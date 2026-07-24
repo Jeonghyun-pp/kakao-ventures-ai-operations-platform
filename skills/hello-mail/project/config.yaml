@@ -1,0 +1,91 @@
+# hello-mail 설정 — 핸드오프 1파일.
+# 다음 인턴은 `assignee` 블록 두 줄과 `partners` 명단만 자기 것으로 바꾸면 된다.
+
+assignee:
+  name: "에반"                     # 초안 서명에 들어가는 이름 (포워드 인트로용)
+  gmail_label: "3. Evan"           # 담당자 Gmail 라벨 (존재해야 함)
+
+# ── 라우팅 목적지 ──────────────────────────────────────────────
+# [사용자 결정 2026-07-13] 가이드라인은 행사 건을 all-행사-강연-섭외 방으로 보내라고 하지만,
+# 최근 실제 포워딩은 전부 #Squad-비플랜 방으로 갔다. 실사용 경로로 통합한다.
+routing:
+  slack_bplan: "person-43d35afbd5dc@example.com"   # #Squad - 비플랜
+  slack_event: "person-a67f8e26da5c@example.com"   # all-행사-강연-섭외 (현재 미사용)
+  # [2026-07-17] LP_CUSTODY는 esther 직행이 아니라 #Squad-비플랜으로 보낸다.
+  # 가이드라인 근거는 "출자 문의는 레퍼런스 검색 or 앤에게 문의"뿐 — 관리팀 직행은 검증 안 된
+  # 가정이었다. 관리팀 직행으로 바꾸려면 앤/관리팀에게 확인 후 route.py의 LP_CUSTODY를 고칠 것.
+  admin_team: "esther@example.vc"    # (후보) 확인 전까지 미사용
+  google_form: "https://forms.gle/EXAMPLE_FORM_6c44ce733004"
+
+# 특정 심사역 지명 건을 그 사람에게 포워드하기 위한 명단.
+# 본문/제목에서 아래 키(이름·영문명)가 발견되면 NAMED_PARTNER로 잡는다.
+partners:
+  리뷰어일: reviewer-one@example.vc
+  reviewer-one: reviewer-one@example.vc
+  리뷰어이: reviewer-two@example.vc
+  reviewer-two: reviewer-two@example.vc
+  앤: reviewer-three@example.vc
+  reviewer-three: reviewer-three@example.vc
+  제로: reviewer-a@example.vc    # 딥테크 (가이드라인: 게임→reviewer-two, 딥테크→zero, 헬스케어→reviewer-one)
+  zero: reviewer-a@example.vc
+
+# ── 자율성 ─────────────────────────────────────────────────────
+# [사용자 결정 2026-07-13] 외부로 나가는 메일은 전부 초안까지만. 발송은 사람이 한다.
+# send_enabled를 true로 바꾸는 것만으로 자동 발송이 켜지지 않는다 — 코드에 발송 경로가 없다.
+# 나중에 자동화를 붙일 때 이 플래그와 함께 core/draft.py에 send 경로를 추가할 것.
+autonomy:
+  archive_auto: true               # L0: 아카이빙은 자동 (되돌릴 수 있고 외부로 안 나감)
+  send_enabled: false              # L1: 회신·포워드는 초안만. 발송 없음.
+
+  # ── 자동 발송 승격 골격 (2026-07-17 결정: 측정 후 단계 승격, 최종 목표는 L2 제외 전면 자동) ──
+  # send_enabled=true가 되어도 아래는 지켜진다 (코드에 send 경로를 붙일 때 이 목록을 강제할 것):
+  # 1) auto_send_categories에 명시된 카테고리만 발송 대상이다 (opt-in, 기본 빈 목록).
+  # 2) never_auto_send는 send_enabled와 무관하게 영원히 초안까지만 — 예외 없음.
+  auto_send_categories: []         # 승격 절차: 무수정 발송률 ≥ 95% (최근 3주) 확인 후 여기 추가
+  never_auto_send:
+    - PARTNERSHIP_DECLINE          # 가이드라인: 슬랙 패스 확인 "후" 발송 — 순서를 코드가 보장 못 함
+    - TRUSTED_REF                  # 신뢰 경로 오판 시 구글폼 건너뛴 특혜가 나감
+    - RECRUIT                      # 채용 상태는 시점마다 바뀜 (escalate라 발송 자체가 없지만 명시)
+    - IMPERSONATION                # 사칭 문의 — 자동 회신 절대 금지
+  daily_send_cap: 10               # 서킷브레이커: 하루 자동 발송 상한 (초과분은 초안으로 폴백)
+  veto_window_hours: 4             # 지연 발송: 초안 생성 → 슬랙 통지 → N시간 내 반대 없으면 발송
+
+scan:
+  lookback_days: 14                # 인박스에서 되짚어볼 기간
+  max_threads: 100
+
+llm:
+  enabled: true
+  model: "claude-opus-4-8"
+  # ANTHROPIC_API_KEY가 없으면 규칙만으로 동작하고, 규칙이 못 잡은 건 UNKNOWN → 에스컬레이션.
+  # 파이프라인은 죽지 않는다.
+
+# ── 광고성/시스템 노이즈 판정 (태스크 1) ────────────────────────
+# 실측 기반. 여기 없는 발신처도 List-Unsubscribe 헤더나 (광고) 말머리로 대부분 잡힌다.
+noise:
+  # 발신 도메인/주소에 이 토큰이 들어가면 광고·뉴스레터·시스템 알림으로 본다.
+  sender_tokens:
+    - innoforest.co.kr           # 혁신의숲
+    - markncompany.co.kr
+    - iva.or.kr
+    - mail.instagram.com
+    - email.openai.com
+    - interactivebrokers.com
+    - substack.com
+    - updates.notion.so
+    - mail.notion.so
+    - person-c6f3b1bbe31e@example.com
+    - mailer-daemon
+    - person-58d31a3f85bd@example.com
+    - noreply
+    - no-reply
+    - donotreply
+  subject_tokens:
+    - "(광고)"
+    - "수신거부"
+    - "뉴스레터"
+    - "무료 세미나"
+    - "참가자 모집"
+    - "홍보요청"
+  # 수신자가 이 수 이상이면 대량 발송(스팸)으로 본다. 실측: KORION 건 수신자 140+.
+  mass_blast_recipients: 20

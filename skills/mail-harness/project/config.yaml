@@ -1,0 +1,101 @@
+# mail-harness 통합 설정 — 파이프라인 전체의 단일 진실.
+# (hello-mail 포크의 triage 설정 + bplan 포크 설정 + 하네스 설정을 한 파일로 통합)
+# 핸드오프: assignee 블록·bplan 블록·partners 명단만 본인 것으로 바꾸면 된다.
+
+assignee:
+  name: "에반"                     # 초안 서명에 들어가는 이름 (포워드 인트로용)
+  gmail_label: "3. Evan"           # 담당자 Gmail 라벨 (존재해야 함)
+
+# ── 라우팅 목적지 ──────────────────────────────────────────────
+routing:
+  slack_bplan: "person-43d35afbd5dc@example.com"   # #Squad - 비플랜
+  slack_event: "person-a67f8e26da5c@example.com"   # all-행사-강연-섭외 (현재 미사용)
+  admin_team: "esther@example.vc"    # (후보) 확인 전까지 미사용 — LP_CUSTODY는 슬랙으로
+  google_form: "https://forms.gle/EXAMPLE_FORM_6c44ce733004"
+
+partners:
+  리뷰어일: reviewer-one@example.vc
+  reviewer-one: reviewer-one@example.vc
+  리뷰어이: reviewer-two@example.vc
+  reviewer-two: reviewer-two@example.vc
+  앤: reviewer-three@example.vc
+  reviewer-three: reviewer-three@example.vc
+  제로: reviewer-a@example.vc    # 딥테크
+  zero: reviewer-a@example.vc
+
+# ── 자율성 — 발송 정책의 단일 진실 ─────────────────────────────
+autonomy:
+  archive_auto: true               # L0: 아카이빙은 자동
+  send_enabled: false              # L1: 회신·포워드는 초안만. P6에서 승격 절차 후 활성화.
+  # 자동 발송은 opt-in: 아래 목록의 카테고리만, 지연 발송(veto window)으로만 나간다.
+  auto_send_categories: []         # 승격 조건: 무수정 발송률 ≥95% (최근 3주, metrics.py 산출)
+  never_auto_send:                 # send_enabled와 무관하게 영원히 초안까지만. 예외 없음.
+    - PARTNERSHIP_DECLINE
+    - TRUSTED_REF
+    - RECRUIT
+    - IMPERSONATION
+  daily_send_cap: 10               # 서킷브레이커: 하루 자동 발송 상한
+  veto_window_hours: 4             # 초안 생성 → 슬랙 통지 → N시간 내 반대 없으면 발송
+  unknown_alert_ratio: 0.30        # 실행당 UNKNOWN 비율이 이를 넘으면 분류기 이상 → 발송 폴백
+
+scan:
+  lookback_days: 14
+  max_threads: 100
+
+llm:
+  enabled: true
+  model: "claude-opus-4-8"
+  # ANTHROPIC_API_KEY는 의도적으로 두지 않는다 — UNKNOWN 분류는 헤드리스 Claude 세션이
+  # reclassify로 직접 한다(구독 비용). 키가 없어도 파이프라인은 죽지 않는다.
+
+# ── 광고성/시스템 노이즈 판정 ───────────────────────────────────
+noise:
+  sender_tokens:
+    - innoforest.co.kr
+    - markncompany.co.kr
+    - iva.or.kr
+    - mail.instagram.com
+    - email.openai.com
+    - interactivebrokers.com
+    - substack.com
+    - updates.notion.so
+    - mail.notion.so
+    - person-c6f3b1bbe31e@example.com
+    - mailer-daemon
+    - person-58d31a3f85bd@example.com
+    - noreply
+    - no-reply
+    - donotreply
+  subject_tokens:
+    - "(광고)"
+    - "수신거부"
+    - "뉴스레터"
+    - "무료 세미나"
+    - "참가자 모집"
+    - "홍보요청"
+  mass_blast_recipients: 20
+
+# ── bplan 포크 설정 (대화형 입력 대체) ──────────────────────────
+bplan:
+  gmail_label: "3. Evan"           # 접수 메일이 이동할 라벨
+  notion_tag: "에반 Evan"           # Notion 담당자 태그
+  # [사용자 결정 2026-07-17] 이미 지나간 건은 건드리지 않는다 — 소피아 시절 잔건 3사.
+  # 노션엔 To Drop+체크박스 False로 남아 있지만 실제로는: 아이스랩(드랍 발송됨 6/16·6/22),
+  # 셀샤인(미팅 후 드랍 발송됨 4/30), 자이브(미팅 후 드랍 미발송 — 의도적으로 보류).
+  # 여기 있는 기업명은 drop이 조용히 건너뛴다(다이제스트 반복 경고 방지).
+  drop_ignore:
+    - "자이브 주식회사"
+    - "(주)아이스랩"
+    - "주식회사 셀샤인"
+
+# ── 하네스 ──────────────────────────────────────────────────────
+harness:
+  stages: [selfcheck, bplan_sync, triage, apply, bplan_drop, digest]
+  # 실패 격리: selfcheck 실패만 전체 중단. 나머지 stage 실패는 기록 후 계속.
+  digest:
+    # 슬랙 Incoming Webhook URL은 .env의 SLACK_WEBHOOK_URL로. 없으면 파일로만 남긴다.
+    fallback_file: "data/digest_latest.md"
+  metrics:
+    log_file: "data/metrics.jsonl"
+    promote_threshold: 0.95        # 무수정 발송률 승격 기준
+    promote_window_days: 21        # 측정 기간 (3주)

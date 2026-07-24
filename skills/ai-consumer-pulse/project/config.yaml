@@ -1,0 +1,33 @@
+# ai-consumer-pulse 설정
+paths:
+  data_root: /home/example/Desktop/ai-consumer   # sources.yaml, raw/, state/ 등의 루트
+
+caps:
+  max_new_per_source: 15      # 텍스트 소스: 1회 실행당 신규 기사 fetch 상한 (첫 실행 폭주 방지)
+  max_videos_per_channel: 8   # 유튜브: 1회 실행당 자막 추출 상한
+  shorts_max_seconds: 300     # 이 미만이면 쇼츠로 판정
+  request_delay_secs: 2       # 소스 간 요청 간격 (매너 + 차단 방지)
+
+apify:
+  proxy: none
+  budget_usd: 1.5             # 1회 실행 폭주 차단선 (예산 아님 — 사고 방지선)
+  preflight_max_usd: 0.8      # 실행 전 추정이 이걸 넘으면 사용자 재확인
+  default_memory_mb: 1024
+  actors:
+    "apidojo~tweet-scraper":              # Tweet Scraper V2 — UNVERIFIED(스모크 미실행)
+      price_per_item: 0.0004              # $0.40/1k tweets
+      max_items: 40                       # 핸들당이 아니라 런당 — 주의
+      max_charge_usd: 0.8
+      timeout_secs: 300
+    "harvestapi~linkedin-profile-posts":  # net-sourcing에서 사용 중인 액터 계열
+      price_per_item: 0.002               # $2/1k posts
+      max_items: 20
+      max_charge_usd: 0.3
+      timeout_secs: 180
+
+gmail:
+  token_path: /home/example/.claude/skills/hello-mail/project/token.json  # hello-mail 크리덴셜 재사용 (읽기만)
+  lookback_days: 8
+
+whisper:
+  enabled: false              # Minus One 폴백 — 기본 비활성 ($0.33/편)

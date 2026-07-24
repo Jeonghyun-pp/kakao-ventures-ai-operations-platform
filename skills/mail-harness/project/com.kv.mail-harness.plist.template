@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 컷오버(P4) 완료 전에는 로드하지 말 것 — SKILL.md HARD-GATE #1.
+     설치: cp 후 사용자명 확인 → launchctl load ~/Library/LaunchAgents/com.kv.mail-harness.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.kv.mail-harness</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>claude -p "/mail-harness 아침 파이프라인: phase1 → UNKNOWN이 있으면 메일을 읽고 reclassify → phase2. 다이제스트의 🚩 항목은 축약 없이 보고." --allowedTools "Bash Read Glob Grep"</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <!-- 평일 07:30 -->
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+  <key>StandardOutPath</key><string>/tmp/mail-harness.cron.log</string>
+  <key>StandardErrorPath</key><string>/tmp/mail-harness.cron.err</string>
+</dict>
+</plist>

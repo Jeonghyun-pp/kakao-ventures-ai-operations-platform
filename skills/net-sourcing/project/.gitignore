@@ -1,0 +1,20 @@
+# 자격증명 — 절대 커밋 금지 (.env.bak 같은 사본까지 전부)
+.env*
+!.env.example
+*.json.token
+credentials.json
+gmail_credentials.json
+token.json
+
+# 가상환경 (머신별 재생성)
+.venv/
+
+# 수집 산출물·상태 파일 — 전부 런타임 데이터 (코드 롤백과 분리)
+data/
+
+# 로컬 산출물
+board.html
+
+# 파이썬 캐시
+__pycache__/
+*.pyc

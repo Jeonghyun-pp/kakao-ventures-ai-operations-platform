@@ -1,0 +1,16 @@
+# Slack 봇 (Socket Mode 포함)
+slack-bolt>=1.27,<2
+
+# Google Sheets 연동
+gspread>=6,<7
+
+# Google API 공통 (Gmail API 사용)
+google-api-python-client>=2.190,<3
+google-auth>=2.49,<3
+google-auth-oauthlib>=1.2,<2
+
+# Notion REST API 호출
+requests>=2.32,<3
+
+# .env 파일 로드
+python-dotenv>=1.2,<2

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.kv.net-sourcing.daily</string>
+  <key>WorkingDirectory</key><string>/home/example/.claude/skills/net-sourcing/project</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/home/example/.claude/skills/net-sourcing/project/.venv/bin/python</string>
+    <string>/home/example/.claude/skills/net-sourcing/project/main.py</string>
+    <string>run</string>
+    <string>--channel</string>
+    <string>all</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>8</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/home/example/.claude/skills/net-sourcing/project/data/cron.log</string>
+  <key>StandardErrorPath</key><string>/home/example/.claude/skills/net-sourcing/project/data/cron.log</string>
+</dict>
+</plist>
