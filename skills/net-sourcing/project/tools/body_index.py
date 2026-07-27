@@ -59,12 +59,8 @@ def _headers(token: str) -> dict:
 
 
 def _token() -> str:
-    tok = os.environ.get("NOTION_TOKEN", "")
-    if not tok and (ROOT / ".env").exists():
-        for line in (ROOT / ".env").read_text().splitlines():
-            if line.startswith("NOTION_TOKEN="):
-                tok = line.split("=", 1)[1].strip().strip('"').strip("'")
-    return tok
+    from kv_core import secrets
+    return secrets.get("NOTION_TOKEN", required=False) or ""
 
 
 def norm(s: str) -> str:

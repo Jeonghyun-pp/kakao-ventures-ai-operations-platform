@@ -27,8 +27,9 @@ set -euo pipefail
 
 LABEL="com.kv.net-sourcing.daily"
 PROJ="$(cd "$(dirname "$0")" && pwd)"
+VENV="$HOME/kv-automation/.venv/bin/python"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-PY="$PROJ/.venv/bin/python"
+PY="$VENV"
 HOUR=8
 MIN=0
 

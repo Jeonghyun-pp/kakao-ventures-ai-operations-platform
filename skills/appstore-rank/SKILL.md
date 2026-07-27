@@ -11,7 +11,7 @@ description: App Store 급상승/급하락 랭킹 보드를 바로 띄운다(dia
 
 1. 이미 떠 있으면 재기동하지 말고 브라우저만 연다:
    ```bash
-   PROJ=~/.claude/skills/net-sourcing/project
+   PROJ=~/kv-automation/skills/net-sourcing/project
    if lsof -ti tcp:8000 >/dev/null 2>&1; then
      open "http://localhost:8000/?genre=36"
      echo "이미 실행 중 → 브라우저 오픈"
@@ -36,11 +36,11 @@ description: App Store 급상승/급하락 랭킹 보드를 바로 띄운다(dia
   ```bash
   launchctl list | grep appstore-rank
   ```
-  없거나 꺼져 있으면 `~/.claude/skills/appstore-rank/install-cron.sh` 를 실행해 (재)등록한다.
+  없거나 꺼져 있으면 `~/kv-automation/skills/appstore-rank/install-cron.sh` 를 실행해 (재)등록한다.
 
 ## 수동 명령(참고)
 ```bash
-cd ~/.claude/skills/net-sourcing/project
+cd ~/kv-automation/skills/net-sourcing/project
 .venv/bin/python tools/board.py                 # 보드 서버 + 브라우저
 .venv/bin/python tools/board.py --genre 6014    # 초기=게임
 .venv/bin/python tools/board.py --snapshot-all  # 전 카테고리 스냅샷만(크론이 쓰는 것)
@@ -48,6 +48,6 @@ cd ~/.claude/skills/net-sourcing/project
 ```
 
 ## 구현 위치
-- 보드/스냅샷: `~/.claude/skills/net-sourcing/project/tools/board.py`
-- 조회기: `~/.claude/skills/net-sourcing/project/tools/rank_lookup.py`
+- 보드/스냅샷: `~/kv-automation/skills/net-sourcing/project/tools/board.py`
+- 조회기: `~/kv-automation/skills/net-sourcing/project/tools/rank_lookup.py`
 - 데이터 소스·검증 근거: SSR `serialized-server-data` 파싱(무료·무인증, 카테고리당 200위). 100위 초과는 애플 무료 천장 200위.

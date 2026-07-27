@@ -6,7 +6,7 @@ description: >-
   분석(LLM 2-pass)이 분리돼 있고, org 단위 교차검증으로 VC 에코챔버를 걸러낸다. v1 산출물은
   digests/<주차>.md 로컬 파일 (Notion/Slack 발행은 v2).
   Triggers on: "펄스", "주간 신호", "컨슈머 펄스", "consumer AI 다이제스트", "주간 다이제스트 돌려줘", "/ai-consumer-pulse".
-  Do NOT trigger for: 그물망 스타트업 소싱(→ net-sourcing), 메일 트리아지(→ hello-mail),
+  Do NOT trigger for: 그물망 스타트업 소싱(→ net-sourcing), 메일 트리아지(→ mail-harness),
   앱스토어 순위 보드(→ appstore-rank), 소스 목록 자체의 갱신(일반 세션에서 kol-source-list.md 편집).
 ---
 
@@ -27,8 +27,9 @@ Phase B(유료 수집) 실행 전 반드시: 예상 비용을 출력하고 사�
 ## Project 위치
 
 ```bash
-PROJ="$HOME/.claude/skills/ai-consumer-pulse/project"
-PY="$PROJ/.venv/bin/python"          # 항상 절대경로 venv 파이썬
+PROJ="$HOME/kv-automation/skills/ai-consumer-pulse/project"
+VENV="$HOME/kv-automation/.venv/bin/python"
+PY="$VENV"          # 항상 절대경로 venv 파이썬
 DATA="$HOME/Desktop/ai-consumer"     # sources.yaml·raw/·digests/ (데이터는 여기)
 cd "$PROJ" && export PYTHONPATH="$PROJ"
 ```

@@ -39,7 +39,14 @@ def config() -> dict:
 
 
 def data_root() -> Path:
-    return Path(config()["paths"]["data_root"])
+    """실데이터 루트. config에 값이 있으면 그것, 없으면 $KV_DATA/ai-consumer-pulse.
+
+    config를 우선하는 이유는 이전 설치가 깨지지 않게 하기 위해서다. 새 설치에서는
+    비워두는 것이 정본이다 — 절대경로가 config에 박히면 머신 이전이 불가능해진다.
+    """
+    from kv_core import paths
+    v = (config().get("paths") or {}).get("data_root")
+    return Path(v).expanduser() if v else paths.data("ai-consumer-pulse")
 
 
 def sources(adapter: str | None = None) -> list[dict]:

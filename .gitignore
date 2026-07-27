@@ -42,6 +42,16 @@ Drop_Mail_Drafts.md
 *.log
 logs/
 
+# investment-memo 흡수 시 병합 (2026-07-27)
+# input/  딜별 원본 문서 — 등기부·주주명부·Term Sheet·IR덱·FP엑셀. 전부 Restricted
+# output/ 생성된 투심보고서
+input/
+output/
+.omc/
+# ⚠️ config.yaml 은 **범위를 지정한다.** 원본 리포는 이걸 통째로 제외했는데,
+#    다른 스킬 4종은 config.yaml 을 정상 추적 중이라 루트에 걸면 전부 빠진다.
+skills/investment-memo/config.yaml
+
 # ── 실행 환경 (머신별 재생성) ──
 .venv/
 .venv.*/

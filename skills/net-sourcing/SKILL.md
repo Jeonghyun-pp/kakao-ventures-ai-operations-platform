@@ -11,7 +11,7 @@ description: >-
   **판단(Tier)은 반자동** — 주 1회 Claude Code 세션이 judge-export → judge-apply.
   Triggers on: "그물망 소싱", "그물망 수집", "신규 스타트업 발굴", "앱스토어 랭킹 소싱",
   "스레드/링크드인 창업자 소싱", "그물망 미팅 다이제스트", "극초기 스타트업 수집", "/net-sourcing".
-  Do NOT trigger for: 앱스토어 순위 보드만 띄우기(→ appstore-rank), 비플랜 접수 처리(→ bplan-automation).
+  Do NOT trigger for: 앱스토어 순위 보드만 띄우기(→ appstore-rank), 비플랜 접수 처리(→ mail-harness).
 ---
 
 # 그물망 소싱 (net-sourcing)
@@ -266,7 +266,7 @@ Raw Text "… · AIM Intelligence · 행정안전부 · Seoul · solving AI secu
 
 **기계 검증 — 새 액터·새 스크래퍼 모드를 붙이면 착지 전에 반드시 돌린다 ($0):**
 ```bash
-"$PROJ/.venv/bin/python" "$PROJ/tools/check_present_coverage.py"    # rc=1이면 착지 금지
+"$VENV" "$PROJ/tools/check_present_coverage.py"    # rc=1이면 착지 금지
 ```
 저장된 액터 원본으로 **우리 파서(`_positions`)가 Present를 몇 % 놓치는가**를 잰다.
 ⚠️ **액터의 누락률(41.8%)이 아니라 파서의 누락률로 판정한다** — 전자는 고쳐도 안 변하는 액터의
@@ -290,16 +290,16 @@ Raw Text "… · AIM Intelligence · 행정안전부 · Seoul · solving AI secu
 ## Project 위치
 
 ```
-~/.claude/skills/net-sourcing/project
+~/kv-automation/skills/net-sourcing/project
 ```
 
-- 러너(머신별 재생성 venv): `project/.venv/bin/python`
+- 러너(머신별 재생성 venv): `.venv/bin/python` (리포 루트, 1벌)
 - 엔트리포인트: `project/main.py`
 - 설정(핸드오프 1파일): `project/config.yaml`
 - 키워드/검색 스펙(수동 관리): `project/keywords.yaml`
 - 자격증명(출력·커밋 금지): `.env` (Notion·Apify·Naver·ProductHunt)
 
-편의 변수: `PROJ="$HOME/.claude/skills/net-sourcing/project"`
+편의 변수: `PROJ="$HOME/kv-automation/skills/net-sourcing/project"`
 
 ## 설계 원칙
 
@@ -367,11 +367,11 @@ bio 액터가 `biography`와 함께 **이미 주는데 버리고 있었다**(실
 상한 없는 LLM 지출이 생기지 않는다. (`config.judge.llm.enabled: false`)
 
 ```bash
-"$PROJ/.venv/bin/python" "$PROJ/main.py" judge-export             # 전 채널 DB · 무제한
-"$PROJ/.venv/bin/python" "$PROJ/main.py" judge-export --channel LinkedIn   # 채널만
+"$VENV" "$PROJ/main.py" judge-export             # 전 채널 DB · 무제한
+"$VENV" "$PROJ/main.py" judge-export --channel LinkedIn   # 채널만
 #  → references/judge-criteria.md 를 읽고 큐를 판단해 verdicts json 작성
 #     [{"page_id": "...", "verdict": "<그 행의 allowed 중 하나>", "reason": "...", "one_liner": "..."}]
-"$PROJ/.venv/bin/python" "$PROJ/main.py" judge-apply --file data/judge_verdicts_{날짜}.json
+"$VENV" "$PROJ/main.py" judge-apply --file data/judge_verdicts_{날짜}.json
 ```
 
 - **판정 어휘는 채널마다 다르다** — 스레드·링크드인 = `Tier`(Catch/Trend/Wait) ·
@@ -393,10 +393,11 @@ bio 액터가 `biography`와 함께 **이미 주는데 버리고 있었다**(실
 ## 실행법
 
 ```bash
-PROJ="$HOME/.claude/skills/net-sourcing/project"
-"$PROJ/.venv/bin/python" "$PROJ/main.py" run --channel all           # 3채널 수집 → dedup → 착지
-"$PROJ/.venv/bin/python" "$PROJ/main.py" collect --channel linkedin_harvestapi
-"$PROJ/.venv/bin/python" "$PROJ/main.py" land --channel all           # 수집분만 dedup→착지
+PROJ="$HOME/kv-automation/skills/net-sourcing/project"
+VENV="$HOME/kv-automation/.venv/bin/python"
+"$VENV" "$PROJ/main.py" run --channel all           # 3채널 수집 → dedup → 착지
+"$VENV" "$PROJ/main.py" collect --channel linkedin_harvestapi
+"$VENV" "$PROJ/main.py" land --channel all           # 수집분만 dedup→착지
 ```
 
 1. 사용자가 채널/커맨드를 안 밝히면 물어본다. 기본은 `run --channel all`.

@@ -58,5 +58,12 @@
   행사를 **알리기만** 하면 AD_NOISE.
 
 ```bash
-"$PROJ/.venv/bin/python" "$PROJ/triage/main.py" reclassify <msg_id>=INBOUND_KO <msg_id>=RECRUIT
+# 편의 변수 (2026-07-27: venv는 리포 1벌, 원본은 skills/_archive/ 로 내려갔다)
+PROJ="$HOME/kv-automation/skills/mail-harness/project"
+VENV="$HOME/kv-automation/.venv/bin/python"
+H="$HOME/kv-automation/skills/_archive/hello-mail/project"   # 원본(콜드 스탠바이)
+```
+
+```bash
+"$VENV" "$PROJ/triage/main.py" reclassify <msg_id>=INBOUND_KO <msg_id>=RECRUIT
 ```

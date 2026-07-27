@@ -18,10 +18,17 @@
   단, **컷오버 당일 라이브 diff 1회를 추가로** 통과해야 한다(최신 메일 유형 반영).
 
 ```bash
+# 편의 변수 (2026-07-27: venv는 리포 1벌, 원본은 skills/_archive/ 로 내려갔다)
+PROJ="$HOME/kv-automation/skills/mail-harness/project"
+VENV="$HOME/kv-automation/.venv/bin/python"
+H="$HOME/kv-automation/skills/_archive/hello-mail/project"   # 원본(콜드 스탠바이)
+```
+
+```bash
 # 리플레이 절차
-"$PROJ/.venv/bin/python" "$PROJ/tools/replay_fetch.py" /tmp/corpus.json
-"$H/.venv/bin/python"    "$PROJ/tools/replay_run.py" "$H"           /tmp/corpus.json /tmp/v_orig.json
-"$PROJ/.venv/bin/python" "$PROJ/tools/replay_run.py" "$PROJ/triage" /tmp/corpus.json /tmp/v_fork.json
+"$VENV" "$PROJ/tools/replay_fetch.py" /tmp/corpus.json
+"$VENV"                    "$PROJ/tools/replay_run.py" "$H"           /tmp/corpus.json /tmp/v_orig.json
+"$VENV" "$PROJ/tools/replay_run.py" "$PROJ/triage" /tmp/corpus.json /tmp/v_fork.json
 # 두 verdict JSON을 대조 — 한 건이라도 다르면 원인 규명 후 수정, 카운트 리셋
 ```
 

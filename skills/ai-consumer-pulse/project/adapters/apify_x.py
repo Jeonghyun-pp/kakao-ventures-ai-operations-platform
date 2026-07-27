@@ -28,12 +28,9 @@ PROJ = Path(__file__).resolve().parents[1]
 
 
 def _load_env() -> None:
-    envf = PROJ / ".env"
-    if envf.exists():
-        for line in envf.read_text().splitlines():
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip())
+    """자격증명 정본은 $KV_CONFIG/.env 하나뿐이다 (스킬별 .env 를 다시 만들지 마라)."""
+    from kv_core import secrets
+    secrets.load()
 
 
 def _src() -> dict:
