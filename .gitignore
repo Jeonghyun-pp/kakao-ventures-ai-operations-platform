@@ -78,3 +78,12 @@ Thumbs.db
 **/raw/
 **/.venv/
 **/Drop_Mail_Drafts.md
+
+# ── 도구 런타임 산출물 (investment-memo/.bkit) ──
+# 🔴 [2026-07-27] 흡수 때 딸려 들어왔다. audit·runtime·state 는 소스가 아니라 실행 기록이고,
+#    전임자 머신 경로(/home/example/...)가 들어 있다. 추적하지 않는다.
+**/.bkit/audit/
+**/.bkit/runtime/
+**/.bkit/state/
+# 머신·사용자별 로컬 설정. 커밋하면 다른 사람 환경에서 엉뚱한 권한이 적용된다.
+**/.claude/settings.local.json
