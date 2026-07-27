@@ -18,17 +18,18 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from dotenv import load_dotenv
+from kv_core import paths, secrets
 
 PROJ = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJ))
-load_dotenv(PROJ / ".env", override=True)
+secrets.load()          # 자격증명 정본은 $KV_CONFIG/.env 하나뿐이다
 
 from core import digest as digest_mod   # noqa: E402
 from core import metrics as metrics_mod  # noqa: E402
 
-PY = PROJ / ".venv" / "bin" / "python"
-DATA = PROJ / "data"
+# venv도 리포 하나뿐이다 (5벌 → 1벌). 스킬별 .venv 는 더 이상 만들지 않는다.
+PY = paths.repo_root() / ".venv" / "bin" / "python"
+DATA = paths.data("mail-harness", "harness")
 STAGE_TIMEOUT = 300
 RESULT_RE = re.compile(r"@@HARNESS_RESULT@@ (\{.*\})")
 

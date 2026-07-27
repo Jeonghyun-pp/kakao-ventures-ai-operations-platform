@@ -9,7 +9,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-STORE = Path(__file__).resolve().parent.parent / "data" / "processed.json"
+from kv_core import paths
+
+STORE = paths.data("mail-harness", "triage") / "processed.json"
 
 
 def load() -> dict:

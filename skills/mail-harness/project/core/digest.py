@@ -90,10 +90,7 @@ def send(text: str, cfg: dict) -> str:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text + f"\n\n(생성: {datetime.now().isoformat(timespec='seconds')})")
 
-    url = os.getenv("SLACK_WEBHOOK_URL", "").strip()
-    if not url:
-        return "file-only"
-    import requests
-    resp = requests.post(url, json={"text": text}, timeout=15)
-    resp.raise_for_status()
-    return "slack"
+    # 알림 경로는 kv_core.notify 하나뿐이다. 통합 전에는 webhook(여기)과 bot 토큰(bplan)이
+    # 공존해서 "왜 안 왔지"를 두 군데서 찾아야 했다.
+    from kv_core import notify
+    return "slack" if notify.slack(text) else "file-only"

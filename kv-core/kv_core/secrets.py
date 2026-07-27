@@ -92,6 +92,17 @@ def get(name: str, required: bool = True, default: str | None = None) -> str | N
     return None
 
 
+def credential_path(relpath: str) -> Path:
+    """`$KV_CONFIG/<relpath>` — **존재 여부를 묻지 않는다.**
+
+    아직 없는 파일을 쓰려는 경우(최초 인증으로 token.json을 만들 때)에 쓴다.
+    읽을 때는 `credential()` 을 써서 없으면 즉시 죽게 하라.
+    """
+    p = paths.config_root() / relpath
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def credential(relpath: str, required: bool = True) -> Path | None:
     """`$KV_CONFIG/<relpath>` — 토큰·인증 파일 경로.
 

@@ -23,9 +23,14 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+from kv_core import secrets
+
 PROJ = Path(__file__).resolve().parent.parent
-TOKEN_FILE = PROJ / "token.json"
-CRED_FILE = PROJ / "gmail_credentials.json"
+# 자격증명은 스킬별 복사본이 아니라 $KV_CONFIG 단일 참조다.
+# 통합 전에는 token.json 이 4벌이었는데 refresh_token·client_id 가 전부 동일했다 —
+# 물리적 복사본일 뿐이었고, 그래서 재인증도 4번 해야 했다. 이제 한 곳만 갱신된다.
+TOKEN_FILE = secrets.credential_path("google/token.json")
+CRED_FILE = secrets.credential_path("google/gmail_credentials.json")
 
 # modify = 읽기/쓰기(라벨·초안) - 영구삭제 제외. 초안만 만들 것이므로 이걸로 충분하다.
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]

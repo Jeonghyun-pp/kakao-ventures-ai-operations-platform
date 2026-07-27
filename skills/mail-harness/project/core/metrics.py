@@ -15,8 +15,10 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from kv_core import paths, secrets
+
 PROJ = Path(__file__).resolve().parent.parent
-SENT_WATCH = PROJ / "data" / "sent_watch.jsonl"
+SENT_WATCH = paths.data("mail-harness", "harness") / "sent_watch.jsonl"
 WATCH_EXPIRE_DAYS = 30   # 이 기간 내 발송 안 되면 '미발송(초안 폐기)'으로 종결
 
 
@@ -29,7 +31,7 @@ def _gmail_service():
     from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
     creds = Credentials.from_authorized_user_file(
-        str(PROJ / "triage" / "token.json"),
+        str(secrets.credential("google/token.json")),
         ["https://www.googleapis.com/auth/gmail.modify"])
     if not creds.valid and creds.expired and creds.refresh_token:
         creds.refresh(Request())

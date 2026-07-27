@@ -19,9 +19,11 @@ from pathlib import Path
 
 import yaml
 
+from kv_core import paths, secrets
+
 PROJ = Path(__file__).resolve().parent.parent
 NEVER_AUTO_REQUIRED = {"PARTNERSHIP_DECLINE", "TRUSTED_REF", "RECRUIT", "IMPERSONATION"}
-TEMPLATE_CHECKSUM_FILE = PROJ / "data" / "templates_checksum.txt"
+TEMPLATE_CHECKSUM_FILE = paths.data("mail-harness", "harness") / "templates_checksum.txt"
 
 
 def _gmail_service(token_path: Path):
@@ -70,8 +72,10 @@ def run() -> int:
 
     # ── 2. Gmail 토큰 + 라벨 ─────────────────────────────────────
     if cfg:
-        for name, token in (("triage", PROJ / "triage" / "token.json"),
-                            ("bplan", PROJ / "bplan" / "token.json")):
+        # triage·bplan이 같은 계정을 쓴다(refresh_token 동일). 토큰이 1벌이 됐으므로
+        # 연결 확인은 한 번이면 되지만, **라벨은 서로 다르다** — 라벨 검증은 둘 다 돈다.
+        _tok = secrets.credential("google/token.json")
+        for name, token in (("triage", _tok), ("bplan", _tok)):
             try:
                 svc = _gmail_service(token)
                 labels = {l["name"] for l in
@@ -84,10 +88,10 @@ def run() -> int:
                 errors.append(f"[{name}] Gmail 연결 실패: {e}")
 
     # ── 3. 상태 파일 무결성 ──────────────────────────────────────
-    for f in [PROJ / "triage" / "data" / "processed.json",
-              PROJ / "bplan" / "data" / "sync_ledger.json",
-              PROJ / "bplan" / "data" / "drop_ledger.json",
-              PROJ / "data" / "sent_watch.jsonl"]:
+    for f in [paths.data("mail-harness", "triage") / "processed.json",
+              paths.data("mail-harness", "bplan") / "sync_ledger.json",
+              paths.data("mail-harness", "bplan") / "drop_ledger.json",
+              paths.data("mail-harness", "harness") / "sent_watch.jsonl"]:
         if not f.exists():
             continue  # 아직 안 생긴 상태 파일은 정상
         try:

@@ -16,12 +16,12 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from dotenv import load_dotenv
+from kv_core import paths, secrets
 
 from core import gmail, llm, route, rules, state
 
 PROJ = Path(__file__).resolve().parent
-load_dotenv(PROJ / ".env", override=True)
+secrets.load()
 
 ICON = {"protect": "🔒", "archive": "📥", "reply": "✉️", "forward": "📤", "escalate": "🚩"}
 
@@ -32,11 +32,11 @@ def cfg() -> dict:
 
 
 def _plan_path(ts: str) -> Path:
-    return PROJ / "data" / f"plan_{ts}.json"
+    return paths.data("mail-harness", "triage") / f"plan_{ts}.json"
 
 
 def _latest_plan() -> Path | None:
-    plans = sorted((PROJ / "data").glob("plan_*.json"))
+    plans = sorted(paths.data("mail-harness", "triage").glob("plan_*.json"))
     return plans[-1] if plans else None
 
 

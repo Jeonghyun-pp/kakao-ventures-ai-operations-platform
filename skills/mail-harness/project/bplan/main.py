@@ -12,13 +12,13 @@ import gspread
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from html import escape as _html_escape
-from dotenv import load_dotenv
+from kv_core import paths, secrets
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-load_dotenv(override=True)
+secrets.load()          # 자격증명 정본은 $KV_CONFIG/.env 하나뿐이다
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -32,7 +32,7 @@ BASE_DIR = Path(__file__).resolve().parent
 #  4) --dry-run: 읽기만 하고 쓰기(노션·시트·Gmail) 전부 생략.
 #  5) 실행 끝에 @@HARNESS_RESULT@@ {json} 한 줄 출력 — harness.py가 파싱한다.
 # ==========================================================================
-LEDGER_DIR = BASE_DIR / "data"
+LEDGER_DIR = paths.data("mail-harness", "bplan")
 SYNC_LEDGER = LEDGER_DIR / "sync_ledger.json"
 DROP_LEDGER = LEDGER_DIR / "drop_ledger.json"
 LEDGER_MAX_ENTRIES = 500
@@ -83,7 +83,7 @@ WORKSHEET_SETTING_NAME = os.getenv("WORKSHEET_SETTING_NAME", "Setting")
 
 GMAIL_CREDENTIALS_FILE = resolve_path(os.getenv("GMAIL_CREDENTIALS_FILE", "gmail_credentials.json"))
 GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
-TOKEN_FILE = BASE_DIR / "token.json"
+TOKEN_FILE = secrets.credential_path("google/token.json")
 
 print(f"[BOOT] BASE_DIR={BASE_DIR} cwd={os.getcwd()} "
       f"GMAIL_CREDENTIALS_FILE={GMAIL_CREDENTIALS_FILE} exists={GMAIL_CREDENTIALS_FILE.exists()} "

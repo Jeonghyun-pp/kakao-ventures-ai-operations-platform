@@ -9,10 +9,13 @@ token.json 이 새로 발급됩니다.
 from pathlib import Path
 from google_auth_oauthlib.flow import InstalledAppFlow
 
+from kv_core import secrets
+
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 BASE = Path(__file__).resolve().parent
-CRED = BASE / "gmail_credentials.json"
-TOKEN = BASE / "token.json"
+# 재인증은 여기 한 곳에서만 일어난다. 통합 전에는 토큰이 4벌이라 4번 해야 했다.
+CRED = secrets.credential_path("google/gmail_credentials.json")
+TOKEN = secrets.credential_path("google/token.json")
 
 if not CRED.exists():
     raise SystemExit(f"gmail_credentials.json 가 없습니다: {CRED}")

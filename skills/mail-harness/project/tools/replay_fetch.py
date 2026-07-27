@@ -4,11 +4,18 @@ import json
 import sys
 from pathlib import Path
 
-TRIAGE = Path.home() / ".claude/skills/mail-harness/project/triage"
+from kv_core import paths  # noqa: E402
+
+# 자기 위치에서 역산한다. 이전에는 ~/.claude/skills/... 를 경유했는데, 그건 코드가
+# 자기 위치가 아니라 **Claude 설정 디렉토리 위치**에 묶여 있다는 뜻이었다.
+TRIAGE = Path(__file__).resolve().parents[1] / "triage"
 sys.path.insert(0, str(TRIAGE))
 from core import gmail  # noqa: E402
 
-H_DATA = Path.home() / ".claude/skills/hello-mail/project/data"
+# 🔴 [2026-07-27] 예전엔 hello-mail 의 data/ 를 직접 읽었다. 스킬이 다른 스킬의 파일을
+#    직접 읽으면 그 스킬을 지우거나 옮길 때 조용히 깨진다(교차 참조 금지).
+#    과거 plan 기록은 **이관 입력**이므로 mail-harness 자기 데이터로 복사해 두고 여기서 읽는다.
+H_DATA = paths.data("mail-harness", "triage", "history")
 OUT = Path(sys.argv[1])
 
 history = {}   # id → (category, action) 당시 기록
