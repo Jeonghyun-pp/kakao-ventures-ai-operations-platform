@@ -47,7 +47,13 @@ PROJ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ))
 
 API = "https://api.notion.com/v1"
-TIER_OPTIONS = ["Catch", "Trend", "Wait"]
+# 🔴 [2026-07-27] **`Cut`을 빠뜨리면 이 스크립트가 판정 체계를 조용히 되돌린다.**
+#   `Cut`은 2026-07-19에 신설된 4번째 Tier인데 여기 상수에만 반영이 안 돼 있었다. 그 상태로
+#   `--apply`를 돌리면 아래 ③ 블록이 Tier 옵션을 **["Catch","Trend","Wait"]로 교체**하면서
+#   `Cut`을 지운다. 그러면 `judge_cli._verdict_field()`가 **노션 스키마에서** allowed를 읽으므로
+#   (문서가 아니라 라이브 스키마가 정본이다) `Cut` 판정이 전부 거부되거나 조용히 버려진다.
+#   → **Tier를 늘리면 여기도 같이 늘려라.** 한쪽만 고치면 다음 마이그레이션이 되돌린다.
+TIER_OPTIONS = ["Catch", "Trend", "Wait", "Cut"]
 LAYER_OPTIONS = ["keyword_search", "watchlist", "following_graph", "reply_crawl"]
 
 
@@ -69,9 +75,10 @@ def _weeks_through(end: date) -> list[str]:
 
 
 def _migrate_db(db_id: str, label: str, kws: dict, token: str, apply: bool,
-                allow_create: bool, followup: bool) -> int:
+                allow_create: bool, followup: bool, linkedin_fields: bool = False) -> int:
     """DB 하나 마이그레이션. allow_create=False면 신규 property 생성 없이 옵션 동기화만
-    (⑨ 팔로업 필드는 followup=True면 예외적으로 생성 — 기능이 그 DB를 쓴다)."""
+    (⑨ 팔로업 필드는 followup=True면, ⑩ 링크드인 경력 필드는 linkedin_fields=True면
+     예외적으로 생성 — 둘 다 "기능이 그 DB를 쓴다"가 근거다)."""
     print(f"\n━━ {label} ({db_id[:8]}…) — 생성 {'허용' if allow_create else '금지(옵션 동기화만)'}")
 
     r = requests.get(f"{API}/databases/{db_id}", headers=_headers(token), timeout=30)
@@ -119,7 +126,7 @@ def _migrate_db(db_id: str, label: str, kws: dict, token: str, apply: bool,
     if tier and tier["type"] == "select":
         have = [o["name"] for o in tier["select"]["options"]]
         if set(have) == set(TIER_OPTIONS):
-            print("  = Tier: 이미 Catch|Trend|Wait")
+            print(f"  = Tier: 이미 {'|'.join(TIER_OPTIONS)}")
         else:
             q = requests.post(f"{API}/databases/{db_id}/query", headers=_headers(token),
                               json={"filter": {"property": "Tier", "select": {"is_not_empty": True}},
@@ -235,6 +242,33 @@ def _migrate_db(db_id: str, label: str, kws: dict, token: str, apply: bool,
                 patch[fname] = fspec
                 print(f"  + {fname} ({next(iter(fspec))}) 추가 — 팔로업 필드")
 
+    # ⑩ 링크드인 경력 필드 (2026-07-27) — `_positions` 수정으로 새로 계산되는 두 값.
+    #    창업 개월    = founder_since_months. **"창업자로 산 기간"**.
+    #                   `Tenure Months`(지금 창업이 몇 개월)와 **짝으로 봐야** 판단이 갈린다:
+    #                     tenure 2 / 창업 2   → 갓 시작한 창업자
+    #                     tenure 2 / 창업 84  → 7년차가 법인을 하나 더 세운 것
+    #    과거 스텔스  = past_stealth. **끝난** 경력에 stealth가 있다 = 이미 회사를 공개했다.
+    #                   시제를 안 가르면 공개한 사람이 영영 '스텔스 창업자'로 남는다.
+    #    🔴 "생성은 base에만" 규칙의 **두 번째 예외**다(첫째는 ⑨ 팔로업). 근거가 ⑨와 같다 —
+    #       기능이 그 DB를 쓴다. 링크드인 신규 착지는 채널 DB로 가므로 거기 칸이 없으면
+    #       값이 조용히 사라지고(_known_options_only), judge 큐에도 영영 안 실린다.
+    #       스레드·앱스토어 DB에는 만들지 않는다(그 채널엔 경력 개념이 없다).
+    if linkedin_fields:
+        for fname, fspec in (("창업 개월", {"number": {"format": "number"}}),
+                             ("과거 스텔스", {"checkbox": {}}),
+                             # 대표 콘텐츠 = featured. **텍스트**로 둔다 — 체크박스로 만들면
+                             # 빈 칸이 "투자 안 받음"으로 읽힌다(회수율이 낮은 신호라 거짓이 된다).
+                             ("대표 콘텐츠", {"rich_text": {}}),
+                             # 공백 개월 = 마지막 직장 종료 후 공백. 0=공백없음 · 빈칸=판정불가.
+                             ("공백 개월", {"number": {"format": "number"}}),
+                             # 본업 공백 = 부업(시간제·인턴) 제외 기준. `공백 개월`과 **짝**이다.
+                             ("본업 공백", {"number": {"format": "number"}})):
+            if fname in schema:
+                print(f"  = {fname}: 이미 있음 ({schema[fname]['type']})")
+            else:
+                patch[fname] = fspec
+                print(f"  + {fname} ({next(iter(fspec))}) 추가 — 링크드인 경력 필드")
+
     if not patch:
         print("  ✅ 바꿀 것 없음 (멱등)")
         return 0
@@ -283,18 +317,20 @@ def main() -> int:
     ncfg = cfg["notion"]
     ch = ncfg.get("channel_db_ids") or {}
     # (db_id, 라벨, 생성허용, 팔로업필드) — 생성은 base에만, 팔로업은 사람 채널 DB까지.
-    targets = [(ncfg["db_id"], "base 그물망 소싱 DB", True, True)]
+    # (db_id, 라벨, 생성허용, 팔로업필드, 링크드인경력필드)
+    targets = [(ncfg["db_id"], "base 그물망 소싱 DB", True, True, False)]
     if ch.get("스레드"):
-        targets.append((ch["스레드"], "스레드 채널 DB", False, True))
+        targets.append((ch["스레드"], "스레드 채널 DB", False, True, False))
     if ch.get("링크드인"):
-        targets.append((ch["링크드인"], "링크드인 채널 DB", False, True))
+        targets.append((ch["링크드인"], "링크드인 채널 DB", False, True, True))
     if ch.get("앱스토어"):
-        targets.append((ch["앱스토어"], "앱스토어 채널 DB", False, False))  # 원샷 — 팔로업 없음
+        targets.append((ch["앱스토어"], "앱스토어 채널 DB", False, False, False))  # 원샷
 
     rc = 0
-    for db_id, label, allow_create, followup in targets:
+    for db_id, label, allow_create, followup, li_fields in targets:
         rc |= _migrate_db(db_id.replace("collection://", ""), label, kws, token, apply,
-                          allow_create=allow_create, followup=followup)
+                          allow_create=allow_create, followup=followup,
+                          linkedin_fields=li_fields)
     return rc
 
 

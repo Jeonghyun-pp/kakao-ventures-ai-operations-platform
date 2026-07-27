@@ -70,6 +70,18 @@ FRESH_TENURE_MONTHS = 12
 
 STRONG_TITLE_TERMS = ("founder", "co-founder", "cofounder", "ceo", "building",
                       "creator of", "창업", "대표", "공동창업")
+# ★ [2026-07-27] 창업 **역할** 판정용 — STRONG_TITLE_TERMS와 목적이 다르니 섞지 마라.
+#   STRONG_TITLE_TERMS는 "창업스러운 말"이라 `building`·`creator of` 같은 자기소개 표현이 들어 있다
+#   (헤드라인 스캔용, 94/97 발화 = 사실상 상수). 아래는 **"이 포지션이 창업 포지션인가"**를 가르는
+#   것이라 회사 직책명으로만 구성한다. 여기에 `building`을 넣으면 "Building the future @ 대기업"이
+#   창업 포지션으로 잡혀 tenure 계산이 통째로 오염된다.
+FOUNDER_ROLE_TERMS = ("founder", "co-founder", "cofounder", "ceo", "cto",
+                      # 🔴 [2026-07-27] **풀어 쓴 형태를 빠뜨리면 안 된다.** `"ceo" in "chief executive officer"`는
+                      #   False다 — 실측에서 `Chief Executive Officer`가 창업 직함으로 안 잡혀,
+                      #   그 사람의 tenure를 옆에 있던 파트타임 자문이 다시 가리고 있었다(9명).
+                      #   Example Person F 사고와 **같은 계열의 잔여 구멍**이었다.
+                      "chief executive", "chief technology",
+                      "대표", "창업자", "공동창업자", "창업")
 # stealth는 headline이 아니라 **회사명**에 박힌다 — 실측: headline 0/97 발화,
 # companyName에 "Stealth", "Newco - still in stealth mode"가 실재.
 STEALTH_TERMS = ("stealth", "newco", "스텔스")
@@ -155,7 +167,14 @@ class LinkedInAdapter(Adapter):
             while page <= end:
                 take = min(batch, end - page + 1)
                 payload = dict(base, **spec_payload)
-                if exclude and "excludeCurrentJobTitles" not in payload:
+                # 🔴 [2026-07-27] **과거직함 축(pastJobTitles)에는 리크루터 제외를 걸지 않는다.**
+                #   이 제외는 "현 직함이 Founder인 사람"을 찾을 때 리크루터가 2,500 천장을 먹는 걸
+                #   막으려고 넣은 것이다. 그런데 공백형 축은 **현 직함이 없는 사람**을 찾는다 —
+                #   현 직함 기준 필터를 걸면 그들이 통째로 빠질 수 있고, 그러면 "공백형 0명"이 나와
+                #   **축이 고장난 것으로 오진**한다(프로브에는 이 필터가 없었으므로 조건도 달라진다).
+                #   ⚠️ 실측으로 확인한 게 아니라 **위험을 회피한 것**이다. 나중에 재봐도 좋다.
+                if exclude and "excludeCurrentJobTitles" not in payload \
+                        and not spec.get("pastJobTitles"):
                     payload["excludeCurrentJobTitles"] = exclude
                 payload["startPage"] = page
                 payload["takePages"] = take
@@ -206,6 +225,15 @@ class LinkedInAdapter(Adapter):
             #    Apify 403(쿼터 초과)으로 10축 전부 0건이었는데 last_run=오늘이 박혔고,
             #    cadence=weekly라 **결제를 풀어도 7/19까지 링크드인이 안 도는** 상태가 됐다.
             #    수집 사고 하루가 팔로업 주기 일주일을 통째로 태운다.
+            # ★ 이 축이 무엇을 데려왔는지 **축 단위로 남긴다.** 공백형 축은 산출이 0이어도
+            #   에러가 안 나므로(정상 응답에 공백자가 없을 뿐) 로그가 없으면 조용히 죽는다.
+            if got and spec.get("pastJobTitles"):
+                gaps = sum(1 for u, r in merged.items()
+                           if label in r.get("labels", []) and (_gap_months(r["raw"]) or 0) >= 3)
+                print(f"· linkedin '{label}': {got}명 중 **공백 3개월+ {gaps}명**")
+                if gaps == 0:
+                    print(f"  🔴 HEALTH: 공백형 축인데 공백자가 0명이다 — "
+                          f"excludeCurrentJobTitles가 붙었는지, 액터 동작이 바뀌었는지 확인하라.")
             if failed and got == 0:
                 print(f"· linkedin '{label}': 액터 실패 — 축 상태 미기록(다음 실행에 재시도)")
             else:
@@ -233,9 +261,9 @@ class LinkedInAdapter(Adapter):
         #   재추적 누락' 딜레마의 실체). 롤백 = config `compare_within_window: false` 한 줄.
         compare_within = bool(pconf.get("compare_within_window", False))
         fresh_urns, recheck, unchanged, changes = [], 0, 0, {}
-        within_changed = within_same = within_nofp = 0
+        within_changed = within_same = within_nofp = rebaselined = 0
         for u, rec in merged.items():
-            st = seen.get(u)
+            st = seen.get(_seen_key(u))
             if st is None:
                 fresh_urns.append(u)                         # 처음 보는 사람
                 continue
@@ -243,8 +271,8 @@ class LinkedInAdapter(Adapter):
                 if not compare_within:
                     continue                                 # (구동작) 최근에 본 사람 → 무조건 건너뜀
                 old_fp = st.get("f", "")
-                if not old_fp:
-                    # 지문 없는 구형 엔트리 — 비교 불가를 '변화'로 치면 배포 첫 런에 대량 오탐.
+                if not _fp_comparable(old_fp):
+                    # 지문이 없거나 **구버전**이면 비교 불가 — 이를 '변화'로 치면 배포 첫 런에 대량 오탐.
                     # 90일 경과 시 기존 경로가 지문을 자연 갱신한다.
                     within_nofp += 1
                     continue
@@ -259,12 +287,16 @@ class LinkedInAdapter(Adapter):
             # 재확인 주기 도래 — **바뀌었을 때만** 후보로 올린다.
             # 안 바뀐 사람까지 매번 다시 착지시키면 노션이 중복으로 찬다.
             old_fp, new_fp = st.get("f", ""), _fingerprint(rec["raw"])
-            if old_fp and old_fp == new_fp:
+            comparable = _fp_comparable(old_fp)
+            if comparable and old_fp == new_fp:
                 unchanged += 1
                 continue
             fresh_urns.append(u)
-            recheck += 1
-            changes[u] = old_fp                              # 뭐가 바뀌었는지 보여주기 위해 보관
+            if comparable:
+                recheck += 1
+                changes[u] = old_fp                          # 뭐가 바뀌었는지 보여주기 위해 보관
+            else:
+                rebaselined += 1     # 구버전 지문 — 재관찰은 하되 '변화'로 **표기하지 않는다**
         dropped = len(merged) - len(fresh_urns) - unchanged
         if not merged:
             # 🔴 정직한 로그. 검색이 0건이면 seen-store는 **판정을 한 적이 없다.**
@@ -273,7 +305,8 @@ class LinkedInAdapter(Adapter):
                   f"(seen에 {len(seen)}명이 있는데 이번에 한 명도 못 받았다 = 액터 실패 의심)")
         else:
             print(f"· linkedin seen-store: 기존 {dropped} 제외 · "
-                  f"{recheck_days}일 경과 중 무변화 {unchanged} 제외 · **변화 감지 {recheck}건 포함**")
+                  f"{recheck_days}일 경과 중 무변화 {unchanged} 제외 · **변화 감지 {recheck}건 포함**"
+                  + (f" · 구버전 지문 재기준선 {rebaselined}건(변화 아님)" if rebaselined else ""))
             if compare_within:
                 print(f"  · 창 내 비교(팔로업): 변화 {within_changed} · 무변화 {within_same}"
                       f" · 지문없음(구형) {within_nofp}")
@@ -288,6 +321,9 @@ class LinkedInAdapter(Adapter):
                 #   "Stealth → 실제 회사명"처럼 프로필이 바뀌는 순간이 가장 이른 신호다.
                 c.signals["profile_changed"] = True
                 c.signals["changed_from"] = changes[urn][:120]
+                # ★ 사람이 읽을 요약 — 노션 `변화 요약` 칸으로 간다(지문 원문이 아니라).
+                c.signals["change_summary"] = _change_summary(
+                    changes[urn], _fingerprint(rec["raw"]))
                 c.signals["match_reason"] = (
                     f"[변화 감지] {changes[urn][:60]} → {_fingerprint(rec['raw'])[:60]}")
             out.append(c)
@@ -295,7 +331,8 @@ class LinkedInAdapter(Adapter):
             # [2단계 커밋] collect 시점엔 pending만 기록. land 성공 후 commit_seen()이 병합.
             # collect 시점 커밋은 land 실패 시 이 URN들이 '이미 본 것'이 되어 영구 유실됐다.
             # 지문도 함께 넘긴다 — 다음 재확인 때 "뭐가 바뀌었나"를 비교하려면 필요하다.
-            pend = {u: _fingerprint(merged[u]["raw"]) for u in fresh_urns}
+            # 키는 **정규화 URN**으로 쓴다 — 모드가 바뀌어도 같은 사람이 같은 칸에 들어간다.
+            pend = {_seen_key(u): _fingerprint(merged[u]["raw"]) for u in fresh_urns}
             (PROJ / (seen_path + ".pending")).parent.mkdir(parents=True, exist_ok=True)
             (PROJ / (seen_path + ".pending")).write_text(
                 json.dumps(pend, ensure_ascii=False), encoding="utf-8")
@@ -503,6 +540,22 @@ class LinkedInAdapter(Adapter):
                 #   전체 중앙값 34개월 / 12개월 미만은 10%뿐 → 이 값 없이는 스톡과 신규를 못 가른다.
                 "tenure_months": tenure,
                 "fresh_tenure": is_fresh,
+                # ★ [2026-07-27] tenure의 짝. "지금 창업이 몇 개월"(tenure) vs "창업자로 산 기간".
+                #   둘이 크게 벌어지면 연쇄창업자다. 컷은 judge가 한다(어댑터는 판단 금지).
+                "founder_since_months": _founder_since_months(p),
+                "present_roles": len(_positions(p)),
+                # ★ 시제 구분 — "과거에 스텔스였다"(=이미 공개했다)와 "지금 스텔스다"는 정반대 신호다.
+                "past_stealth": _past_stealth(p),
+                # ★ 회사 단계의 유일한 직접 증거. payload에 회사 나이·투자단계가 없어서
+                #   지금은 tenure로 대리 추정 중인데, 여기엔 답이 문장으로 있을 때가 있다.
+                "featured": _featured_titles(p),
+                # ★ 경력 전문 — 노션 **페이지 본문**으로 간다(2,000자를 넘는 사람이 절반이다).
+                "career": _career_timeline(p),
+                # ★ 공백기(사수 요구사항) — 0=공백없음 · N=N개월 공백 · 빈칸=판정불가.
+                "gap_months": _gap_months(p),
+                # ★ 부업(시간제·인턴)만 걸어둔 사람의 실질 공백. 0과 뜻이 다르다.
+                "fulltime_gap_months": _fulltime_gap_months(p),
+                "company_url": _current_company_url(p),
                 "schools": schools,
                 "kr_school": has_kr_school,           # ★ schools 서버측 필터 작동 검증용
                 "strong_title": has_strong,           # 참고(94/97 발화 = 상수)
@@ -712,7 +765,8 @@ class LinkedInAdapter(Adapter):
         if not isinstance(d, dict):
             return {}
         # 구 형식(문자열 날짜)도 호환
-        return {u: (v if isinstance(v, dict) else {"d": str(v), "f": ""}) for u, v in d.items()}
+        raw = {u: (v if isinstance(v, dict) else {"d": str(v), "f": ""}) for u, v in d.items()}
+        return _fold_seen(raw)
 
 
 def commit_seen(cfg: dict) -> None:
@@ -757,9 +811,12 @@ def commit_seen(cfg: dict) -> None:
         committed = {}
     if isinstance(committed, list):                     # 구 형식 마이그레이션
         committed = {u: {"d": "", "f": ""} for u in committed}
+    # ★ [2026-07-27] 병합 전에 **정규화해서 접는다.** 안 하면 같은 사람이 `ACoAA…`/`ACwAA…`
+    #   두 칸을 차지하고, 재확인 주기·지문 비교가 사람 단위로 안 돌아간다(실측 85쌍).
+    committed = _fold_seen(committed)
     today = date.today().isoformat()
     for u, fp in pending.items():
-        committed[u] = {"d": today, "f": fp}
+        committed[_seen_key(u)] = {"d": today, "f": fp}
     seen_path.parent.mkdir(parents=True, exist_ok=True)
     seen_path.write_text(json.dumps(committed, ensure_ascii=False, sort_keys=True),
                          encoding="utf-8")
@@ -826,6 +883,222 @@ def _join_name(p: dict) -> str:
     return " ".join(x for x in (p.get("firstName"), p.get("lastName")) if x).strip()
 
 
+def _seen_key(urn: str) -> str:
+    """seen-store의 사람 키. 링크드인 URN은 **모드마다 달라지므로 정규화**한다.
+
+    🔴 [2026-07-27 실측] `data/linkedin_seen.json` 344 엔트리 = `ACoAA` 247 + `ACwAA` 97인데,
+       정규화하면 **85쌍이 같은 사람**이었다(실제 ~259명). 접지 않으면:
+         · 같은 사람이 두 칸을 차지해 recheck 주기가 사람 단위로 안 돌고
+         · 노션에도 두 번 착지한다(실제로 84행이 그렇게 생겼다).
+       비용 손해는 없다 — seen-store는 돈을 낸 **뒤** 거르는 장치다.
+    """
+    from adapters.base import canonical_linkedin_urn
+    return canonical_linkedin_urn(urn) or urn
+
+
+def _fold_seen(d: dict) -> dict:
+    """seen-store를 정규화 키로 접는다. 충돌하면 **날짜가 최신인 쪽**을 남기고,
+    지문이 있는 쪽을 우선한다(지문이 없으면 비교 불가 처리되어 재기준선을 잡게 된다)."""
+    out: dict[str, dict] = {}
+    for u, v in d.items():
+        k = _seen_key(u)
+        cur = out.get(k)
+        if cur is None:
+            out[k] = v
+            continue
+        if (v.get("d") or "") > (cur.get("d") or "") or (v.get("f") and not cur.get("f")):
+            out[k] = v
+    return out
+
+
+def _featured_titles(p: dict) -> str:
+    """`featured`(대표 콘텐츠)의 제목들을 이어붙인다. **이미 산 필드인데 버리고 있었다.**
+
+    🔴 [2026-07-27] 왜 중요한가 — payload 어디에도 **회사의 나이·투자단계가 없다**(키 50개 전수).
+       그래서 "이 사람 회사가 이미 자리를 잡았나"를 tenure로 **대리 추정**하고 있는데,
+       `featured`에는 그 답이 문장으로 들어 있는 경우가 있다(실측 287명 중 10명, 3.5%):
+         「셀론, AI '기억 레이어'로 승부…프라이머·더벤처스서 시드 투자 유치」
+         「피직스에이아이, 서울대기술지주 시드 투자 유치 - 로봇신문」
+         「매쉬업벤처스, AI 컨설팅사 '오르빗코리아'에 프리시드 투자」
+
+    ⚠️ **정규식으로 '투자받음' 플래그를 만들지 않는다.** 본인이 올린 하이라이트라 회수율이 낮아
+       (투자받은 사람이 전부 올리지는 않는다) 빈 값이 "투자 안 받음"으로 읽히는 순간 거짓이 된다.
+       → **텍스트만 싣고 판단은 judge가 한다.** 있으면 사실, 없으면 **미확인**이지 부정이 아니다.
+    """
+    f = p.get("featured")
+    if not isinstance(f, dict):
+        return ""
+    out: list[str] = []
+    for sl in (f.get("slides") or []):
+        if not isinstance(sl, dict):
+            continue
+        t = str(sl.get("title") or "").strip()
+        sub = str(sl.get("subtitle") or "").strip()
+        one = " · ".join(x for x in (t, sub) if x)
+        if one and one not in out:
+            out.append(one)
+    for k in ("title", "subtitle"):
+        v = str(f.get(k) or "").strip()
+        if v and v not in out:
+            out.append(v)
+    return " / ".join(out)[:1800]          # 노션 rich_text 한 블록 상한(2000) 안쪽
+
+
+def _career_timeline(p: dict) -> str:
+    """경력 + 학력을 **원본 그대로** 한 덩어리 텍스트로. 판단 에이전트에게 넘길 본문이다.
+
+    🔴 [2026-07-27] 왜 필요한가 — 지금까지 우리는 경력으로 **숫자만 계산하고 원본을 버렸다**
+       (tenure·창업개월). 그런데 판단에 필요한 건 숫자가 아니라 **이야기**다:
+
+         Advisory Committee @ 행정안전부 | Mar 2026~Present | Part-time
+         Cofounder & CTO @ AIM Intelligence | May 2024~Present | Full-time
+           The most frontier AI safety startup you will see
+         Founder @ Stealth Startup | Feb 2024~Aug 2024
+           - #12 appstore/playstore app - 55 million+ views
+
+       이 열 줄이면 tenure 숫자 하나로 씨름할 이유가 없다. Example Person F 사고도 여기선 안 난다 —
+       **`Part-time`이 눈에 보이기 때문**이다.
+
+    ⚠️ **설명을 자르지 않는다**(사용자 결정 2026-07-27). 요약형(중앙 808자)이 아니라 전문
+       (중앙 1,808자·최대 12,570자)을 넘긴다. 여기서 자르면 그게 '조용한 삭제'다.
+       → 2,000자를 넘는 사람이 136/287이라 **노션 칸에는 안 들어간다. 페이지 본문에 쌓는다.**
+    """
+    lines: list[str] = []
+    for e in (p.get("experience") or []):
+        if not isinstance(e, dict):
+            continue
+        sd = (e.get("startDate") or {}).get("text") or "?"
+        ed = (e.get("endDate") or {}).get("text") or "?"
+        bits = [f"{e.get('position') or '?'} @ {e.get('companyName') or '?'}", f"{sd}~{ed}"]
+        # ★ 고용형태 — Example Person F을 가른 바로 그 정보. 시간제 자문이 창업을 가리는 걸 사람이 즉시 본다.
+        for k in ("employmentType", "workplaceType", "location"):
+            if e.get(k):
+                bits.append(str(e[k]))
+        lines.append(" | ".join(bits))
+        desc = " ".join(str(e.get("description") or "").split())
+        if desc:
+            lines.append("  " + desc)
+    for ed_ in (p.get("education") or []):
+        if not isinstance(ed_, dict):
+            continue
+        tail = " ".join(x for x in (ed_.get("degree"), ed_.get("fieldOfStudy")) if x)
+        lines.append(f"[학력] {ed_.get('schoolName') or '?'}" + (f" | {tail}" if tail else ""))
+        d = " ".join(str(ed_.get("description") or "").split())
+        if d:
+            lines.append("  " + d)
+    return "\n".join(lines)
+
+
+def _current_company_url(p: dict) -> str:
+    """현재 회사의 LinkedIn URL. **판단 에이전트가 회사를 조회할 유일한 열쇠**다(실측 287/287 보유).
+
+    payload에 회사의 나이·투자단계가 없으므로, 회사 자체를 보려면 이 URL이 있어야 한다.
+    창업 포지션을 우선한다(`_positions`가 이미 창업 직함을 앞으로 정렬해 둔다).
+    """
+    for e in _positions(p):
+        u = e.get("companyLinkedinUrl")
+        if u:
+            return str(u)
+    return ""
+
+
+# 🔴 **부업으로 보는 고용형태는 여기까지다(S1).** 넓히지 마라 —
+#   `Contract`를 넣었다가는 `Deputy Site Manager(LNG) · Contract`처럼 **명백한 본업**을 무직으로
+#   찍는다(실측: S1 2명 → S2 6명인데 늘어난 4명 중 3명이 진짜 근무자였다).
+#   `Freelance`·`Self-employed`도 본업이다(프리랜서로 먹고살고, self-employed는 곧 창업이다).
+#   ⚠️ employmentType **표기없음이 40%(227/561)**다. 모르면 **본업으로 취급**한다 —
+#      반대로 하면 거짓 공백이 대량 생긴다.
+_SIDE_EMPLOYMENT = {"Part-time", "Internship", "Volunteer", "Seasonal"}
+
+
+def _is_side_job(pos: dict) -> bool:
+    return str(pos.get("employmentType") or "") in _SIDE_EMPLOYMENT
+
+
+def _fulltime_gap_months(p: dict) -> int | None:
+    """**본업**(부업 제외) 기준 공백 개월. `_gap_months`의 짝이다.
+
+    왜 따로 재나 (2026-07-27 실측): `공백 개월`은 Present가 **하나라도** 있으면 0이다.
+    그런데 퇴사하고 자문·EIR만 파트타임으로 걸어둔 사람이 있다 — 실질은 본업이 없는데 0으로 찍힌다.
+      · `jaeminbae`  EIR(Entrepreneur in Residence, Part-time) · 본업 종료 후 **6개월**
+      · `2miho`      CEO Staff(Part-time)                      · 본업 종료 후 **7개월**
+    EIR은 **말 그대로 창업 준비 중**이라는 뜻이라, 이 축에서 가장 놓치면 안 되는 인구다.
+
+    두 칸을 **같이** 봐야 뜻이 산다. 하나로 합치면 어느 쪽도 못 믿는다:
+      공백 0 / 본업공백 6  → "파트타임 하나 걸고 6개월째 본업 없음" ← 신호
+      공백 0 / 본업공백 0  → 정상 재직
+    """
+    from datetime import date
+    exp = [e for e in (p.get("experience") or []) if isinstance(e, dict)]
+    if any(_is_present(e) and not _is_side_job(e) for e in exp):
+        return 0
+    today = date.today().year * 12 + date.today().month
+    ends = []
+    for e in exp:
+        if _is_present(e) or _is_side_job(e):
+            continue                       # 부업의 종료일은 본업 공백의 기준이 아니다
+        ed = e.get("endDate")
+        if isinstance(ed, dict) and ed.get("year"):
+            ends.append(int(ed["year"]) * 12 +
+                        _MON.get(str(ed.get("month", "")).strip()[:3].lower(), 1))
+    return (today - max(ends)) if ends else None
+
+
+def _gap_months(p: dict) -> int | None:
+    """**마지막 직장 종료 후 공백 개월.** 회의 요구사항(2026-07-24, 사수) 반영.
+
+    값의 뜻을 헷갈리면 안 된다 — 세 상태가 **전부 다르다**:
+      · `0`   = 진행 중인 포지션이 있다 → **공백 없음**(확인된 사실)
+      · `N`   = 마지막 경력이 N개월 전에 끝났고 그 뒤가 비었다
+      · 빈칸  = 경력에 날짜가 없어 **판정 불가**(미확인이지 "공백 없음"이 아니다)
+
+    🔴 [2026-07-27 실측] **현재 5축으로는 이 값이 거의 항상 0이다.** 271명 중 공백자 0명.
+       축이 전부 `currentJobTitles`/`yearsAtCurrentCompanyIds`(=현 직장이 있어야 성립) 또는
+       `searchQuery:"Stealth Startup"`(=그 문자열이 현 회사명에 있어야 매칭) 기반이라
+       **공백자는 검색 결과에 들어오지도 않는다.** 계산이 아니라 **수집**의 문제다.
+       → 값을 채우려면 `pastJobTitles`/`pastCompanies` 축을 따로 태워야 한다(프로브: 4/25 = 16%).
+
+    ⚠️ 사람들은 공백을 실제로 프로필에 남긴다(경력 2개 이상 260명 중 232명, 89%). 지표 자체는 성립한다.
+    """
+    from datetime import date
+    if any(_is_present(e) for e in (p.get("experience") or []) if isinstance(e, dict)):
+        return 0
+    today = date.today().year * 12 + date.today().month
+    ends = []
+    for e in (p.get("experience") or []):
+        if not isinstance(e, dict):
+            continue
+        ed = e.get("endDate")
+        if isinstance(ed, dict) and ed.get("year"):
+            ends.append(int(ed["year"]) * 12 +
+                        _MON.get(str(ed.get("month", "")).strip()[:3].lower(), 1))
+    return (today - max(ends)) if ends else None
+
+
+def _change_summary(old_fp: str, new_fp: str) -> str:
+    """지문 두 개를 **사람이 읽는 문장**으로. `재검토 ✅`만 켜고 이유를 안 남기면 소용없다.
+
+    🔴 [2026-07-27] 수집 중 감지한 변화 8건이 노션에서 `변화 요약` **전부 빈칸**이었다.
+       사람은 "이 사람이 왜 재검토에 올라왔지?"를 알 수 없고, 결국 프로필을 다시 열어봐야 한다 —
+       그러면 자동 감지의 의미가 없다. (`recheck-linkedin` 레인은 쓰고 있었는데 `land` 경로가 빠져 있었다)
+
+    지문 형식은 `v{n}|회사|직함`이다. **바뀐 항목만** 적는다:
+        회사: Stealth → 주식회사 드래프타입
+        직함: Product Manager → Founder
+    """
+    def parts(fp: str) -> tuple[str, str]:
+        seg = (fp or "").split("|")
+        return (seg[1] if len(seg) > 1 else "", seg[2] if len(seg) > 2 else "")
+    oc, ot = parts(old_fp)
+    nc, nt = parts(new_fp)
+    out = []
+    if oc != nc:
+        out.append(f"회사: {oc or '(없음)'} → {nc or '(없음)'}")
+    if ot != nt:
+        out.append(f"직함: {ot or '(없음)'} → {nt or '(없음)'}")
+    return " / ".join(out)
+
+
 def _fingerprint(p: dict) -> str:
     """프로필 지문 — **"이 사람이 뭔가 했나"를 나타내는 필드만** 넣는다.
 
@@ -833,10 +1106,24 @@ def _fingerprint(p: dict) -> str:
       · 회사명 `Stealth` → `주식회사 드래프타입`  = **법인을 세우고 공개했다**
       · 직함 `Product Manager` → `Founder`      = **창업했다**
     소개글(summary)은 자주 바뀌므로(문구 다듬기) 넣지 않는다 — 넣으면 무의미한 변화가 쏟아진다.
+
+    🔴 **버전 접두사가 붙는다(`v2|`).** 지문의 재료(`_positions`)가 바뀌면 같은 사람의 지문도
+       바뀌므로, 버전이 없으면 **배포 첫 실행에 저장된 344명이 전부 "변화 감지"로 오탐**한다
+       (전원 재착지 + 재검토 체크 = 사람이 볼 큐가 쓰레기가 된다).
+       구버전 지문은 `_fp_comparable()`이 **비교 불가**로 판정해 조용히 재기준선을 잡는다.
+       → 지문 재료를 바꾸면 **반드시 이 버전도 올려라.**
     """
     co = _current_company(p)
     titles = _position_title(p)
-    return f"{co}|{titles}"
+    return f"{_FP_VERSION}|{co}|{titles}"
+
+
+_FP_VERSION = "v2"          # v2 = _positions가 experience의 Present를 포함(2026-07-27)
+
+
+def _fp_comparable(fp: str) -> bool:
+    """저장된 지문을 **지금 지문과 비교해도 되는가**. 구버전/빈값이면 False."""
+    return bool(fp) and fp.startswith(_FP_VERSION + "|")
 
 
 def _post_author_is_kr(p: dict) -> bool:
@@ -883,20 +1170,70 @@ def _profile_url(p: dict, urn: str) -> str:
 
 
 def _positions(p: dict) -> list[dict]:
-    """**현재** 포지션 목록.
+    """**현재** 포지션 목록 = `currentPosition[]` ∪ `experience[]` 중 **endDate=Present**.
 
     🔴 스크래퍼 모드마다 키가 다르다 (실측 2026-07-13):
          Short : currentPositions[]  (복수)
          Full  : currentPosition[]   (단수)  ← 복수형은 **아예 없다**
-       그래서 Full로 바꾼 뒤 `experience`로 폴백하고 있었는데, experience는 **과거 경력까지**
-       포함한다 → 10년 전 창업 직함을 '현재 창업자'로 오인하고, 회사명도 옛 회사가 잡힌다.
-       현재 포지션을 먼저 본다. experience는 둘 다 없을 때의 최후 폴백으로만 남긴다.
+
+    🔴🔴 [2026-07-27 실측] **`currentPosition`은 현재 진행 중인 경력을 통째로 누락한다.**
+       271명 표본에서 **117명(43%)** 이 `experience`에 `endDate=Present`인데 `currentPosition`에
+       없는 포지션을 갖고 있었다. 실제 피해:
+
+         Example Person F — currentPosition = [행정안전부 자문위원(파트타임, 5개월)] **하나뿐**.
+                     `Cofounder & CTO @ AIM Intelligence (2024-05~Present, 27개월)`은
+                     experience에만 있다. 그 결과 tenure가 **4개월**로 착지해
+                     "극초기 창업자"로 분류됐고(실제로는 창업 2년 3개월차·Gitex 그랑프리 수상),
+                     회사명은 "행정안전부"만 남아 `t-stealth`로 오분류됐다.
+
+       옛 주석은 `experience` 폴백을 **"과거 경력까지 포함하니 위험"**이라며 최후 수단으로 뒀는데,
+       진단은 맞고 처방이 과했다 — **`endDate=Present`로 거르면 과거 경력은 안 들어온다.**
+       그 한 줄이 없어서 43%의 현재 상태를 못 보고 있었다.
+
+    ⚠️ 순서: **창업 직함을 앞에 둔다.** `_current_company`·`_position_title`이 이 순서대로 이어붙이므로
+       "AIM Intelligence · 행정안전부"가 되어 judge가 첫 조각에서 정체를 본다(반대면 정부부처가 먼저다).
     """
-    for key in ("currentPosition", "currentPositions", "positions", "experience"):
-        v = p.get(key)
-        if isinstance(v, list) and v:
-            return [x for x in v if isinstance(x, dict)]
-    return []
+    out: list[dict] = []
+    seen: set[tuple] = set()
+    for key in ("currentPosition", "currentPositions", "positions"):
+        for x in p.get(key) or []:
+            if isinstance(x, dict):
+                k = (str(x.get("companyName") or ""), str(x.get("position") or x.get("title") or ""))
+                if k not in seen:
+                    seen.add(k)
+                    out.append(x)
+    for x in p.get("experience") or []:                # ★ Present만 흡수 (과거 경력은 안 들어온다)
+        if isinstance(x, dict) and _is_present(x):
+            k = (str(x.get("companyName") or ""), str(x.get("position") or x.get("title") or ""))
+            if k not in seen:
+                seen.add(k)
+                out.append(x)
+    if not out:
+        # 🔴 [2026-07-27] 최후 폴백은 **"진행 중인지 알 수 없을 때"만** 쓴다.
+        #   경력에 날짜가 제대로 있는데 Present가 하나도 없다 = **정말로 현 직장이 없는 사람**이다
+        #   (공백형). 그런 사람에게 과거 경력을 '현재'로 돌려주면 **가짜 tenure**가 생긴다 —
+        #   실측: 공백 15개월인 사람에게 `tenure 43개월`이 붙었다. 현 직장이 없는데 재직 43개월은
+        #   말이 안 되고, 그게 바로 우리가 오늘 하루 걸려 없앤 종류의 거짓이다.
+        #   → 판정 가능하면 **빈 목록**을 준다(tenure·창업개월이 빈칸 = 해당 없음/미확인).
+        exp = [x for x in (p.get("experience") or []) if isinstance(x, dict)]
+        datable = [x for x in exp if x.get("startDate") or x.get("endDate")]
+        out = [] if datable else exp
+    out.sort(key=lambda x: 0 if _is_founder_role(x) else 1)   # 안정 정렬 — 창업 직함 우선
+    return out
+
+
+def _is_present(pos: dict) -> bool:
+    """이 경력이 **진행 중**인가. `endDate.text == "Present"`가 액터의 표기다(실측)."""
+    ed = pos.get("endDate")
+    if isinstance(ed, dict):
+        return str(ed.get("text") or "").strip().lower() == "present"
+    return not ed and bool(pos.get("startDate"))       # endDate 자체가 없으면 진행 중으로 본다
+
+
+def _is_founder_role(pos: dict) -> bool:
+    """이 포지션이 **창업 포지션**인가 (직함 문자열로 판정)."""
+    t = str(pos.get("position") or pos.get("title") or "").lower()
+    return any(term in t for term in FOUNDER_ROLE_TERMS)
 
 
 def _position_title(p: dict) -> str:
@@ -959,17 +1296,48 @@ def _tenure_months(p: dict) -> int | None:
     왜 min 인가: 동시 포지션을 가진 사람(97명 중 12명)은 [0]=삼성 10년, [1]=Founder 3개월 처럼
     들어온다. 우리가 알고 싶은 건 "이 사람이 **새로 시작한 일**이 얼마나 됐나"이므로 가장 짧은 쪽이다.
     (max/[0]을 보면 대기업 재직 10년으로 읽혀 창업 신호가 완전히 반대로 뒤집힌다)
+
+    🔴🔴 [2026-07-27] **창업 직함이 하나라도 있으면 그중에서만 고른다.** 그냥 min을 쓰면
+       파트타임 자문·멘토·고문이 "가장 짧은 일"로 잡혀 창업 시점을 덮어쓴다. 실측 피해가
+       Example Person F이다 — 행정안전부 자문(5개월)이 AIM Intelligence 창업(27개월)을 가렸다.
+       271명 재계산: **21명(7.7%)** 이 "코드상 12개월 미만"인데 실제 창업직함은 24개월 이상이었다.
+
+       ⚠️ 창업 직함이 **없는** 사람은 옛 동작(전체 min)을 그대로 쓴다 — 그들에겐 "새로 시작한 일"이
+          여전히 옳은 정의다(대기업 재직 중 창업 준비자 등).
     """
-    best: int | None = None
-    # ⚠️ 키가 모드마다 다르다: Short=currentPositions(복수) · Full=currentPosition(단수)
-    for key in ("currentPositions", "currentPosition"):
-        for pos in p.get(key) or []:
-            if not isinstance(pos, dict):
-                continue
-            months = _pos_months(pos)
-            if months is not None and (best is None or months < best):
-                best = months
-    return best
+    pos_all = _positions(p)
+    founders = [x for x in pos_all if _is_founder_role(x)]
+    pool = founders or pos_all                     # 창업 직함이 있으면 그 안에서만
+    vals = [m for m in (_pos_months(x) for x in pool) if m is not None]
+    return min(vals) if vals else None
+
+
+def _founder_since_months(p: dict) -> int | None:
+    """**창업자로 산 기간**(개월) — 현 창업 포지션 중 가장 **긴** 것. 없으면 None.
+
+    `_tenure_months`(가장 최근 시작한 창업)와 짝이다. 둘을 같이 실어야 판단이 갈린다:
+      · tenure 2 / founder_since 2   → 갓 시작한 창업자
+      · tenure 2 / founder_since 84  → 7년차 창업자가 법인을 하나 더 세운 것
+    점수에는 안 넣는다(컷은 judge의 일). 추가 구매 비용 0 — 이미 산 필드다.
+    """
+    vals = [m for m in (_pos_months(x) for x in _positions(p) if _is_founder_role(x))
+            if m is not None]
+    return max(vals) if vals else None
+
+
+def _past_stealth(p: dict) -> bool:
+    """**끝난** 경력에 stealth가 있나 — "과거에 스텔스였다"와 "지금 스텔스다"는 다르다.
+
+    Example Person F은 `Founder @ Stealth Startup (2024-02~2024-08, 종료)`을 갖고 있어 stealth 축의
+    전문검색에 걸려 들어왔다. 시제를 구분하지 않으면 **이미 회사를 공개한 사람**이 계속
+    "스텔스 창업자"로 남는다.
+    """
+    for e in p.get("experience") or []:
+        if isinstance(e, dict) and not _is_present(e):
+            blob = f"{e.get('companyName') or ''} {e.get('position') or ''}".lower()
+            if any(t in blob for t in STEALTH_TERMS):
+                return True
+    return False
 
 
 def _current_company(p: dict) -> str:

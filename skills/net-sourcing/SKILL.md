@@ -59,10 +59,10 @@ description: >-
 | | 월 | 비고 |
 |---|---|---|
 | 수집 · 스레드 | $20.3 | 키워드·리플라이 매주 · **FG 격주** · 워치리스트 폐기 |
-| 수집 · 링크드인 | $13.3 | flow축 **격주** · stealth-us 월1 · 나머지 매주 |
+| 수집 · 링크드인 | $14.2 | flow·**gap 격주** · stealth-us 월1 · 나머지 매주 (6축, 2026-07-27) |
 | 수집 · 앱스토어 | **$0** | 애플 무료 API. Apify 미경유 |
 | 리텐션 (2채널) | $1.6 | recheck 7일균일 + LI레인 + 빈-bio TTL |
-| **합계** | **~$35** | 상한 $45에 여유 $10 |
+| **합계** | **~$36** | 상한 $45에 여유 $9 |
 
 **절감의 정체는 "몇 건을 사느냐"가 아니라 "얼마나 자주 사느냐"다.** 건수·필터 레버는 2026-07-16에
 소진됐다(키워드 축소는 배타 빌더 5명 손실 + 킬룰 위반, maxPosts 컷은 `sort=recent`인데 배송이
@@ -229,6 +229,58 @@ payload에 넣으면 액터가 모르는 키라 무시하고, 가드가 안 걸�
 켜기는 코드(land 병합 지점·recheck), 끄기는 사람. 그래서 셋 다 `_PATCH_EXCLUDE`에 들어 있다.
 대신: 표기가 필요한 새 경로가 생기면 land()의 병합 지점처럼 **행의 실제 속성(_ROW_PROPS)을
 확인하고 직접 주입**하라(스키마 교집합을 안 거치므로 미확인 주입은 PATCH 전체를 400으로 죽인다).
+
+⚠️ **판정 옵션(select)을 늘렸으면 `tools/notion_migrate.py`의 상수도 같이 늘려라.** 한쪽만 고치면
+   **다음 마이그레이션이 조용히 되돌린다.** 실측(2026-07-27): 07-19에 신설한 Tier `Cut`이
+   `TIER_OPTIONS`에 없어서, `--apply`가 옵션을 3개로 교체하며 `Cut`을 지우려 했다.
+   `judge_cli._verdict_field()`는 **라이브 스키마에서** allowed를 읽으므로(문서가 아니라 스키마가
+   정본) 그대로 뒀으면 `Cut` 판정이 전량 거부됐다. dry-run에서 잡았다 — **`--apply` 전에 dry-run을
+   눈으로 읽어라.** `~ Tier: [...] → [...]` 처럼 **줄이는** 변경이 보이면 멈춰라.
+
+**#12 — 액터가 `current*`라고 이름 붙인 필드를 "현재의 전부"로 믿지 마라.**
+
+현재 포지션은 **`currentPosition[]` ∪ `experience[]` 중 `endDate == "Present"`** 로 구한다.
+그리고 그 해석은 **`_positions()` 한 곳에서만** 한다(회사명·직함·tenure·지문이 전부 그걸 쓴다).
+
+왜 — 실측(2026-07-27, 저장된 실액터 응답 271명):
+| | |
+|---|---|
+| `currentPosition`이 진행 중 경력을 **누락**한 사람 | **117 / 271 (43%)** |
+| 그 결과 **극초기(<12개월) 판정이 뒤집힌** 사람 | **17명** (탈락 14 · 편입 3) |
+| 회사명이 바뀐 사람 | 108 / 271 (40%) |
+
+나쁜 예 (2026-07-13~07-27에 실제로 착지된 행):
+```
+Example Person F · Tenure Months 4 · Axis [t-cto, t-stealth]
+Raw Text "solving AI safety & security · 행정안전부 · Seoul"
+→ 액터의 currentPosition에 **파트타임 자문위원(5개월) 하나만** 들어 있었다.
+  극초기 창업자로 분류됐다. 실제로는 AIM Intelligence 공동창업 2년 3개월차 · Gitex 그랑프리 수상.
+```
+좋은 예:
+```
+Example Person F · Tenure Months 26 · 창업 개월 26 · 과거 스텔스 ✅
+Raw Text "… · AIM Intelligence · 행정안전부 · Seoul · solving AI security"
+→ experience의 Present를 흡수. 창업 직함이 있으면 tenure를 **그 안에서만** 고른다
+  (자문·멘토 같은 짧은 부업이 창업 시점을 덮어쓰는 걸 막는다).
+```
+
+**기계 검증 — 새 액터·새 스크래퍼 모드를 붙이면 착지 전에 반드시 돌린다 ($0):**
+```bash
+"$PROJ/.venv/bin/python" "$PROJ/tools/check_present_coverage.py"    # rc=1이면 착지 금지
+```
+저장된 액터 원본으로 **우리 파서(`_positions`)가 Present를 몇 % 놓치는가**를 잰다.
+⚠️ **액터의 누락률(41.8%)이 아니라 파서의 누락률로 판정한다** — 전자는 고쳐도 안 변하는 액터의
+   성질이라, 그걸 기준으로 삼으면 체커가 **항상 빨간불이 되어 아무도 안 본다.**
+| 파서 누락률 | 조치 |
+|---|---|
+| **10% 이상** | ❌ rc=1. **파서를 고치기 전에 착지하지 마라.** 그 채널의 신선도 지표가 통째로 틀린다 |
+| 3~10% | ⚠️ 고치고 가되, 영향 받은 행 수를 로그에 남긴다 |
+| 3% 미만 | ✅ 통과 (현재 **0.0% / 287명**) |
+
+⚠️ **파생 규칙 — 지문(`_fingerprint`)의 재료를 바꿨으면 `_FP_VERSION`을 올려라.**
+안 올리면 저장된 사람 전원의 지문이 달라져 **다음 실행에 전부 "변화 감지"로 오탐**한다
+(실측: `linkedin_seen.json` **344명 전원이 v1**이었다 = 344명 재착지 + `재검토` 일괄 점등).
+구버전 지문은 `_fp_comparable()`이 **비교 불가 → 조용히 재기준선**으로 처리한다.
 </CRITICAL>
 
 → 착지 필드 매핑 전체: `core/notion.py._build_landing_properties` · 채널 스키마: `references/notion-schema.md`
@@ -378,7 +430,7 @@ PROJ="$HOME/.claude/skills/net-sourcing/project"
 | 어디 | 노브 | 현재 |
 |---|---|---|
 | 스레드 **층** | `channels.threads.layer_cadence` | keyword·replies `always` · following_graph **`biweekly`** |
-| 링크드인 **축** | `keywords.yaml` 축별 `cadence` | flow-new-founder **`biweekly`** · stealth-us `monthly` · 나머지 `always` |
+| 링크드인 **축** | `keywords.yaml` 축별 `cadence` | flow-new-founder·**gap-practitioner `biweekly`** · stealth-us `monthly` · 나머지 `always` |
 
 - 어휘의 정본은 **`core/cadence.py`** 하나다(always/daily/weekly/biweekly/monthly/quarterly).
   두 채널·추정기가 같은 표를 본다 — 복사하면 언젠가 한쪽만 고쳐진다.
@@ -388,6 +440,29 @@ PROJ="$HOME/.claude/skills/net-sourcing/project"
   `ceil(gap/실행리듬)×실행리듬`으로 늘어난다 — 10일 리듬이면 격주 축은 **20일**마다 돈다.
 - 상태: `data/threads_layer_state.json` · `data/linkedin_axis_state.json`.
   **비어 있으면 전 층/축이 한 번은 돈다**(모르면 도는 쪽) → 첫 실행은 최악주 요금이다.
+
+### 링크드인 축 6개 (2026-07-27) — **앞의 5개와 6번째는 논리가 반대다**
+
+| 축 | 찾는 것 | 모수 | p | 주기 |
+|---|---|---|---|---|
+| `flow-new-founder` | 방금 창업 직함이 된 사람 | 237 | 10 | 격주 |
+| `stealth-kr` / `stealth-us-krschool` | 회사명이 Stealth | 444 / 145 | 4 / 6 | 매주 / 월1 |
+| `early-kr` / `posted-early` | 극초기 스톡 / 최근 글 | 1,348 / 496 | 3 / 2 | 매주 |
+| **`gap-practitioner`** | **퇴사하고 아직 아무것도 안 올린 실무자** | **67,881** | 2 | 격주 |
+
+🔴 **6번째 축에는 `currentJobTitles`·`yearsAtCurrentCompanyIds`·`excludeCurrentJobTitles`를 걸지 마라.**
+전부 **현 직함이 있어야 성립**하는 조건이라 공백자를 구조적으로 배제한다(실측: 5축으로 모은 271명 중
+공백자 **0명**). 리크루터 제외도 같은 이유로 `pastJobTitles` 축엔 자동 미적용이다 — 걸면 "공백형 0명"이
+나와 **축이 고장난 것으로 오진**한다. 산출 0이면 어댑터가 🔴 HEALTH를 찍는다.
+
+**공백형은 칸이 다르게 찬다** — `Tenure Months`·`창업 개월`이 **빈칸**(해당 없음)이고 `공백 개월`이 찬다.
+그래서 뷰를 갈라야 한다(🚀 창업형 = 창업 개월↑ / 🕳️ 공백형 = 공백 개월↑).
+⚠️ 공백형 뷰 필터를 `Tenure IS EMPTY`로 걸지 마라 — **날짜가 없어 못 재는 사람 15명**이 섞인다
+(빈칸=미확인이지 공백이 아니다). `공백 개월 ≥ 3 OR 본업 공백 ≥ 3`으로 건다.
+
+**리텐션이 이 축의 절반이다.** 공백자는 tenure가 빈칸이라 `이탈임박[9,12)`에 안 걸린다 →
+`recheck_linkedin`에 `(공백 OR 본업공백) [3,18)`을 넣어야 **"무직 → Founder @ X"로 바뀌는 순간**을 잡는다.
+상한 18이 없으면 공백 62개월인 사람을 영원히 재확인한다(이탈임박 상한을 빠뜨렸던 것과 같은 함정).
 
 ### 크론 켜기 전 체크리스트
 1. ✅ 월 예산 가드(`monthly_budget_usd`) — 있음. 크론은 `--force-budget`를 **쓰지 마라**.

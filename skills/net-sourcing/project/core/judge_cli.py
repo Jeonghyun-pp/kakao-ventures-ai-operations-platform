@@ -195,6 +195,22 @@ def export(cfg: dict, limit: int = 0, channel: str = "", include_base: bool = Fa
                 #   (비타깃 평균 45.4개월). 예전 export는 이 칸을 아예 안 실었다.
                 if has("Tenure Months"):
                     item["tenure_months"] = (p.get("Tenure Months") or {}).get("number")
+                # ★ [2026-07-27] tenure **하나만 보면 판단이 뒤집힌다.** 같이 줘야 갈린다:
+                #     tenure 2 / 창업 2  = 갓 시작한 창업자   ·  tenure 2 / 창업 84 = 연쇄창업자의 새 법인
+                #   과거 스텔스 = 끝난 경력에 stealth = **이미 회사를 공개했다**(더는 스텔스 후보 아님).
+                if has("창업 개월"):
+                    item["founder_since_months"] = (p.get("창업 개월") or {}).get("number")
+                if has("과거 스텔스"):
+                    item["past_stealth"] = (p.get("과거 스텔스") or {}).get("checkbox")
+                # ★ 대표 콘텐츠 = 회사 단계의 유일한 직접 증거("…시드 투자 유치" 같은 기사 제목).
+                #   비어 있으면 **미확인**이지 "투자 안 받음"이 아니다 — 판정에 그렇게 쓰지 마라.
+                if has("대표 콘텐츠"):
+                    item["featured"] = notion._plain(p.get("대표 콘텐츠"))
+                # 공백 개월 — 0=공백없음 · 빈칸=판정불가. 둘을 같게 취급하지 마라.
+                if has("공백 개월"):
+                    item["gap_months"] = (p.get("공백 개월") or {}).get("number")
+                if has("본업 공백"):
+                    item["fulltime_gap_months"] = (p.get("본업 공백") or {}).get("number")
                 for prop, key in (("Matched Keyword", "matched_keyword"),
                                   ("Sourcing Layers", "sourcing_layers"),
                                   ("Korea Signal", "korea_signal")):
@@ -204,6 +220,12 @@ def export(cfg: dict, limit: int = 0, channel: str = "", include_base: bool = Fa
                 # 스레드 인물 행은 **본문에 쌓인 글 전부**가 판단 근거다(최신 글 하나가 아니라).
                 if item["channel"] == "Threads":
                     item["posts"] = _page_posts(token, page["id"])
+                # ★ [2026-07-27] 링크드인은 **경력 타임라인 전문**이 본문에 있다.
+                #   tenure 숫자 하나가 아니라 "Part-time 자문 5개월 + Full-time 창업 27개월" 같은
+                #   이야기를 판단자가 직접 읽는다. 이게 없으면 headline 한 줄로 판정하게 된다.
+                if item["channel"] == "LinkedIn":
+                    item["career"] = "\n".join(
+                        b["text"] for b in _page_posts(token, page["id"]) if b.get("text"))
                 rows.append(item)
                 got += 1
                 if limit and len(rows) >= limit:

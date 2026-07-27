@@ -46,16 +46,21 @@ class Candidate:
         """
         keys: list[str] = []
         if self.ext_id:
-            keys.append(f"ext:{self.ext_id}")
+            # ★ [2026-07-27] 링크드인 URN은 모드마다 달라진다 → 정규화해서 키를 만든다.
+            #   안 하면 같은 사람이 `ext:ACoAA…`와 `ext:ACwAA…` 두 키로 갈려 dedup을 통과한다.
+            keys.append("ext:" + (canonical_linkedin_urn(self.ext_id) or self.ext_id))
         if self.linkedin_url:
             keys.append("li:" + _normalize_linkedin_url(self.linkedin_url))
         if self.app_id:
             keys.append(f"app:{self.app_id}")
         # 🔴 [2026-07-14] 앱스토어 제외 — homepage가 **개발사 홈페이지**(seller_url)라
         #   같은 개발사의 새 앱이 중복으로 버려진다. 근거·실측은 core/dedup._keys 주석 참조.
-        if self.homepage and self.source != "앱스토어":
+        # 🔴 [2026-07-27] 링크드인은 `home:`(=회사 URL, 공동창업자가 공유)과 `name:`(=사람 이름,
+        #   흔한 이름 오제외)을 **둘 다 쓰지 않는다.** 근거·실측은 core/dedup._keys 주석 참조.
+        #   ⚠️ 이 메서드와 core/dedup._keys 는 **같이 고쳐야 한다**(위 docstring 경고).
+        if self.homepage and self.source not in ("앱스토어", "링크드인"):
             keys.append("home:" + _normalize_url(self.homepage))
-        if self.name:
+        if self.name and self.source != "링크드인":
             keys.append("name:" + _normalize(self.name))
         return keys
 
@@ -69,18 +74,47 @@ def _normalize(s: str) -> str:
     return re.sub(r"[\s()（）\[\]·・\-_/.,]+", "", (s or "").lower())
 
 
+def canonical_linkedin_urn(slug: str) -> str:
+    """링크드인 **난독화 URN**(`ACwAABq8pMkBt36I…`)에서 사람 고유부만 남긴다. URN이 아니면 "".
+
+    🔴 [2026-07-27 실측] **같은 사람의 URN이 스크래퍼 모드마다 다르다.**
+       구조가 `AC?AA` + 멤버ID인코딩(9자) + **세션마다 바뀌는 꼬리**다:
+         ACoAABq8pMkB Uyu5gUHx3GXGv2NNOIOK_cb7o_s   ← Full 모드 payload id
+         ACwAABq8pMkB t36I8fnw2bZfjGbW3xZp5X8xsl0   ← Short 모드가 URL로 쓰던 값
+       3번째 글자(o/w)와 꼬리만 다르고 **앞 12자의 나머지는 같다.**
+       이걸 몰라서 dedup이 통과했고, **노션 링크드인 345행 중 84행이 같은 사람의 두 번째 행**이
+       됐다(84쌍 전수 검증 · 불일치 0). 정규화 키 = `AC` + `_` + 9자.
+
+    ⚠️ **대소문자를 죽이기 전에** 판정한다 — 멤버ID 인코딩은 대소문자를 구분하므로
+       `.lower()` 뒤에 자르면 서로 다른 사람이 같은 키가 될 수 있다.
+    """
+    import re
+    s = (slug or "").strip()
+    if re.fullmatch(r"AC[A-Za-z0-9]AA[A-Za-z0-9_\-]{20,}", s):
+        return "urn:" + s[:2] + s[3:12]
+    return ""
+
+
 def _normalize_linkedin_url(u: str) -> str:
     """링크드인 프로필 URL 정규화 → 정확매칭 키.
     소문자화 · 프로토콜/서브도메인(www·kr·kr.linkedin) 제거 · /in/<slug> 추출 · 쿼리·트레일링 슬래시 제거.
-    URL이 /in/ 형태가 아니면(회사·post) 일반 URL 정규화로 폴백."""
+    난독화 URN 슬러그는 `canonical_linkedin_urn`으로 접는다(모드가 달라도 같은 키가 된다).
+    URL이 /in/ 형태가 아니면(회사·post) 일반 URL 정규화로 폴백.
+
+    ⚠️ 남는 한계: **vanity(`/in/haonpark`)와 URN(`/in/ACwAA…`)은 여전히 다른 키다.**
+       URN에서 vanity를 유도할 방법이 없다. 지금은 Full 모드가 `publicIdentifier`를 100% 주므로
+       (실측 287/287) URN 형태 URL이 애초에 안 생긴다. 다시 생기기 시작하면 **그 사람의 URN을
+       노션에 저장해서 대조**하는 수밖에 없다.
+    """
     import re
-    s = (u or "").strip().lower()
-    if not s:
+    raw = (u or "").strip()
+    if not raw:
         return ""
-    m = re.search(r"linkedin\.com/in/([^/?#]+)", s)
+    m = re.search(r"linkedin\.com/in/([^/?#]+)", raw, re.I)
     if m:
-        return "in/" + m.group(1).rstrip("/")
-    return _normalize_url(s)
+        slug = m.group(1).rstrip("/")
+        return "in/" + (canonical_linkedin_urn(slug) or slug.lower())
+    return _normalize_url(raw.lower())
 
 
 def _normalize_url(u: str) -> str:

@@ -54,6 +54,17 @@ CADENCE_DAYS = 30                                 # 링크드인 지문 diff 주
 #   12개월을 이미 넘긴 사람은 우선군(타깃/빌더/Catch)일 때만 본다 — 그게 우선군의 역할이다.
 EXIT_RISK_MIN_MONTHS = 9
 EXIT_RISK_MAX_MONTHS = 12
+# ★ [2026-07-27] 공백형 대상군 — `gap-practitioner` 축이 데려오는 인구.
+#   왜 필요한가: 이 축의 가치는 **"퇴사했지만 아직 아무것도 안 올린 사람"을 먼저 잡아두고,
+#   그가 창업을 올리는 순간을 지문 diff로 포착"**하는 것이다. 그런데 공백형은 `Tenure Months`가
+#   **빈칸**이라 위 이탈임박 조건에 **절대 안 걸린다** → 리텐션에서 통째로 샌다.
+#   그러면 명단만 사고 정작 창업 순간을 못 본다 = 축을 넣은 의미가 없다.
+#
+#   🔴 **상한 18개월이 반드시 있어야 한다.** 하한만 두면 공백 62개월인 사람을 영원히 재확인한다 —
+#      이탈임박을 처음에 `tenure >= 9`로 짰다가 72·89개월이 잡혔던 것과 **똑같은 함정**이다.
+#   근거: 프로브 실측 공백 분포 중앙 8개월, 3~9개월이 창업 준비 신호로 가장 그럴듯했다.
+GAP_MIN_MONTHS = 3
+GAP_MAX_MONTHS = 18
 
 _IN = re.compile(r"linkedin\.com/in/([^/?#]+)", re.I)
 
@@ -103,7 +114,14 @@ def _targets(cfg: dict, token: str, limit: int = 0) -> list[dict]:
                 prio = target or builder or tier == "Catch"
                 exiting = (isinstance(tenure, (int, float))
                             and EXIT_RISK_MIN_MONTHS <= tenure < EXIT_RISK_MAX_MONTHS)
-                if not (prio or exiting):
+                # ★ 공백형 — `공백 개월`(현직 전무) 또는 `본업 공백`(부업만 걸어둠) 둘 중 하나가
+                #   [3,18)이면 대상. 둘을 OR로 보는 이유: EIR·자문만 파트타임으로 걸어둔 사람은
+                #   `공백 개월`이 0이라 앞 조건에 안 걸리는데, 그가 **가장 곧 창업할 인구**다.
+                gapv = (props.get("공백 개월") or {}).get("number")
+                ftgap = (props.get("본업 공백") or {}).get("number")
+                gapping = any(isinstance(v, (int, float)) and GAP_MIN_MONTHS <= v < GAP_MAX_MONTHS
+                              for v in (gapv, ftgap))
+                if not (prio or exiting or gapping):
                     continue
                 key = followup.key_linkedin(pid)
                 if not followup.is_due(state, key):
@@ -111,7 +129,8 @@ def _targets(cfg: dict, token: str, limit: int = 0) -> list[dict]:
                 seen.add(pid)
                 out.append({
                     "pid_page": page["id"], "public_id": pid, "db": db,
-                    "prio": prio, "exiting": exiting, "tenure": tenure,
+                    "prio": prio, "exiting": exiting, "gapping": gapping, "tenure": tenure,
+                    "gap": gapv, "fulltime_gap": ftgap,
                     "old_headline": notion._plain(props.get("Author Headline")),
                     "name": notion._plain(props.get("서비스명")) or pid,
                 })
@@ -119,8 +138,8 @@ def _targets(cfg: dict, token: str, limit: int = 0) -> list[dict]:
                 break
             payload["start_cursor"] = d["next_cursor"]
 
-    # 이탈임박 먼저(시간이 없다), 그다음 우선군
-    out.sort(key=lambda x: (not x["exiting"], not x["prio"]))
+    # 이탈임박 먼저(시간이 없다) → 공백형(창업 선언이 언제든 온다) → 우선군
+    out.sort(key=lambda x: (not x["exiting"], not x["gapping"], not x["prio"]))
     return out[:limit] if limit else out
 
 
@@ -144,10 +163,16 @@ def run(dry_run: bool = False, limit: int = 0) -> int:
 
     n_exit = sum(1 for t in tg if t["exiting"])
     est = len(tg) * 0.004
-    print(f"대상 {len(tg)}명 (이탈임박 {n_exit} · 우선군 {len(tg) - n_exit}) · **추정 ${est:.2f}**")
+    # 🔴 요약은 **구성을 정직하게** 찍는다. 예전엔 "이탈임박 N · 우선군 나머지"로 찍어서
+    #   공백형이 우선군으로 둔갑했다 — 로그가 거짓말하면 대상군이 잘못돼도 아무도 모른다.
+    n_gap = sum(1 for t in tg if t.get("gapping") and not t["exiting"])
+    n_prio = len(tg) - n_exit - n_gap
+    print(f"대상 {len(tg)}명 (이탈임박 {n_exit} · 공백형 {n_gap} · 우선군 {n_prio}) · **추정 ${est:.2f}**")
     for t in tg[:10]:
-        tag = "이탈임박" if t["exiting"] else "우선"
-        print(f"  · {t['name'][:20]:<20} [{tag}] tenure={t['tenure']}")
+        tag = "이탈임박" if t["exiting"] else ("공백형" if t.get("gapping") else "우선")
+        extra = (f"공백={t.get('gap')}/본업={t.get('fulltime_gap')}"
+                 if tag == "공백형" else f"tenure={t['tenure']}")
+        print(f"  · {t['name'][:20]:<20} [{tag}] {extra}")
     if len(tg) > 10:
         print(f"  … 외 {len(tg) - 10}명")
     if dry_run:

@@ -9,7 +9,8 @@
 """
 from __future__ import annotations
 
-from adapters.base import _normalize, _normalize_linkedin_url, _normalize_url
+from adapters.base import (_normalize, _normalize_linkedin_url, _normalize_url,
+                           canonical_linkedin_urn)
 
 
 def filter_new(cfg: dict, raws: list[dict]) -> list[dict]:
@@ -37,7 +38,10 @@ def _keys(c: dict) -> list[str]:
     """dict 후보의 매칭 키 전부 (Candidate.match_keys 미러)."""
     keys: list[str] = []
     if c.get("ext_id"):
-        keys.append(f"ext:{c['ext_id']}")
+        # ★ [2026-07-27] 링크드인 URN은 스크래퍼 모드마다 3번째 글자와 꼬리가 바뀐다.
+        #   정규화 안 하면 같은 사람이 두 키로 갈려 dedup을 통과한다 —
+        #   실제로 노션에 **84행**이 그렇게 생겼다. base.Candidate.match_keys 와 같이 고쳤다.
+        keys.append("ext:" + (canonical_linkedin_urn(c["ext_id"]) or c["ext_id"]))
     if c.get("linkedin_url"):
         keys.append("li:" + _normalize_linkedin_url(c["linkedin_url"]))
     if c.get("app_id"):
@@ -52,7 +56,15 @@ def _keys(c: dict) -> list[str]:
     #   ✅ 대신 `app:{app_id}`가 정확 고유키다(notion.weekly_url_keys가 App ID 칸을 읽는다).
     #   ※ 링크드인/스레드는 그대로 유지 — 링크드인 homepage는 실측 0% 채워짐이라 영향이 없고,
     #     회사 URL이 채워지기 시작하면 그땐 **공동창업자 2명이 충돌**하므로 같이 재검토할 것.
-    if c.get("homepage") and str(c.get("adapter", "")) != "appstore":
+    #   🔴 [2026-07-27] **링크드인도 `home:`을 쓰지 않는다 — 앱스토어와 똑같은 이유다.**
+    #      오늘 `Homepage`에 **회사 LinkedIn URL**을 싣기 시작했다(실측 94.4% 채워짐).
+    #      그런데 회사는 **공동창업자가 공유한다** → 두 번째 창업자가 `home:` 키에 걸려 사라진다.
+    #      실측: 착지 745행 중 **같은 회사 URL을 쓰는 행이 27곳/145행**
+    #      (stealth-startup-community ×62 · playad-ai ×5 · coupang ×3).
+    #      이번 실행엔 안 터졌다 — 그 회사 URL들이 **오늘 처음 생겼기** 때문이다. 다음 실행부터 터진다.
+    #      ⚠️ 바로 위 앱스토어 주석이 이 상황을 예언했다("회사 URL이 채워지기 시작하면 공동창업자
+    #         2명이 충돌하므로 같이 재검토할 것"). 그 조건이 오늘 충족됐다.
+    if c.get("homepage") and not str(c.get("adapter", "")).startswith(("appstore", "linkedin")):
         keys.append("home:" + _normalize_url(c["homepage"]))
     if c.get("url"):
         # 글 단위 채널(스레드)의 유일한 안정 키. 이게 없으면 아래 name 키를 빼는 순간
@@ -61,6 +73,12 @@ def _keys(c: dict) -> list[str]:
     # name 키는 ②단 레거시 DB(극초기·스타트업 — 대표이사·회사명을 제목에 저장) 퍼지대조용이다.
     # 스레드의 name 은 사람·회사명이 아니라 **핸들**(@zenonplane)이라 그 대조에 쓸 수 없다.
     # 게다가 핸들로 대조하면 "이미 착지한 빌더의 새 글"이 영구 차단돼 워치리스트 층이 통째로 죽는다.
-    if c.get("name") and not str(c.get("adapter", "")).startswith("threads"):
+    #   🔴 [2026-07-27] **링크드인도 `name:`을 쓰지 않는다.**
+    #      이 키는 회사명·대표명이 제목인 **레거시 DB 대조용**인데, 링크드인은 제목이 사람 이름이라
+    #      흔한 이름이 통째로 오제외된다. 실측(495명): `li:` 키가 **492명**을 잡았고 `name:`이
+    #      추가로 잡은 건 **3명뿐**인데 그 3명이 전부 오제외 의심이었다 —
+    #      `Minsu Kim`(AutoLabs Co-Founder/COO) · `Minsu Lee` · `Example Person G`.
+    #      → 중복 방지력은 `li:`(프로필 URL 정확매칭)가 사실상 전부 담당한다. name은 손해만 남는다.
+    if c.get("name") and not str(c.get("adapter", "")).startswith(("threads", "linkedin")):
         keys.append("name:" + _normalize(c["name"]))
     return keys

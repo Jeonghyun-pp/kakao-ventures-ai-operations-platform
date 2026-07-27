@@ -119,13 +119,47 @@ _MAX_TEXT = 1900              # 노션: rich_text 항목당 content 2,000자
 _MAX_POSTS_PER_REQ = _MAX_CHILDREN // 2      # = 50글 (최악의 경우 100블록)
 
 
+def _clip16(text: str, limit: int = 2000) -> str:
+    """노션 길이 제한에 맞춰 자른다. **파이썬 문자 수가 아니라 UTF-16 코드유닛 기준**이다.
+
+    🔴 [2026-07-27 실측] `text[:2000]`으로 잘랐는데 노션이 400을 냈다:
+         "content.length should be ≤ 2000, instead was 2003"
+       원인: 노션(JS)은 **UTF-16 코드유닛**을 센다. 이모지 같은 보조평면 문자는 **2로 계산**된다.
+       `Example Person M`의 bio에 `🦖🦹🎮` 3개가 있어 2000자가 2003유닛이 됐다.
+       → 링크드인 495건 중 **7건이 통째로 착지 실패**했다(이모지 쓰는 사람이 정확히 우리가 찾는
+         인구다 — 게임·디자인·인디 개발자). 로그엔 400이 찍혔지만 조용히 넘어갔으면 못 봤다.
+
+    ⚠️ 새로 rich_text/title에 값을 넣을 땐 **반드시 이걸 통과시켜라.** `[:N]`은 안전하지 않다.
+    """
+    s = text or ""
+    if len(s.encode("utf-16-le")) // 2 <= limit:
+        return s
+    # 유닛 기준으로 뒤에서 줄인다(문자 경계는 파이썬 슬라이스가 보장한다)
+    lo, hi = 0, len(s)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(s[:mid].encode("utf-16-le")) // 2 <= limit:
+            lo = mid
+        else:
+            hi = mid - 1
+    return s[:lo]
+
+
 def _rt_chunks(text: str) -> list[dict]:
     """긴 본문을 1,900자 단위 rich_text 배열로. 안 쪼개면 2,000자 초과 시 400이 난다."""
     s = (text or "").strip()
     if not s:
         return []
-    return [{"type": "text", "text": {"content": s[i:i + _MAX_TEXT]}}
-            for i in range(0, len(s), _MAX_TEXT)][:10]      # 한 글이 19,000자를 넘을 일은 없다
+    # 🔴 청크도 **UTF-16 유닛**으로 잘라야 한다 — 1,900 파이썬 문자가 이모지 때문에
+    #   2,000유닛을 넘으면 그 블록만 400이 나고 본문이 통째로 안 붙는다.
+    out, rest = [], s
+    while rest and len(out) < 10:
+        piece = _clip16(rest, _MAX_TEXT)
+        if not piece:
+            break
+        out.append({"type": "text", "text": {"content": piece}})
+        rest = rest[len(piece):]
+    return out
 
 
 def _blocks_for_posts(posts: list[dict]) -> list[dict]:
@@ -153,6 +187,80 @@ def _blocks_for_posts(posts: list[dict]) -> list[dict]:
             out.append({"object": "block", "type": "paragraph",
                         "paragraph": {"rich_text": body}})
     return out
+
+
+_CAREER_HEAD = "경력 · 학력"
+
+
+def _blocks_for_career(career: str, stamp: str) -> list[dict]:
+    """경력 타임라인 → 블록. heading_3에 **날짜 도장**을 찍어 append-only로 쌓는다.
+
+    왜 덮어쓰지 않나: 경력은 시간이 지나면 바뀌는데(창업·이직), 덮으면 **"언제 무엇이 바뀌었나"가
+    영구 소실**된다. `core/followup.py`가 지문에 대해 같은 원칙을 적는다("이벤트는 append-only").
+    그리고 우리가 찾는 신호가 바로 그 **변화**다.
+    """
+    out: list[dict] = [{"object": "block", "type": "heading_3", "heading_3": {
+        "rich_text": [{"type": "text", "text": {"content": f"{_CAREER_HEAD} · {stamp}"}}]}}]
+    # paragraph 하나에 rich_text 2,000자 제한이 있어 문단 단위로 쪼갠다(문장을 안 자르려고 줄 단위로).
+    buf: list[str] = []
+    size = 0
+    for line in career.split("\n"):
+        if size + len(line) > 1800 and buf:
+            out.append({"object": "block", "type": "paragraph",
+                        "paragraph": {"rich_text": _rt_chunks("\n".join(buf))}})
+            buf, size = [], 0
+        buf.append(line)
+        size += len(line) + 1
+    if buf:
+        out.append({"object": "block", "type": "paragraph",
+                    "paragraph": {"rich_text": _rt_chunks("\n".join(buf))}})
+    return out
+
+
+def existing_career(token: str, page_id: str) -> str | None:
+    """본문에 이미 쌓인 경력 텍스트 전부(중복 append 방지용). 읽기 실패면 None."""
+    out, cursor = [], None
+    for _ in range(20):
+        params = {"page_size": 100}
+        if cursor:
+            params["start_cursor"] = cursor
+        r = _read(f"{API}/blocks/{page_id}/children", token, params)
+        if r.status_code != 200:
+            return None
+        d = r.json()
+        for b in d.get("results", []):
+            t = b.get("type") or ""
+            rt = (b.get(t) or {}).get("rich_text") or []
+            out.append("".join(x.get("plain_text", "") for x in rt))
+        if not d.get("has_more"):
+            break
+        cursor = d.get("next_cursor")
+    return "\n".join(out)
+
+
+def append_career_blocks(token: str, page_id: str, career: str, stamp: str) -> bool:
+    """경력을 본문에 append. **이미 같은 내용이 있으면 붙이지 않는다**(멱등).
+
+    🔴 본문을 못 읽으면 **붙이지 않는다.** 읽기 딸꾹질 한 번에 같은 경력이 두 번 쌓이면
+       판단 에이전트가 같은 사람을 두 번 읽는다(스레드 글 append와 같은 규율).
+    """
+    if not career:
+        return True
+    have = existing_career(token, page_id)
+    if have is None:
+        print(f"  · 본문 조회 실패 page={page_id[:8]} — 경력 추가만 건너뛴다")
+        return False
+    probe = career.split("\n")[0][:80]
+    if probe and probe in have:
+        return True                       # 같은 타임라인이 이미 있다 → no-op
+    blocks = _blocks_for_career(career, stamp)
+    for i in range(0, len(blocks), _MAX_CHILDREN):
+        r = _write("PATCH", f"{API}/blocks/{page_id}/children", token,
+                   {"children": blocks[i:i + _MAX_CHILDREN]})
+        if r.status_code != 200:
+            print(f"  ✗ 경력 append 실패 page={page_id[:8]} {r.status_code} {r.text[:160]}")
+            return False
+    return True
 
 
 def existing_post_urls(token: str, page_id: str) -> set[str] | None:
@@ -590,12 +698,12 @@ def _prop_value(ptype: str, value):
         text = str(value or "").strip()
         if not text:
             return None
-        return {"title": [{"text": {"content": text[:2000]}}]}
+        return {"title": [{"text": {"content": _clip16(text)}}]}
     if ptype in ("rich_text", "text"):     # REST=rich_text, 데이터소스 스키마=text (둘 다 허용)
         text = str(value or "").strip()
         if not text:
             return None
-        return {"rich_text": [{"text": {"content": text[:2000]}}]}
+        return {"rich_text": [{"text": {"content": _clip16(text)}}]}
     if ptype == "url":
         text = str(value or "").strip()
         if not text:
@@ -955,7 +1063,7 @@ def land(cfg: dict, candidates: list[dict], run_id: str) -> tuple[int, int]:
     fu = cfg.get("followup") or {}
     fu_on = bool(fu.get("enabled"))
 
-    ok = skipped = patched = failed = appended = block_failed = touched = 0
+    ok = skipped = patched = failed = appended = block_failed = touched = careers = 0
     for cand in candidates:
         key = _landing_key(cand)
         props = _build_landing_properties(cfg, cand, schema, run_id)
@@ -1011,12 +1119,27 @@ def land(cfg: dict, candidates: list[dict], run_id: str) -> tuple[int, int]:
                     patch_props["Last Seen"] = {"date": {"start": date.today().isoformat()}}
                 if "재검토" in row_props:
                     patch_props["재검토"] = {"checkbox": True}
+                # ★ [2026-07-27] **왜 켰는지도 같이 남긴다.** 이유 없는 `재검토 ✅`는
+                #   사람이 프로필을 다시 열어보게 만들어 자동 감지의 의미를 없앤다
+                #   (실측: 오늘 감지된 8명이 전부 `변화 요약` 빈칸이었다).
+                #   ⚠️ 사람이 적어둔 요약을 덮지 않는다 — **비어 있을 때만** 쓴다.
+                _cs = (cand.get("signals") or {}).get("change_summary") or ""
+                if _cs and "변화 요약" in row_props and not _plain(
+                        (_ROW_PROPS.get(pid) or {}).get("변화 요약")):
+                    patch_props["변화 요약"] = {"rich_text": [{"text": {"content": _clip16(_cs, 1900)}}]}
+                if _cs and "재검토 사유" in row_props:
+                    patch_props["재검토 사유"] = {"select": {"name": "프로필변화"}}
             r = _write("PATCH", f"{API}/pages/{pid}", token, {"properties": patch_props})
             if r.status_code != 200:
                 failed += 1
                 print(f"  ✗ 갱신 실패 [{cand.get('name', '?')}] status={r.status_code} {r.text[:200]}")
                 continue
             patched += 1
+            # ★ [2026-07-27] 경력 타임라인도 본문에 쌓는다(멱등 — 같은 내용이면 no-op).
+            #   프로필이 바뀐 사람만 여기 온다 = **바뀐 경력이 날짜 도장과 함께 append**된다.
+            _c = (cand.get("signals") or {}).get("career") or ""
+            if _c and pid and append_career_blocks(token, pid, _c, date.today().isoformat()):
+                careers += 1
             if new_posts:
                 n, nf = append_post_blocks(token, pid, new_posts)
                 appended += n
@@ -1049,6 +1172,11 @@ def land(cfg: dict, candidates: list[dict], run_id: str) -> tuple[int, int]:
             n, nf = append_post_blocks(token, pid, rest)
             appended += n
             block_failed += nf
+        # ★ 경력 타임라인 — 생성 payload에 안 싣고 따로 붙인다. 글(children)과 섞으면
+        #   100블록 상한 계산이 얽히고, 실패 시 어느 쪽이 죽었는지 구분이 안 된다.
+        _c = (cand.get("signals") or {}).get("career") or ""
+        if _c and pid and append_career_blocks(token, pid, _c, date.today().isoformat()):
+            careers += 1
 
     if patched:
         print(f"· 기존 행 갱신 {patched}건 (스레드=새 글 추가 · 링크드인=프로필 변화)"
@@ -1057,6 +1185,8 @@ def land(cfg: dict, candidates: list[dict], run_id: str) -> tuple[int, int]:
         print(f"· 순수중복 Last Seen 갱신 {touched}건 (touch_on_duplicate)")
     if appended:
         print(f"· 페이지 본문에 글 {appended}편 누적")
+    if careers:
+        print(f"· 페이지 본문에 경력 타임라인 {careers}건 적재(링크드인)")
     if skipped:
         print(f"· 중복 {skipped}건 skip (새 글/변화 없음)")
     if block_failed:
@@ -1100,7 +1230,7 @@ def _build_landing_properties(cfg: dict, cand: dict, schema: dict, run_id: str) 
         ("Post URL", cand.get("url", "")),
         ("LinkedIn URL", cand.get("linkedin_url", "")),      # [C4] go-forward dedup 키
         ("주차", _iso_week(run_id)),                          # [D1] 주간 관리(ISO 주차)
-        ("Raw Text", (cand.get("raw_text", "") or "")[:2000]),
+        ("Raw Text", _clip16(cand.get("raw_text", "") or "")),
         ("Captured At", run_id_date(run_id)),
         ("Status", cfg.get("notion", {}).get("land_status", "New")),
         ("Run ID", run_id),
@@ -1145,7 +1275,26 @@ def _build_landing_properties(cfg: dict, cand: dict, schema: dict, run_id: str) 
         # ↓ 수집은 하는데 착지에서 통째로 버려지던 값들. (스키마에 없으면 아래 루프가 알아서 건너뛴다)
         #   판단 에이전트의 입력이 될 것들이라 여기서 끊기면 그 에이전트가 볼 게 없다.
         ("Tenure Months", s.get("tenure_months")),   # ★ 극초기를 재는 유일한 하드 팩트(링크드인)
-        ("Homepage", cand.get("homepage") or s.get("seller_url")),  # 앱스토어 651/1086 유실 중
+        # ★ [2026-07-27] Tenure Months의 **짝**. 하나만 보면 판단이 뒤집힌다:
+        #     tenure 2 / 창업 2   → 갓 시작한 창업자        (우리가 찾는 사람)
+        #     tenure 2 / 창업 84  → 7년차가 법인을 하나 더  (같은 tenure, 전혀 다른 사람)
+        #   271명 실측: 창업직함 기준으로 고치니 극초기 판정이 17명 뒤집혔다(탈락 14·편입 3).
+        ("창업 개월", s.get("founder_since_months")),
+        # ★ 시제. **끝난** 경력의 stealth = 이미 회사를 공개했다 = 더는 스텔스가 아니다.
+        #   안 가르면 공개한 사람이 stealth 축에 영원히 남는다(실측 19/271).
+        ("과거 스텔스", s.get("past_stealth")),
+        # ★ featured(대표 콘텐츠) — 회사가 이미 투자를 받았는지가 여기 문장으로 있을 때가 있다.
+        #   payload에 회사 나이·투자단계가 **없어서** tenure로 대리 추정하던 구멍을 메운다.
+        #   ⚠️ 있으면 사실, 없으면 **미확인**이다(부정이 아니다) — 그래서 체크박스가 아니라 텍스트다.
+        ("대표 콘텐츠", s.get("featured")),
+        # ★ 공백 개월(사수 요구사항 2026-07-24). **0과 빈칸의 뜻이 다르다** —
+        #   0 = 진행 중인 일이 있다(확인됨) · 빈칸 = 경력 날짜가 없어 판정 불가(미확인).
+        ("공백 개월", s.get("gap_months")),
+        # ★ 짝. 공백 0 / 본업공백 6 = "파트타임 하나 걸고 6개월째 본업 없음"(EIR 등) = 신호.
+        ("본업 공백", s.get("fulltime_gap_months")),
+        # ★ [2026-07-27] 링크드인은 `Homepage`가 0% 사용 중이라, **회사 LinkedIn URL**을 싣는다.
+        #   payload에 회사의 나이·투자단계가 없으므로 판단 에이전트가 회사를 보려면 이 URL이 필요하다.
+        ("Homepage", cand.get("homepage") or s.get("company_url") or s.get("seller_url")),  # 앱스토어 651/1086 유실 중
         ("Rating", s.get("rating")),                 # 1083/1086 유실 중
         ("Review Count", s.get("review_count")),     # 811/1086 유실 중
         ("One Liner", cand.get("one_liner")),        # 1083/1086 유실 중
