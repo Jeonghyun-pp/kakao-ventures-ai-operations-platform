@@ -23,26 +23,17 @@ import yaml
 PROJ = Path(__file__).resolve().parent
 CONFIG_PATH = PROJ / "config.yaml"
 KEYWORDS_PATH = PROJ / "keywords.yaml"
-ENV_PATH = PROJ / ".env"
 
 
 def load_env() -> None:
-    """project/.env 를 stdlib로 파싱해 os.environ에 주입(python-dotenv 의존성 회피).
+    """자격증명 정본은 `$KV_CONFIG/.env` 하나뿐이다.
 
-    이미 환경에 있는 값은 덮지 않는다(setdefault). 키를 .env에 넣기만 하면 전 어댑터가 읽음.
+    🔴 [2026-07-27] 예전엔 스킬마다 `project/.env` 를 따로 뒀다. 같은 NOTION_TOKEN 이 3벌,
+       APIFY_TOKEN 이 2벌 있었고 — 값이 우연히 같았을 뿐 **한쪽만 갱신되면 조용히 갈라진다.**
+       스킬별 `.env` 를 다시 만들지 마라.
     """
-    import os
-    if not ENV_PATH.exists():
-        return
-    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        key = key.strip()
-        val = val.strip().strip('"').strip("'")
-        if key:
-            os.environ.setdefault(key, val)
+    from kv_core import secrets
+    secrets.load()
 
 
 def load_config() -> dict:

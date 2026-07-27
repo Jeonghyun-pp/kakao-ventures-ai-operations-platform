@@ -1,6 +1,8 @@
 # ai-consumer-pulse 설정
 paths:
-  data_root: /home/example/Desktop/ai-consumer   # sources.yaml, raw/, state/ 등의 루트
+  # 비워두면 kv_core.paths.data("ai-consumer-pulse") 를 쓴다 → $KV_DATA/ai-consumer-pulse/
+  # 절대경로를 여기 박지 마라. 머신을 옮기면 통째로 깨진다.
+  data_root:
 
 caps:
   max_new_per_source: 15      # 텍스트 소스: 1회 실행당 신규 기사 fetch 상한 (첫 실행 폭주 방지)
@@ -26,7 +28,10 @@ apify:
       timeout_secs: 180
 
 gmail:
-  token_path: /home/example/.claude/skills/hello-mail/project/token.json  # hello-mail 크리덴셜 재사용 (읽기만)
+  # 비워두면 $KV_CONFIG/google/token.json 을 쓴다.
+  # 예전엔 hello-mail 의 token.json 을 절대경로로 직접 읽었다 — 그 스킬이 아카이브되면서
+  # 끊길 참조였다(교차 스킬 참조 금지). 자격증명은 공통 저장소에서만 온다.
+  token_path:
   lookback_days: 8
 
 whisper:

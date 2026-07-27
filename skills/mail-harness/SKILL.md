@@ -3,11 +3,10 @@ name: mail-harness
 description: >-
   카카오벤처스 hello@ 계정 메일 업무 전체를 하나의 무인 파이프라인으로 실행한다:
   selfcheck → 비플랜 sync → 트리아지(아카이빙·초안·라우팅) → 비플랜 drop →
-  무수정 발송률 측정 → 슬랙 다이제스트. hello-mail·bplan-automation의 독립 포크로,
-  원본 두 스킬은 콜드 스탠바이다.
+  무수정 발송률 측정 → 슬랙 다이제스트. hello-mail·bplan-automation의 독립 포크이고,
+  원본 두 스킬은 2026-07-27 skills/_archive/ 로 내려갔다 — 메일 업무의 유일한 진입점이다.
   Triggers on: "메일 하네스", "메일 파이프라인", "아침 메일 처리", "메일 무인 실행",
-  "/mail-harness". Do NOT trigger for: 개별 수동 작업(→ hello-mail / bplan-automation
-  원본), 그물망 소싱(→ net-sourcing).
+  "/mail-harness". Do NOT trigger for: 그물망 소싱(→ net-sourcing).
 ---
 
 # Mail Harness
@@ -75,16 +74,16 @@ veto window(4h) 경과 후 발송. veto window가 사람 거부권의 물리적 
 ## Project 위치
 
 ```
-~/.claude/skills/mail-harness/project
+~/kv-automation/skills/mail-harness/project
 ```
 
-- 러너: `project/.venv/bin/python` · 엔트리포인트: `project/harness.py`
+- 러너: `.venv/bin/python` (리포 루트, 1벌) · 엔트리포인트: `project/harness.py`
 - 설정(단일 진실): `project/config.yaml` — assignee·라우팅·autonomy·bplan·harness 전부
 - 포크: `project/triage/`(hello-mail), `project/bplan/`(bplan-automation+결함수정)
 - 자격증명(출력·커밋 금지): 각 포크 안의 `token.json`, `*credentials*.json`, `.env`
 - 슬랙 다이제스트: `.env`의 `SLACK_WEBHOOK_URL` (없으면 `data/digest_latest.md`로만)
 
-편의 변수: `PROJ="$HOME/.claude/skills/mail-harness/project"`
+편의 변수: `PROJ="$HOME/kv-automation/skills/mail-harness/project"`
 
 ## 서브커맨드
 
@@ -97,10 +96,11 @@ veto window(4h) 경과 후 발송. veto window가 사람 거부권의 물리적 
 | `--dry-run` | 모든 쓰기 생략 리허설 (컷오버 전 유일하게 허용되는 전체 실행) | 없음 |
 
 ```bash
-PROJ="$HOME/.claude/skills/mail-harness/project"
-"$PROJ/.venv/bin/python" "$PROJ/harness.py" run --dry-run    # 리허설
-"$PROJ/.venv/bin/python" "$PROJ/harness.py" phase1           # 계획까지
-"$PROJ/.venv/bin/python" "$PROJ/harness.py" phase2           # 실행+다이제스트
+PROJ="$HOME/kv-automation/skills/mail-harness/project"
+VENV="$HOME/kv-automation/.venv/bin/python"
+"$VENV" "$PROJ/harness.py" run --dry-run    # 리허설
+"$VENV" "$PROJ/harness.py" phase1           # 계획까지
+"$VENV" "$PROJ/harness.py" phase2           # 실행+다이제스트
 ```
 
 ## 실행법 (Claude Code 세션에서 — 권장 경로)
@@ -109,7 +109,7 @@ PROJ="$HOME/.claude/skills/mail-harness/project"
 
 1. `phase1`을 돌린다. 출력 끝의 UNKNOWN 건수를 확인한다.
 2. UNKNOWN이 있으면 해당 메일을 직접 읽고 판단해
-   `"$PROJ/.venv/bin/python" "$PROJ/triage/main.py" reclassify <msg_id>=<CATEGORY> ...`
+   `"$VENV" "$PROJ/triage/main.py" reclassify <msg_id>=<CATEGORY> ...`
    로 주입한다. 판정 기준은 `references/routing.md`. **확신 없으면 UNKNOWN으로 둔다**(룰 #2).
 3. `phase2`를 돌린다. 다이제스트가 슬랙(또는 `data/digest_latest.md`)에 남는다.
 4. 다이제스트의 🚩 항목과 초안 안내를 사용자에게 그대로 전달한다.

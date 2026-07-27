@@ -303,11 +303,8 @@ def _migrate_db(db_id: str, label: str, kws: dict, token: str, apply: bool,
 def main() -> int:
     apply = "--apply" in sys.argv
 
-    env = PROJ / ".env"
-    for line in env.read_text(encoding="utf-8").splitlines():
-        if line.strip() and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    from kv_core import secrets
+    secrets.load()          # 정본은 $KV_CONFIG/.env 하나뿐이다
 
     import yaml
     cfg = yaml.safe_load((PROJ / "config.yaml").read_text(encoding="utf-8"))

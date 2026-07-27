@@ -27,8 +27,9 @@ set -euo pipefail
 
 LABEL="com.kv.net-sourcing.appstore"
 PROJ="$(cd "$(dirname "$0")" && pwd)"
+VENV="$HOME/kv-automation/.venv/bin/python"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-PY="$PROJ/.venv/bin/python"
+PY="$VENV"
 LOG="$PROJ/data/cron-appstore.log"
 HOUR=7
 MIN=0

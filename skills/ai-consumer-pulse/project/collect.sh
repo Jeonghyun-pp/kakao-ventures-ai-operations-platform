@@ -2,8 +2,10 @@
 # Phase A — 무료·무인증 수집 오케스트레이터 (토큰 0, 과금 0)
 # apify/gmail은 여기 없음 — 스킬 Phase B에서 승인 게이트 후 별도 실행.
 set -uo pipefail
-PROJ="$HOME/.claude/skills/ai-consumer-pulse/project"
-PY="$PROJ/.venv/bin/python"
+# 자기 위치에서 역산한다. ~/.claude/skills 경유는 코드를 Claude 설정 디렉토리에 묶는다.
+PROJ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# venv는 리포 하나뿐이다 (5벌 → 1벌)
+PY="$(cd "$PROJ/../../.." && pwd)/.venv/bin/python"
 cd "$PROJ"
 export PYTHONPATH="$PROJ"
 

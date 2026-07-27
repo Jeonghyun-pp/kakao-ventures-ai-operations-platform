@@ -15,7 +15,11 @@ from core.state import load_seen, mark_seen, record_health
 def _svc():
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
-    creds = Credentials.from_authorized_user_file(config()["gmail"]["token_path"])
+    from kv_core import secrets
+    # config에 값이 있으면 그것, 없으면 공통 자격증명 저장소.
+    _tp = (config().get("gmail") or {}).get("token_path")
+    creds = Credentials.from_authorized_user_file(
+        str(_tp) if _tp else str(secrets.credential("google/token.json")))
     return build("gmail", "v1", credentials=creds)
 
 

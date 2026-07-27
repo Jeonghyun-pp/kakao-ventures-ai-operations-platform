@@ -4,8 +4,9 @@
 # 해제:  launchctl unload -w ~/Library/LaunchAgents/com.kv.appstore-rank-snapshot.plist
 
 set -e
-PROJ="$HOME/.claude/skills/net-sourcing/project"
-PY="$PROJ/.venv/bin/python"
+PROJ="$HOME/kv-automation/skills/net-sourcing/project"
+VENV="$HOME/kv-automation/.venv/bin/python"
+PY="$VENV"
 PLIST="$HOME/Library/LaunchAgents/com.kv.appstore-rank-snapshot.plist"
 LOG="$PROJ/data/snapshot.log"
 
