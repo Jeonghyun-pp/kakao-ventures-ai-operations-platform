@@ -52,9 +52,7 @@ cd ~/kv-automation
 
 # 1. 단일 venv + 공통 런타임
 python3.14 -m venv .venv
-./.venv/bin/pip install -e ./kv-core
-./.venv/bin/pip install requests PyYAML python-dotenv anthropic openpyxl gspread \
-  slack-bolt google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
+./.venv/bin/pip install -r requirements.txt -e ./kv-core
 
 # 2. 자격증명 (리포 밖)
 mkdir -p ~/kv-config/google && chmod 700 ~/kv-config ~/kv-config/google
