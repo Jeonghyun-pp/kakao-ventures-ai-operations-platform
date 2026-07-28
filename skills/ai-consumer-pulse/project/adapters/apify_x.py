@@ -26,6 +26,10 @@ from core.state import load_seen, mark_seen, record_health
 ACTOR = "apidojo~tweet-scraper"
 PROJ = Path(__file__).resolve().parents[1]
 
+# 회당 추정 과금(SKILL.md 실측: X 28계정 수집 ~$0.3). 공유 예산 게이트의 입력이다.
+# 실측이 달라지면 여기를 고쳐라 — 추정이 실제보다 낮으면 게이트가 늦게 걸린다.
+_EST_RUN_USD = 0.3
+
 
 def _load_env() -> None:
     """자격증명 정본은 $KV_CONFIG/.env 하나뿐이다 (스킬별 .env 를 다시 만들지 마라)."""
@@ -54,9 +58,9 @@ def run(handles: list[str] | None = None) -> int:
     handles = handles or list(handle_org)
     apify_client.configure(config())
 
-    warn = apify_client.preflight()
-    if warn:
-        print(f"⚠️  {warn}")
+    # 공유 예산 게이트 — 넘으면 여기서 멈춘다(한 푼도 안 쓴 상태).
+    # 이 계정은 net-sourcing 과 공유한다. 예전엔 경고만 하고 계속 썼다.
+    apify_client.require_budget(estimate_usd=_EST_RUN_USD)
     before = apify_client.usage_usd()
 
     since = (datetime.now(timezone.utc) - timedelta(days=8)).strftime("%Y-%m-%d")

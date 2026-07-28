@@ -116,11 +116,35 @@ def usage_usd() -> float | None:
         return None
 
 
+def require_budget(estimate_usd: float = 0.0) -> None:
+    """공유 예산 게이트 — 넘으면 **실행 전에 막는다**. 넘지 않으면 조용히 통과.
+
+    🔴 [2026-07-28 W2] 이게 없어서 생기던 문제:
+       Apify 계정을 net-sourcing 과 공유하는데 **net-sourcing 만 월 상한을 지켰다.**
+       그러면 이쪽이 쓴 만큼 저쪽이 먼저 막히고, 이쪽은 저쪽이 멈춘 뒤에도 계속 썼다 —
+       **절제하는 쪽만 손해를 보는 구조**였다(공유지의 비극).
+       이제 둘 다 같은 관문(kv_core.gate)을 통과한다.
+
+    조회 실패 시에는 막지 않는다(fail-open). API 딸꾹질 한 번이 수집을 죽이면 안 되고,
+    회당 차단선(budget_usd)이 한 번의 손해는 묶어준다.
+    """
+    from kv_core import gate
+    v = gate.check("apify", estimate_usd=estimate_usd)
+    if not v.allowed:
+        gate.notify_blocked(v)
+        raise RuntimeError(
+            f"{v.reason}\n"
+            f"   · 이 계정은 net-sourcing 과 공유한다 — 한쪽이 쓰면 다른 쪽이 못 쓴다.\n"
+            f"   · 한도를 올리거나 다음 사이클을 기다려라.")
+
+
 def preflight() -> str | None:
     """무과금 사용량 체크(GET /users/me/limits). 한도 초과/임박이면 경고 문자열, 정상이면 None.
 
     2026-07-10 실사례: 무료 $5 초과 상태로 run → 스레드 400·링크드인 0건이 원인불명으로 보임.
     사전 체크로 '쿼터 문제'를 실행 전에 명시한다. 체크 실패는 조용히 통과(수집을 막지 않음).
+
+    ⚠️ 이건 **경고만** 한다. 실제 차단은 `require_budget()` 이 한다.
     """
     token = os.environ.get("APIFY_TOKEN")
     if not token:

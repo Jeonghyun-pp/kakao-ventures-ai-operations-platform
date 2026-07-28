@@ -202,7 +202,15 @@ def _monthly_gate(cfg: dict, used: float | None, est: float | None,
        수집을 통째로 죽인다. 통과시켜도 회당 가드가 한 번의 손해를 budget_usd로 묶는다 —
        **조용히 죽는 것보다 시끄럽게 도는 게 낫다.**
     """
-    cap = float((cfg.get("apify") or {}).get("monthly_budget_usd") or 0)
+    # 🔴 [2026-07-28 W2] 천장 판정을 kv_core.gate 로 옮겼다. **우리 설정과 플랫폼 한도 중
+    #    낮은 쪽**을 쓴다. 그 전엔 config 의 $45 만 봤는데 Apify 플랜 실제 한도는 $29 였다 —
+    #    $29~$45 는 "가드가 있다고 믿지만 실제로는 없는 구간"이었고, 통과시킨 뒤 Apify 가
+    #    중간에 끊어 **돈은 쓰고 결과는 반쪽**이 되는 경로였다.
+    from kv_core import gate as _gate
+    _v = _gate.check("apify", estimate_usd=est or 0.0, quiet=True)
+    cap = _v.ceiling_usd or float((cfg.get("apify") or {}).get("monthly_budget_usd") or 0)
+    for _w in _v.warnings:
+        print(f"⚠️  {_w}")
     if not cap:
         return                                    # 미설정 = 가드 없음(구 config 호환)
     if used is None:
@@ -228,6 +236,9 @@ def _monthly_gate(cfg: dict, used: float | None, est: float | None,
     if force:
         print(f"⚠️  {msg}\n   → --force-budget 지정됨: **그대로 진행한다.**")
         return
+    # 결정 B5(2026-07-28): 게이트에 막히면 **실패시키고 알린다.** 큐잉 후 자동 재개는
+    # W3(잡 러너)이 있어야 성립한다. 지금 알리지 않으면 크론이 조용히 안 도는 상태가 된다.
+    _gate.notify_blocked(_v)
     raise RuntimeError(
         msg + "\n   · 사람이 판단해 강행하려면: --force-budget\n"
               "   · 다음 달까지 기다리거나, config.apify.monthly_budget_usd 를 올려라.\n"
