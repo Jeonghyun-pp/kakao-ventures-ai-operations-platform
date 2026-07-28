@@ -1,0 +1,98 @@
+# 계층 A — 앱스토어 순위 일일 스냅샷
+#
+# ## 왜 이것만 외부에서 도는가
+# 앱스토어 Δ(급상승·급하락)는 **어제 순위표가 있어야** 계산된다. 그리고 지나간 날의 순위는
+# 애플이 다시 알려주지 않는다 — **못 찍은 날은 영구 손실**이다(2026-07-20~27, 8일 소실).
+# 맥북은 닫으면 안 돈다. 그래서 이 잡만 상시 실행기로 뺀다.
+#
+# 뺄 수 있는 이유는 **비용이 아니라 열쇠**다. 앱스토어는 애플이 공개하는 데이터라
+# 회사 자격증명이 필요 없다. 메일·노션 작업은 열쇠가 필요하므로 여기 올리지 않는다(결정 B6).
+#   → 이 워크플로에 secrets 가 하나도 없는 것이 그 결정의 구조적 표현이다.
+#
+# ## 실패를 어떻게 아는가
+# Slack 웹훅도 열쇠라 여기 올리지 않는다. 대신 두 경로로 감지한다:
+#   ① GitHub 기본 실패 알림(저장소 소유자에게 메일)
+#   ② 로컬에서 `tools/sync_snapshots.py` 가 며칠 밀렸는지 본다
+# W7(관측 평면)에서 staleness 를 정식 지표로 올린다.
+
+name: appstore snapshot
+
+on:
+  schedule:
+    # UTC 20:10 = KST 05:10 (다음날). GitHub 스케줄은 UTC 기준이고 **시각이 보장되지 않는다** —
+    # 지연·누락이 있을 수 있다. 일 1회 Δ 용도로는 무해하지만 "정말 돌았는가"는 별도로 본다.
+    - cron: '10 20 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write        # data 브랜치에 커밋하기 위한 최소 권한. 그 외 없음.
+
+concurrency:
+  # 이중 실행 방지 — 같은 날 두 번 돌면 스냅샷이 겹친다.
+  group: appstore-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 코드 체크아웃 (main)
+        uses: actions/checkout@v4
+
+      - name: 데이터 브랜치 체크아웃
+        uses: actions/checkout@v4
+        with:
+          ref: data
+          path: databranch
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성
+        # board.py 체인이 실제로 쓰는 것만 — 전체 requirements 는 불필요하다.
+        run: |
+          pip install --quiet requests PyYAML python-dotenv
+          pip install --quiet -e ./kv-core
+
+      - name: 스냅샷 수집
+        env:
+          # 실데이터 루트를 러너 임시 디렉토리로. 코드에 경로가 박혀 있지 않아
+          # 로컬(~/kv-data)과 러너가 같은 코드로 돈다.
+          KV_DATA: ${{ runner.temp }}/kvdata
+        run: |
+          cd skills/net-sourcing/project
+          python tools/board.py --snapshot-all
+          echo "SNAP_DIR=$KV_DATA/net-sourcing/snapshots" >> "$GITHUB_ENV"
+
+      - name: 산출물 검증
+        # 🔴 불변 규칙 06 — 0건은 정상이 아니라 실패다.
+        #    "성공했는데 아무것도 안 나왔다"를 통과시키면 조용히 며칠을 날린다.
+        run: |
+          TODAY=$(date -u -d '+9 hours' +%Y-%m-%d)   # KST 기준 날짜
+          N=$(ls "$SNAP_DIR"/appstore_board_*_"$TODAY".json 2>/dev/null | wc -l)
+          echo "· $TODAY 스냅샷 $N 개"
+          if [ "$N" -lt 40 ]; then
+            echo "🔴 스냅샷이 $N 개뿐이다 (정상 84개). 부분 실패로 간주하고 커밋하지 않는다."
+            exit 1
+          fi
+
+      - name: data 브랜치에 커밋
+        run: |
+          TODAY=$(date -u -d '+9 hours' +%Y-%m-%d)
+          mkdir -p databranch/snapshots
+          cp "$SNAP_DIR"/appstore_board_*_"$TODAY".json databranch/snapshots/
+          cd databranch
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add snapshots
+          if git diff --cached --quiet; then
+            echo "· 변경 없음 — 이미 오늘 스냅샷이 있다"
+            exit 0
+          fi
+          N=$(git diff --cached --name-only | wc -l)
+          git commit -q -m "data: 앱스토어 스냅샷 $TODAY ($N개 차트)"
+          git push -q origin data
+          echo "✅ $N 개 커밋"
