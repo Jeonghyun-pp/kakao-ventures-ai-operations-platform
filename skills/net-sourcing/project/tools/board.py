@@ -40,7 +40,10 @@ sys.path.insert(0, os.path.dirname(_TOOLS))      # 프로젝트 루트 — adapt
 import rank_lookup as rl  # noqa: E402
 
 PROJ = Path(__file__).resolve().parents[1]
-SNAP_DIR = PROJ / "data" / "snapshots"
+# 실데이터 루트는 $KV_DATA 다(기본 ~/kv-data). 리포 안에 두면 git 명령의 사정권에 들어간다.
+# GitHub Actions 러너에서도 같은 코드가 돌아야 하므로 경로를 코드에 박지 않는다.
+from kv_core import paths as _paths  # noqa: E402
+SNAP_DIR = _paths.data("net-sourcing", "snapshots")
 BOARD_PREFIX = "appstore_board"
 
 # 전체(genre 36 = 카테고리 무관 통합 차트) + diandian과 동일한 App Store 25개 카테고리.
