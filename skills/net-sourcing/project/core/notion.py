@@ -1124,11 +1124,41 @@ def land(cfg: dict, candidates: list[dict], run_id: str) -> tuple[int, int]:
                 #   (실측: 오늘 감지된 8명이 전부 `변화 요약` 빈칸이었다).
                 #   ⚠️ 사람이 적어둔 요약을 덮지 않는다 — **비어 있을 때만** 쓴다.
                 _cs = (cand.get("signals") or {}).get("change_summary") or ""
-                if _cs and "변화 요약" in row_props and not _plain(
-                        (_ROW_PROPS.get(pid) or {}).get("변화 요약")):
-                    patch_props["변화 요약"] = {"rich_text": [{"text": {"content": _clip16(_cs, 1900)}}]}
-                if _cs and "재검토 사유" in row_props:
-                    patch_props["재검토 사유"] = {"select": {"name": "프로필변화"}}
+                if not _cs:
+                    # 🔴 변화는 감지됐는데 이유가 없다 = **조용히 사라짐**([[net-bugs-log]] 패턴 2).
+                    #   요약은 어댑터(`_change_summary`)가 만드는 게 정본이라 여기서 다시 계산하지
+                    #   않는다(로직 2벌은 어긋난다). 대신 **소리를 낸다** — 재검토 ✅만 켜지고
+                    #   이유가 빈 행은 사람이 프로필을 다시 열어야 하고, 그러면 감지의 의미가 없다.
+                    print(f"  🔴 변화 감지인데 change_summary가 비었다: {cand.get('name')} "
+                          f"(raw가 _change_summary 도입 전이면 재수집 전까지 이 칸은 빈다)")
+                if _cs:
+                    # 🔴 [2026-07-28] **덮어쓰지 않고 앞에 붙인다.** 예전엔 "비어 있을 때만" 썼는데
+                    #   (사람 메모 보호 목적) 그 부작용으로 **두 번째 변화가 통째로 사라졌다** —
+                    #   노션 칸은 1차 그대로였고 이벤트 로그에도 안 남았다.
+                    #   우리가 찾는 게 '변화'인데 그 이력이 1회성으로 끝나면 궤적을 못 본다
+                    #   (`PM → Pre-founder → Founder`는 한 시점보다 훨씬 강한 신호다).
+                    #   `core/followup.py`가 적어둔 원칙("이벤트는 append-only")을 land도 지킨다.
+                    prev = _plain((_ROW_PROPS.get(pid) or {}).get("변화 요약"))
+                    if _cs not in prev:              # 같은 raw로 재실행해도 중복 append 안 됨
+                        line = f"{date.today().isoformat()[5:]} {_cs}"
+                        merged = line + (" / " + prev if prev else "")
+                        if "변화 요약" in row_props:
+                            # ⚠️ 노션 rich_text 2,000유닛 상한 — 여기서 잘려도 **이벤트 로그가 정본**이다.
+                            patch_props["변화 요약"] = {
+                                "rich_text": [{"text": {"content": _clip16(merged, 1900)}}]}
+                        # ★ append-only 이벤트 로그. 노션 칸이 잘려도 여기엔 전부 남는다.
+                        #   공백형 축의 정밀도("몇 명이 실제로 창업했나")를 재는 **유일한 수단**이다.
+                        try:
+                            from core import followup as _fu
+                            _fu.record("li_profile_change",
+                                       _fu.key_linkedin(str(cand.get("ext_id") or "")),
+                                       {"name": cand.get("name"), "summary": _cs,
+                                        "from": (cand.get("signals") or {}).get("changed_from", ""),
+                                        "page": pid}, by="land")
+                        except Exception as e:       # 로그 실패가 착지를 막으면 안 된다
+                            print(f"  · 이벤트 기록 실패(무시): {e}")
+                    if "재검토 사유" in row_props:
+                        patch_props["재검토 사유"] = {"select": {"name": "프로필변화"}}
             r = _write("PATCH", f"{API}/pages/{pid}", token, {"properties": patch_props})
             if r.status_code != 200:
                 failed += 1

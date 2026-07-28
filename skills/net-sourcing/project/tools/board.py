@@ -27,7 +27,16 @@ from pathlib import Path
 
 import requests
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 🔴 [2026-07-20 → 07-28] **프로젝트 루트도 넣어야 한다.**
+#   tools/ 만 넣었더니 `rank_lookup` 은 찾았는데 그게 import 하는 `adapters._util` 을 못 찾았다.
+#   증상: ModuleNotFoundError: No module named 'adapters'.
+#   07-20에 rank_lookup.py 가 `from adapters import _util` 을 얻으면서 깨졌고,
+#   그날부터 **8일간 보드 스냅샷이 한 건도 안 쌓였다**(앱스토어 Δ는 재수집이 불가능 —
+#   그 8일은 영구 손실이다). 로그엔 트레이스백이 찍혔지만 아무도 안 봤다.
+#   → 실패 알림이 없으면 조용히 죽은 것을 못 본다는 증거. (불변 규칙 06)
+_TOOLS = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _TOOLS)
+sys.path.insert(0, os.path.dirname(_TOOLS))      # 프로젝트 루트 — adapters/ core/ 가 여기 있다
 import rank_lookup as rl  # noqa: E402
 
 PROJ = Path(__file__).resolve().parents[1]

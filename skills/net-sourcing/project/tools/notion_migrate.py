@@ -62,9 +62,15 @@ def _headers(token: str) -> dict:
             "Content-Type": "application/json"}
 
 
-def _weeks_through(end: date) -> list[str]:
-    """오늘부터 end까지의 ISO 주차 라벨."""
-    out, d = [], date.today()
+def _weeks_through(end: date, start: date | None = None) -> list[str]:
+    """`start`(기본 오늘)부터 end까지의 ISO 주차 라벨.
+
+    🔴 [2026-07-27] **과거 주차를 만들 수 있어야 한다.** 기본값이 `date.today()`라
+       과거 데이터를 백필할 때 그 주차 옵션이 **없어서 값이 조용히 버려진다**
+       (`_known_options_only` · CRITICAL #8). 앱스토어 1,711행을 W28~W30으로 백필하려는데
+       옵션이 W31부터 시작하면 "✅ 1,711행 성공"인데 칸은 전부 빈다.
+    """
+    out, d = [], (start or date.today())
     while d <= end:
         y, w, _ = d.isocalendar()
         label = f"{y}-W{w:02d}"
@@ -75,7 +81,8 @@ def _weeks_through(end: date) -> list[str]:
 
 
 def _migrate_db(db_id: str, label: str, kws: dict, token: str, apply: bool,
-                allow_create: bool, followup: bool, linkedin_fields: bool = False) -> int:
+                allow_create: bool, followup: bool, linkedin_fields: bool = False,
+                week_field: bool = False) -> int:
     """DB 하나 마이그레이션. allow_create=False면 신규 property 생성 없이 옵션 동기화만
     (⑨ 팔로업 필드는 followup=True면, ⑩ 링크드인 경력 필드는 linkedin_fields=True면
      예외적으로 생성 — 둘 다 "기능이 그 DB를 쓴다"가 근거다)."""
@@ -213,11 +220,23 @@ def _migrate_db(db_id: str, label: str, kws: dict, token: str, apply: bool,
         patch["빌더"] = {"checkbox": {}}
         print("  + 빌더 (checkbox) 추가 — tools/mark_builders.py 가 채운다")
 
-    # ⑤ 주차 옵션 연장
+    # ⑤ 주차 옵션 연장 (+ ⑪ 앱스토어에는 칸 자체를 만든다)
+    #    🔴 [2026-07-27] 앱스토어 DB에 `주차` 칸이 **없어서** 1,711행 전부 빈 채로 쌓였다.
+    #       `_iso_week(run_id)`가 착지 때 이미 계산하는데 스키마 교집합에서 버려지고 있었다
+    #       (= "생성은 base에만" 규칙의 조용한 부작용). 칸만 만들면 코드 수정 0으로 채워진다.
+    #       "생성은 base에만"의 **세 번째 예외**다(⑨ 팔로업 · ⑩ 링크드인 경력에 이어).
+    #       ⚠️ 예외가 셋이 됐다 — 다음에 또 필요하면 그 규칙 자체를 재설계하라.
     wk = schema.get("주차")
-    if wk and wk["type"] == "select":
+    if wk is None and week_field:
+        weeks = _weeks_through(date.today() + timedelta(days=400),
+                               start=date.today() - timedelta(days=120))   # 과거 ~17주 포함
+        patch["주차"] = {"select": {"options": [{"name": n} for n in weeks]}}
+        print(f"  + 주차 (select) 추가 — 옵션 {len(weeks)}개 ({weeks[0]} … {weeks[-1]}) "
+              f"· 과거 주차 포함(백필용)")
+    elif wk and wk["type"] == "select":
         have = {o["name"] for o in wk["select"]["options"]}
-        want = _weeks_through(date.today() + timedelta(days=400))
+        want = _weeks_through(date.today() + timedelta(days=400),
+                              start=date.today() - timedelta(days=120))
         missing = [w for w in want if w not in have]
         if missing:
             patch["주차"] = {"select": {
@@ -262,7 +281,22 @@ def _migrate_db(db_id: str, label: str, kws: dict, token: str, apply: bool,
                              # 공백 개월 = 마지막 직장 종료 후 공백. 0=공백없음 · 빈칸=판정불가.
                              ("공백 개월", {"number": {"format": "number"}}),
                              # 본업 공백 = 부업(시간제·인턴) 제외 기준. `공백 개월`과 **짝**이다.
-                             ("본업 공백", {"number": {"format": "number"}})):
+                             ("본업 공백", {"number": {"format": "number"}}),
+                             # ★ [2026-07-27] `회사` — **수식이다. 쓰기 경로가 0개다.**
+                             #   왜 필요한가: 회사명이 이 DB에 **원자값으로 존재하지 않는다.**
+                             #   title은 사람 이름이고, 회사는 `Author Headline` 안에 구분자가
+                             #   제각각(@ · | · / · ,)인 채로 섞여 있다("Co-founder of DailyFit | ex-Bain").
+                             #   5초 판단의 첫 질문이 "어느 회사인가 / 회사가 없나(=스텔스)"인데
+                             #   지금은 행마다 긴 문자열을 눈으로 파싱해야 한다 —
+                             #   **행당 3~5초 × 30행 = 매주 90~150초**가 여기서 나간다.
+                             #   ⚠️ 쓰기 칸(`Company Name`)으로 만들고 백필하면 안 된다 —
+                             #      07-21 이전 수집분은 파서가 첫 포지션만 잡아 회사명이 **실제로 틀려**
+                             #      있다(Example Person F="행정안전부"). 틀린 값 백필은 원칙 위반이다.
+                             #      다음 유료 수집에서 `Company Name`을 배선하면 이 수식을
+                             #      `if(empty(Company Name), 슬러그, Company Name)`로 한 줄만 바꾼다.
+                             ("회사", {"formula": {"expression":
+                                 'if(contains(prop("Homepage"), "/company/"), '
+                                 'replaceAll(prop("Homepage"), "(^.*/company/)|(/.*$)", ""), "")'}})):
             if fname in schema:
                 print(f"  = {fname}: 이미 있음 ({schema[fname]['type']})")
             else:
@@ -315,19 +349,21 @@ def main() -> int:
     ch = ncfg.get("channel_db_ids") or {}
     # (db_id, 라벨, 생성허용, 팔로업필드) — 생성은 base에만, 팔로업은 사람 채널 DB까지.
     # (db_id, 라벨, 생성허용, 팔로업필드, 링크드인경력필드)
-    targets = [(ncfg["db_id"], "base 그물망 소싱 DB", True, True, False)]
+    # (db_id, 라벨, 생성허용, 팔로업, 링크드인경력, 주차칸)
+    targets = [(ncfg["db_id"], "base 그물망 소싱 DB", True, True, False, False)]
     if ch.get("스레드"):
-        targets.append((ch["스레드"], "스레드 채널 DB", False, True, False))
+        targets.append((ch["스레드"], "스레드 채널 DB", False, True, False, False))
     if ch.get("링크드인"):
-        targets.append((ch["링크드인"], "링크드인 채널 DB", False, True, True))
+        targets.append((ch["링크드인"], "링크드인 채널 DB", False, True, True, False))
     if ch.get("앱스토어"):
-        targets.append((ch["앱스토어"], "앱스토어 채널 DB", False, False, False))  # 원샷
+        # ★ 앱스토어는 팔로업 대상이 아니지만 **주차 칸은 만든다**(유입 추이 뷰용).
+        targets.append((ch["앱스토어"], "앱스토어 채널 DB", False, False, False, True))
 
     rc = 0
-    for db_id, label, allow_create, followup, li_fields in targets:
+    for db_id, label, allow_create, followup, li_fields, wk_field in targets:
         rc |= _migrate_db(db_id.replace("collection://", ""), label, kws, token, apply,
                           allow_create=allow_create, followup=followup,
-                          linkedin_fields=li_fields)
+                          linkedin_fields=li_fields, week_field=wk_field)
     return rc
 
 
