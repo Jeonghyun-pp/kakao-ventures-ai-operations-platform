@@ -308,7 +308,88 @@ class heavy_slot:
             return False         # 남의 프로세스지만 살아 있음
 
 
-# ─────────────────────────── 제네릭 드라이버 ───────────────────────────
+class resource_slots:
+    """여러 자원 락을 한꺼번에 배타 획득 — **이름 정렬 순서로 잡아 데드락을 막는다**(결정 3, D′).
+
+    동시성의 진짜 기준은 CPU 무게가 아니라 **공유 자원**이다(인박스·시트 A1·노션 DB). 한 잡이
+    [gmail-inbox, notion-bplan] 둘을 건드리면 둘 다 배타로 잡아야 다른 잡과 안 겹친다.
+    여러 락을 제각각 순서로 잡으면 교착(잡1: A→B, 잡2: B→A). 그래서 **항상 이름 정렬 순**으로.
+    하나라도 못 잡으면 이미 잡은 것을 전부 풀고 SlotBusy — 부분 점유를 남기지 않는다.
+
+    자원명으로 키잉된 배타 락은 heavy_slot 을 그대로 재사용한다(O_EXCL·stale reaping 검증됨).
+    """
+
+    def __init__(self, names: Iterable[str]):
+        self.names = sorted({n for n in names if n})
+        self._slots: list[heavy_slot] = []
+
+    def __enter__(self):
+        acquired: list[heavy_slot] = []
+        try:
+            for name in self.names:
+                s = heavy_slot(kind=name)
+                s.__enter__()
+                acquired.append(s)
+        except SlotBusy:
+            for s in reversed(acquired):
+                s.__exit__(None, None, None)
+            raise
+        self._slots = acquired
+        return self
+
+    def __exit__(self, *exc):
+        for s in reversed(self._slots):
+            s.__exit__(None, None, None)
+        return False
+
+
+# ─────────────────────────── 항목 루프 (재사용 코어) ───────────────────────────
+# run() 과 run_pipeline() 의 스테이지가 공유하는 항목 처리 코어. 결정 A(건너뛰고 계속)·
+# C(가드+부작용 먼저·커서 마지막)가 여기 한 곳에 있다.
+
+def _done_keys(skill: str, job_id: str, stage: str = "") -> set[str]:
+    """events 에서 이 stage 의 item_done 키만 모은다(스테이지별 커서 분리)."""
+    out: set[str] = set()
+    for ev in read_events(skill, job_id):
+        if ev.get("kind") == "item_done" and ev.get("stage", "") == stage:
+            out.add(ev["key"])
+    return out
+
+
+def process_items(
+    skill: str,
+    job_id: str,
+    items: Iterable[Any],
+    *,
+    key: Callable[[Any], str],
+    process: Callable[[Any], None],
+    stage: str = "",
+    watermark_reader: Callable[[], "set[str]"] | None = None,
+) -> tuple[int, int]:
+    """항목 루프 — 재개 가능·멱등. 반환 (done 개수, skipped 개수).
+
+    stage: '' 면 단일 스테이지(run). run_pipeline 스테이지는 자기 이름을 줘서 커서를 분리한다.
+    watermark_reader: 외부 커서 스테이지(bplan A1 등)용(결정 4c). 주면 "이미 한 것"의 근거를
+        events 가 아니라 이 콜백(외부 진실)에서 얻는다. 없으면 events 의 done_keys.
+    """
+    done = set(watermark_reader()) if watermark_reader is not None else _done_keys(skill, job_id, stage)
+    skipped = 0
+    for item in items:
+        k = key(item)
+        if k in done:                                  # 결정 C-① 가드: 이미 했다
+            continue
+        try:
+            process(item)                              # 부작용(멱등해야 함) — 먼저
+        except Exception as e:                         # noqa: BLE001  결정 A: 건너뛰고 계속
+            append_event(skill, job_id, "item_skipped", key=k, stage=stage, error=repr(e))
+            skipped += 1
+            continue
+        append_event(skill, job_id, "item_done", key=k, stage=stage)   # 커서 전진 — 성공 뒤에만
+        done.add(k)
+    return len(done), skipped
+
+
+# ─────────────────────────── 제네릭 드라이버 (단일 스테이지) ───────────────────────────
 
 def run(
     skill: str,
@@ -319,6 +400,7 @@ def run(
     process: Callable[[Any], None],
     validate: Callable[[int, int], bool] | None = None,
     heavy: bool = False,
+    watermark_reader: Callable[[], "set[str]"] | None = None,
 ) -> Derived:
     """잡을 실행한다. **재개 가능하고 멱등하다.** 세 결정이 여기서 함께 작동한다.
 
@@ -348,30 +430,91 @@ def run(
 
     try:
         transition(skill, job_id, "running")
-        done = set(rebuild(skill, job_id).done_keys)   # 재개 시작점: 이미 끝낸 것들
-        skipped = 0
-        for item in items:
-            k = key(item)
-            if k in done:                              # 결정 C-① 가드: 이미 했다
-                continue
-            try:
-                process(item)                          # 부작용(멱등해야 함) — 먼저
-            except Exception as e:                     # noqa: BLE001  결정 A: 건너뛰고 계속
-                append_event(skill, job_id, "item_skipped", key=k, error=repr(e))
-                skipped += 1
-                continue
-            append_event(skill, job_id, "item_done", key=k)   # 커서 전진 — 부작용 성공 뒤에만
-            done.add(k)
+        done_n, skipped = process_items(skill, job_id, items, key=key, process=process,
+                                        watermark_reader=watermark_reader)
 
         # 검증(불변규칙 06): 0건은 정상이 아니라 실패다
         transition(skill, job_id, "validating")
-        ok = validate(len(done), skipped) if validate else (len(done) > 0)
+        ok = validate(done_n, skipped) if validate else (done_n > 0)
         transition(skill, job_id, "completed" if ok else "failed",
-                   done=len(done), skipped=skipped)
+                   done=done_n, skipped=skipped)
         _materialize(skill, job_id, rebuild(skill, job_id))
         return rebuild(skill, job_id)
     finally:
         slot_cm.__exit__(None, None, None)
+
+
+# ─────────────────────────── 다단계 파이프라인 드라이버 ───────────────────────────
+# 순서형 잡(collect→judge→land, sync→scoring→drop). 스테이지 완료마다 stage_done 을 찍어
+# 재개 시 완료 스테이지를 건너뛴다(결정 5, 스테이지 레벨 체크포인트). 항목 레벨(process_items)과
+# 두 겹으로 재개된다 — 스테이지가 통째로 끝났으면 스킵, 스테이지 중간에 죽었으면 그 스테이지의
+# done_keys 로 항목을 이어간다.
+
+@dataclass
+class Stage:
+    """파이프라인 한 단계. run(skill, job_id)이 부작용을 수행하고 실패 시 예외를 던진다.
+
+    스테이지 안에서 항목 루프가 필요하면 process_items(skill, job_id, ..., stage=name)을 부른다.
+    """
+    name: str
+    run: Callable[[str, str], None]
+
+
+def _done_stages(skill: str, job_id: str) -> set[str]:
+    return {ev.get("stage") for ev in read_events(skill, job_id)
+            if ev.get("kind") == "stage_done"}
+
+
+def run_pipeline(
+    skill: str,
+    job_id: str,
+    stages: "list[Stage]",
+    *,
+    resources: Iterable[str] | None = None,
+) -> Derived:
+    """다단계 잡 — 순서형. 각 스테이지 완료 시 stage_done, 재개 시 완료 스테이지 스킵.
+
+    스테이지는 **순서 의존**(land 는 collect 결과가 있어야 한다). 한 스테이지가 예외를 던지면
+    이후를 진행하지 않고 잡을 failed 로 둔다 — 다음 cadence 에 새 잡으로 재시도된다(워터마크가
+    last_success 면). kill-9 로 죽으면 stage_done 이 없으니 재개 시 그 스테이지부터 다시 한다.
+
+    resources: 이 잡이 건드리는 자원 이름들 → 배타 락(결정 3). 겹치는 자원의 잡끼리만 배타.
+    """
+    d = rebuild(skill, job_id)
+    if d.state in _TERMINAL:
+        return d                                        # 이미 끝난 잡은 다시 안 돈다
+    if d.state == "requested":
+        transition(skill, job_id, "queued")
+
+    lock_cm = resource_slots(resources) if resources else _null_ctx()
+    try:
+        lock_cm.__enter__()
+    except SlotBusy:
+        append_event(skill, job_id, "queued_wait", reason="자원 락 점유 중",
+                     resources=sorted({n for n in (resources or []) if n}))
+        return rebuild(skill, job_id)
+
+    try:
+        transition(skill, job_id, "running")
+        done = _done_stages(skill, job_id)
+        for st in stages:
+            if st.name in done:                         # 완료 스테이지 스킵(재개)
+                continue
+            st.run(skill, job_id)                       # 부작용 — 실패 시 예외
+            append_event(skill, job_id, "stage_done", stage=st.name)
+
+        transition(skill, job_id, "validating")
+        finished = _done_stages(skill, job_id)
+        ok = all(st.name in finished for st in stages)
+        transition(skill, job_id, "completed" if ok else "failed", stages=len(finished))
+        _materialize(skill, job_id, rebuild(skill, job_id))
+        return rebuild(skill, job_id)
+    except Exception as e:                              # noqa: BLE001  스테이지 실패 = 이후 중단
+        append_event(skill, job_id, "pipeline_error", error=repr(e))
+        transition(skill, job_id, "failed", error=repr(e))
+        return rebuild(skill, job_id)
+    finally:
+        lock_cm.__exit__(None, None, None)
 
 
 # ─────────────────────────── 유틸 ───────────────────────────

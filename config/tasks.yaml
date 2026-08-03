@@ -1,0 +1,119 @@
+# Task Registry — 노션 `인턴 업무 자동화` DB 의 코드 미러 (정본).
+# 설계 근거·전체 지도: docs/task-registry-mirror.md
+# "무슨 업무가 존재하나"(노션) 와 "그게 자동화됐나"(status) 를 분리 추적한다.
+# 필드:
+#   kind:      routine(cadence 있음·스케줄 대상) | ondemand(사람 트리거)
+#   catch_up:  coalesce(1회로 합침) | backfill(놓친 만큼 다 채움)          [결정 A]
+#   watermark: last_success(실패면 재시도) | last_attempt(시도했으면 전진)  [결정 B]
+#   resources: 배타 락 대상 자원(겹치는 잡끼리만 배타)                       [결정 3]
+#   origin:    system(우리가 시작→팀 슬랙방) | partner(심사역 트리거→개인)  [결정 10, 승인 라우팅 기본값]
+#   covers:    이 task 가 커버하는 노션 업무 카테고리(reconcile 대조용)
+#   status:    done | partial | slot
+
+# ── 스케줄 task (cadence) ──
+- name: sourcing
+  skill: net-sourcing
+  kind: routine
+  cadence: weekly
+  catch_up: coalesce         # Apify 회당 ~$10.5 — backfill 은 새 데이터 0 인데 돈만 태움
+  watermark: last_success    # 수집 실패 = 후보 0 → 다시 시도
+  resources: [apify, notion, gmail]
+  stages: [collect, judge, land, meeting-mail]
+  origin: system
+  covers: [그물망]
+  status: partial
+  notes: judge L0만·L1/L2 미구현 · meeting-mail(auto-mail) 노션에만·리포 미이식
+
+- name: sourcing-followup
+  skill: net-sourcing
+  kind: routine
+  cadence: quarterly         # DB 인물 3~4개월 재확인
+  catch_up: coalesce
+  watermark: last_success
+  resources: [notion]
+  stages: [followup]
+  origin: system
+  covers: [그물망]
+  status: partial
+
+- name: appstore-snapshot
+  skill: net-sourcing
+  kind: routine
+  cadence: daily
+  catch_up: backfill         # 일일 랭킹 — 하루 빠지면 시계열에 구멍(무료라 backfill 부담 0)
+  watermark: last_success
+  resources: []              # $0·무인증
+  stages: [snapshot]
+  origin: system
+  covers: [그물망]
+  status: done
+
+- name: mail-triage
+  skill: mail-harness
+  kind: routine
+  cadence: daily
+  catch_up: coalesce
+  watermark: last_attempt    # 미처리 메일은 인박스에 남아 다음 sweep 이 집음
+  resources: [gmail-inbox]
+  stages: [sweep, classify, draft]
+  origin: system
+  covers: [메일관리]
+  status: partial
+  notes: 컷오버 전(W5) · 광고아카이빙·Webflow·제안·인바운드 4업무 라우팅 규칙 존재
+
+- name: bplan
+  skill: mail-harness
+  kind: routine
+  cadence: daily
+  catch_up: coalesce
+  watermark: last_attempt
+  resources: [gmail-inbox, sheet-a1, notion-bplan]
+  stages: [sync, scoring, deliver]   # sync=접수·배분·기입 / scoring=판단 / deliver=드랍초안|후속미팅초안
+  origin: system                     # 접수는 시스템 시작 · 드랍/후속은 approval 호출시 partner 로 override
+  covers: [비플랜]
+  status: partial
+  notes: sync/drop ✅ · scoring(judge-bplan)·후속미팅 🔴 · A1 외부 커서(watermark_reader)
+
+# ── 온디맨드 task ──
+- name: investment-memo
+  skill: investment-memo
+  kind: ondemand
+  catch_up: coalesce
+  watermark: last_attempt
+  resources: [notion]
+  stages: [scan, absorb, tables, sections, docx]
+  origin: partner
+  covers: [투심보고서]
+  status: done
+
+- name: research
+  skill: research
+  kind: ondemand
+  catch_up: coalesce
+  watermark: last_attempt
+  resources: []
+  origin: partner
+  covers: [리서치]
+  status: slot
+
+- name: deal-review
+  skill: deal-review
+  kind: ondemand
+  catch_up: coalesce
+  watermark: last_attempt
+  resources: []
+  origin: partner
+  covers: [딜검토]
+  status: slot
+
+- name: ivc
+  skill: ivc
+  kind: ondemand
+  catch_up: coalesce
+  watermark: last_attempt
+  resources: []
+  stages: [ideation, research, outline, write]
+  origin: partner
+  covers: [IVC]
+  status: slot
+  notes: 사용자가 직접 구축 예정
