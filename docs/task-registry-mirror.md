@@ -63,6 +63,7 @@
 ---
 
 ## 확정된 설계 판단 (2026-08-03)
+- **AI = claude -p 구독 단일화 (ADR 0003)** — 모든 판단·분류·초안 스테이지는 `claude -p` 세션이 수행(API 키 없음). 코드=결정론적 통제, claude=판단/생성. `claude`는 공유 자원(`tasks.yaml` 등록)이라 세션 직렬화. 출력은 soft → `validating` 스테이지가 되읽기 검증(W5). `core/llm.py`(API) 은퇴, `kv_core/session.py` 단일 통로 신설.
 - **판단은 부모 스킬의 스테이지** — judge-sourcing은 net-sourcing에, judge-bplan은 bplan에 흡수. 편향이 반대(살림 vs 거름)라 기준은 도메인별, **판단 골격**(티어링·evidence·사람검수·오탐 실측)만 kv-core 공유. **제품 완성 후에도 지속 튜닝**.
 - **승인 브릿지가 모든 판단·발송의 공통 출구** — 심사역 Slack/메일 초안. (W8)
 - **뷰티·consumer-pulse 스코프 제외.**

@@ -1,0 +1,32 @@
+# 산출물 검증 계약 (Write-Audit-Publish 의 Audit 규칙). 정본 = 이 파일 하나. [W5·ADR 0003]
+# kv_core.validate.load_contracts() 가 읽는다. 코드에 하드코딩하지 않는다(결정 ③).
+#
+# 스테이지마다:
+#   on_invalid: halt | quarantine   ← 부작용 가역성으로 고른다(결정 ②)
+#     halt       = 하나라도 어긋나면 전체 중단(발송 등 비가역 스테이지)
+#     quarantine = 어긋난 것만 DLQ 격리하고 나머지 진행(판정 기입 등 가역 스테이지)
+#   schema: {필드: {type, required, enum, nonempty}}
+
+# ── 그물망 소싱 판단 (노션 Tier 기입 = 가역) ──
+judge:
+  on_invalid: quarantine          # 오판 한 건은 다음 회차가 주움. recall 우선.
+  schema:
+    id:      {type: int, required: true}
+    verdict: {type: str, required: true, enum: [keep, promo, unsure]}
+    reason:  {type: str, required: false, nonempty: true}
+
+# ── 링크드인/스레드 Tier 판정 (노션 select 기입 = 가역) ──
+judge-tier:
+  on_invalid: quarantine
+  schema:
+    id:      {type: int, required: true}
+    tier:    {type: str, required: true, enum: [Catch, Trend, Wait]}   # 노션 select 옵션과 정확히 일치
+    reason:  {type: str, required: false, nonempty: true}
+
+# ── 그물망 미팅요청 메일 초안 (발송 = 비가역) ──
+meeting-mail:
+  on_invalid: halt                # 형식 깨진 초안은 절대 발행 안 함. 의심스러우면 멈춘다.
+  schema:
+    to:      {type: str, required: true, nonempty: true}
+    subject: {type: str, required: true, nonempty: true}
+    body:    {type: str, required: true, nonempty: true}

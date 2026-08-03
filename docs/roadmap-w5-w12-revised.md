@@ -9,6 +9,16 @@
 1. **W4가 W6·W8 토대를 앞당겨 지음** — scheduler(드레인)·approval(승인 토대)가 이미 있다. W6·W8이 줄고 여유가 생긴다.
 2. **제품 = 척추 + 표면 + 신뢰곡선.** 척추(registry·scheduler·job·approval)는 W4에서 섰다. 남은 건 **표면(W7 대시보드·W8 카드)**과 **신뢰곡선(draft→approve→auto)**.
 3. **넓게보다 깊게** — 한 수직선을 끝까지 뚫어 제품 루프를 먼저 증명한다(depth-first).
+4. **AI 단일화 확정(ADR 0003)** — 모든 AI = `claude -p` 구독(API 키 없음). 이 결정이 W5(통로·검증)·W6(게이트 재타깃)을 재구성한다. ↓
+
+## 아키텍처 확정 (2026-08-03): AI = claude -p 단일화 [ADR 0003]
+
+> **모든 AI 호출을 `claude -p` 구독 세션으로 통일. API 키 의존 제거.** W2 레슨 #1 + ADR 0002 대가 ②가 예고했던 결정을 지금 확정.
+
+세 원칙이 W5~W6에 박힌다:
+- **결정론=코드, 판단=claude.** "언제 뭘 돌리나"(due·catch-up·락·멱등)는 코드. claude는 "좋은 팀인가·메일 초안"에만. → 비결정성을 신뢰가 필요한 곳에 두지 않는다.
+- **claude 구독 = 공유 자원.** `tasks.yaml`에 `claude` 자원 등록 → 세션 직렬화. 게이트는 `$` 대신 **쿼터** 감시(W6). (W2 레슨 #3)
+- **claude 출력은 soft → 되읽기 검증 필수.** API의 스키마 강제가 사라져 `validating` 스테이지가 생명줄이 된다(W5).
 
 ---
 
@@ -29,8 +39,8 @@ W5 draft 실배선 → W8 승인 카드 → W10 측정 후 auto-send 승격
 
 | 주차 | 원래 | 개정 (제품 + 학습) | 학습 앵커 |
 |---|---|---|---|
-| **W5** | 산출물 검증 + mail-harness 컷오버 | validate.py를 `run_pipeline`의 `validating` 단계에 연결. **[실A 시작] 그물망 미팅메일 draft 실배선**(auto-mail, 쉬운 소비자 먼저). mail-harness 컷오버는 유지하되 실A 증명 뒤로 무게 이동 | 산출물 검증·JSON 스키마·"exit0≠성공"·read-back 검증 |
-| **W6** | 워커화 + wake 부트스트랩 | scheduler **완성** → W6 = launchd→`scheduler --run` 배선 + 스킬 러너 배선 + plist 템플릿 + **🔴 appstore 이중실행 해소(첫 항목)**. 여유분으로 **[W7 최소 대시보드 앞당김]** | idempotent scheduling·wake bootstrap·single-writer 락·이식성 |
+| **W5** | 산출물 검증 + mail-harness 컷오버 | **🆕 선행: 무인 인증 스모크**(launchd→`claude -p` 로그인 유지, 발송·spend 0). **🆕 `kv_core/session.py`**(코드가 claude -p를 부르는 단일 통로, 좁은 도구 허용목록·`_assert_no_send` 상속) + `core/llm.py`(API) 은퇴 시작. validate.py를 `run_pipeline`의 `validating` 단계에 연결 — **claude 출력은 soft라 이제 필수**(fail-closed). **[실A 시작] 그물망 미팅메일 draft 실배선**(claude=판단·초안, 코드=검증·산출). mail-harness 컷오버는 실A 증명 뒤로 무게 이동 | 자판기(강제)vs알바생(권고) 신뢰모델·되읽기 검증·"exit0≠성공"·결정론(코드)vs확률(claude) 경계·최소권한 |
+| **W6** | 워커화 + wake 부트스트랩 | scheduler **완성** → W6 = launchd→`scheduler --run` 배선 + 스킬 러너 배선 + plist 템플릿 + **🔴 appstore 이중실행 해소(첫 항목)**. **🆕 게이트 재타깃**: `gate.py`가 `$` API 과금 대신 **claude -p 구독 쿼터**를 감시(ADR 0002 대가 ②·ADR 0003). 여유분으로 **[W7 최소 대시보드 앞당김]** | idempotent scheduling·wake bootstrap·single-writer 락·**공유자원(claude)=단일 관문**·이식성 |
 | **W7** | KV-ORRERY 재진입 브리핑 | read-only 한 판: *뭐 돌았나·대기(승인)·실패·비용*. registry+승인큐+job events가 데이터. **제품의 얼굴** | 관측가능성·"안 벌어진 일"·read-only 관측자·watermark |
 | **W8** | 승인 브릿지 + 실패 푸시 | approval **토대 완성** → W8 = PreToolUse hook + allow/deny 카드(로컬 훅=상시서버 불필요) + **결과 검증**(보냈다≠반영됐다) + 실패 푸시. **➕ 승인→판단 피드백 루프**(승인/거부=라벨, 실B·W11로 연결). **[실A: 승인 카드]** | human-in-loop·trust boundary·hook·at-least-once·compensation |
 | **W9** | stale 감지 + 장애 실험 | 그대로. **[실A 우선]** 미팅메일 파이프라인에 장애 주입(429·kill·중복·JSON 깨짐). 런북 먼저 쓰고 자동화 | 카오스 엔지니어링·런북·멱등 재확인·stale 지표화 |
@@ -45,6 +55,6 @@ W5 draft 실배선 → W8 승인 카드 → W10 측정 후 auto-send 승격
 "24개 task 다 자동화"가 아니라 이 세 조건. 안 되면 스크립트 더미, 되면 제품.
 
 ## 변경 요약 (원본 대비)
-- **바뀐 것 3개:** ① 실A(수직선) 스파인 신설 — auto-mail 을 W5→W8→W10 완주. ② W6 재정의(scheduler 완성 반영 + appstore 해소 + W7 앞당김). ③ W8에 승인→판단 피드백 루프 추가.
+- **바뀐 것 4개:** ① 실A(수직선) 스파인 신설 — auto-mail 을 W5→W8→W10 완주. ② W6 재정의(scheduler 완성 반영 + appstore 해소 + W7 앞당김 + **게이트 $→쿼터 재타깃**). ③ W8에 승인→판단 피드백 루프 추가. ④ **AI 단일화(ADR 0003)** — API 키 제거, `claude -p` 통로(`session.py`) 신설, W5 validating 필수화, `claude` 공유자원 등록.
 - **더해진 것:** 매주 학습 앵커(goal 2).
 - **그대로인 것:** 원본의 순서·원칙(런북 먼저·측정 게이트·depth-first·이식성 실측)은 유효. W9·W12 거의 불변.

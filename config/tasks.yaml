@@ -6,6 +6,7 @@
 #   catch_up:  coalesce(1회로 합침) | backfill(놓친 만큼 다 채움)          [결정 A]
 #   watermark: last_success(실패면 재시도) | last_attempt(시도했으면 전진)  [결정 B]
 #   resources: 배타 락 대상 자원(겹치는 잡끼리만 배타)                       [결정 3]
+#              claude = claude -p 구독(공유 쿼터) → 세션 직렬화 [ADR 0003·W2 레슨 #3]
 #   origin:    system(우리가 시작→팀 슬랙방) | partner(심사역 트리거→개인)  [결정 10, 승인 라우팅 기본값]
 #   covers:    이 task 가 커버하는 노션 업무 카테고리(reconcile 대조용)
 #   status:    done | partial | slot
@@ -17,12 +18,12 @@
   cadence: weekly
   catch_up: coalesce         # Apify 회당 ~$10.5 — backfill 은 새 데이터 0 인데 돈만 태움
   watermark: last_success    # 수집 실패 = 후보 0 → 다시 시도
-  resources: [apify, notion, gmail]
+  resources: [apify, claude, notion, gmail]   # judge·meeting-mail = claude -p 스테이지 [ADR 0003]
   stages: [collect, judge, land, meeting-mail]
   origin: system
   covers: [그물망]
   status: partial
-  notes: judge L0만·L1/L2 미구현 · meeting-mail(auto-mail) 노션에만·리포 미이식
+  notes: judge=claude -p 세션(현 주1회 수동→W5 무인 승격) · meeting-mail(auto-mail) 노션에만·리포 미이식
 
 - name: sourcing-followup
   skill: net-sourcing
@@ -30,7 +31,7 @@
   cadence: quarterly         # DB 인물 3~4개월 재확인
   catch_up: coalesce
   watermark: last_success
-  resources: [notion]
+  resources: [claude, notion]   # 재판정 = claude -p [ADR 0003]
   stages: [followup]
   origin: system
   covers: [그물망]
@@ -54,7 +55,7 @@
   cadence: daily
   catch_up: coalesce
   watermark: last_attempt    # 미처리 메일은 인박스에 남아 다음 sweep 이 집음
-  resources: [gmail-inbox]
+  resources: [claude, gmail-inbox]   # classify·draft = claude -p [ADR 0003]
   stages: [sweep, classify, draft]
   origin: system
   covers: [메일관리]
@@ -67,7 +68,7 @@
   cadence: daily
   catch_up: coalesce
   watermark: last_attempt
-  resources: [gmail-inbox, sheet-a1, notion-bplan]
+  resources: [claude, gmail-inbox, sheet-a1, notion-bplan]   # scoring·deliver 초안 = claude -p [ADR 0003]
   stages: [sync, scoring, deliver]   # sync=접수·배분·기입 / scoring=판단 / deliver=드랍초안|후속미팅초안
   origin: system                     # 접수는 시스템 시작 · 드랍/후속은 approval 호출시 partner 로 override
   covers: [비플랜]
