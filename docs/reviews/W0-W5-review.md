@@ -31,6 +31,21 @@
 
 ---
 
+## ✅ 수정 결과 [2026-08-04, 브랜치 w6-prep-fixes 배치 1~4]
+
+**High 7/7 전부 수정** + med 9건 동반 수정. 각 수정은 리뷰의 재현 시나리오를 상설 회귀 테스트로 승격해(`tests/_review_regressions.py`, 20 체크) 같은 잣대로 검증했고, 기존 합성테스트(worker·pipeline)와 **실 claude E2E 슬라이스 4/4**도 통과.
+
+| 배치 | 수정 | 커밋 |
+|---|---|---|
+| 1 | H1(validating 재개 간선) · H2(torn tail 복구) · run() 실패 이벤트 | `d37e004` |
+| 2 | H3(순차 드레인) · H4(`runner: external` 선언) · 규칙08(스케줄러 락) · D4(rename 회수) · H7(스킬명 분기 삭제) · cadence load 검증 | `c8bf982` |
+| 3 | H5(`--strict-mcp-config`+stdin) · parse_json 모호=fail-closed · bool/int · results falsy · DLQ append · `min_records`(선언적 진공 방지) | `8bea626` |
+| 4 | H6(스코프 주장 4곳 정정) · D2(데드코드 3곳 삭제) · 슬라이스 ④ AST 검사로 교체 | `5c2efa4` |
+
+**보류(설계대로):** gate 재구조(run-budget·이중 진실원)=W6 쿼터 재타깃과 함께 · stdout→notify 승격(패턴①)=W7 관측 평면과 함께 · low 다수=W6 진행 중 처리.
+
+---
+
 ## 🔴 High 7 — 전문 (전부 근거·재현 있음)
 
 | # | 위치 | 문제 | 재현/근거 |
