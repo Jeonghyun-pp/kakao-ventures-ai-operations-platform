@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  [W6] kv 스케줄러 단일 진입점 — launchd 는 "언제 깨울지"만 알고, "뭘 돌릴지"는
+  registry(config/tasks.yaml)가 안다. 발화는 대충, 의미론(coalesce·워터마크)은 정확.
+
+  발화: 09:00 정시 + 4시간 간격 보조. StartInterval 은 sleep 중엔 안 울리고
+  깨어나면 밀린 것 1회 발화 — pull 스케줄러의 catch-up 과 정확히 맞물린다.
+  이중 발화는 스케줄러의 heavy_slot("scheduler") 락이 한쪽을 물린다.
+
+  설치:  cp config/launchd/com.kv.scheduler.plist ~/Library/LaunchAgents/
+        launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.kv.scheduler.plist
+  제거:  launchctl bootout gui/$(id -u)/com.kv.scheduler
+
+  ⚠️ PATH 에 claude CLI(~/.local/bin)가 반드시 포함돼야 한다 — launchd 기본 PATH 엔 없어
+     judge 세션이 FileNotFoundError 로 죽는다(session.py 가 loud 하게 잡긴 한다).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.kv.scheduler</string>
+  <key>WorkingDirectory</key><string>/home/example/kv-automation</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/home/example/kv-automation/.venv/bin/python</string>
+    <string>-m</string><string>kv_core.scheduler</string><string>--run</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StartInterval</key><integer>14400</integer>
+  <key>RunAtLoad</key><false/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/home/example/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StandardOutPath</key><string>/home/example/kv-data/_scheduler/launchd.log</string>
+  <key>StandardErrorPath</key><string>/home/example/kv-data/_scheduler/launchd.log</string>
+</dict>
+</plist>
