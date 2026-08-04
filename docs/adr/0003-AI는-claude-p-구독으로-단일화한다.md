@@ -71,8 +71,9 @@ W2 레슨 #3(공유지의 비극)의 재현이다. 여러 task가 각자 claude 
   - (1) 화면 잠금 ~3분 내내 60초마다 `OK`, 에러 0 → **잠금-깨어있음(locked-awake) 인증 유지**.
   - (2) 뚜껑 닫아 실제 sleep(`runs` 정지로 확인) 후 wake → deferred 발화 + kickstart **둘 다 `OK`** → **sleep-wake 인증 유지**.
   - → 대가 ①(최대 리스크)이 해소. *단, 장시간(밤샘) sleep 의 토큰 갱신은 실운영(W6)에서 관찰. 화면잠금 자동감지는 pyobjc 부재로 사용자 구간+타임스탬프로 판정.*
-- ✅ **합성 수직선 4시나리오 통과 [2026-08-03]** — `tests/_synthetic_slice.py`: ①claude 판단+초안이 `session.py` 통로로 실제로 나옴 ②재실행 멱등(claude 재호출 0) ③발송 앞 계약 위반 주입 → halt·발행 0 ④구조적 무발송(`_assert_no_send` 상속). soft 출력을 되읽기 검증이 실제로 잡음을 확인.
-- ✅ **진짜 Gmail 초안까지 실배선 [2026-08-04]** — `kv_core.gmail.create_draft` 가 실 계정(`hello@`)에 초안 1건 생성→read-back→삭제(인박스 오염 0). AST로 코드에 `.send()` 호출 0건 확인 + 스코프 `gmail.modify`(API 레벨 send 거부) + `_assert_no_send` 활성 → **발송 0을 유지한 채 수직선 마지막 뼘(로컬파일 흉내→실 초안) 관통.** 토큰 경로는 `$KV_CONFIG/google/token.json` 로 정정.
+- ✅ **합성 수직선 4시나리오 통과 [2026-08-03]** — `tests/_synthetic_slice.py`: ①claude 판단+초안이 `session.py` 통로로 실제로 나옴 ②재실행 멱등(claude 재호출 0) ③발송 앞 계약 위반 주입 → halt·발행 0 ④구조적 무발송(AST 로 `.send()` 호출 0건 상시 검증). soft 출력을 되읽기 검증이 실제로 잡음을 확인.
+- ✅ **진짜 Gmail 초안까지 실배선 [2026-08-04]** — `kv_core.gmail.create_draft` 가 실 계정(`hello@`)에 초안 1건 생성→read-back→삭제(인박스 오염 0). AST로 코드에 `.send()` 호출 0건 확인 → **발송 0을 유지한 채 수직선 마지막 뼘(로컬파일 흉내→실 초안) 관통.** 토큰 경로는 `$KV_CONFIG/google/token.json` 로 정정.
+- ⚠️ **정정 [2026-08-04, W0-W5 리뷰 H6]** — "스코프 `gmail.modify` 라 API 레벨에서도 send 불가"는 **오류였다**: 구글 문서상 `gmail.modify` 는 `messages.send` 를 허용한다. 무발송의 실 보장은 **"코드에 send 호출이 없다"** 하나이며, 이를 AST 검사가 상시 확인한다(주장 두 겹 → 검증된 한 겹으로 정정). 같은 리뷰에서 호출부 없는 `_assert_no_send` 마커도 삭제.
 - 남은 검증(W6): 장시간 sleep 토큰 갱신 · 무인 스케줄러 실배선 하 실 net-sourcing 첫 수직선.
 
 ---
