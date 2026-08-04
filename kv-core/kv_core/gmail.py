@@ -21,11 +21,11 @@ def _assert_no_send() -> None:
 
 
 def service():
-    """Gmail 서비스 — `$KV_CONFIG/gmail/token.json`(gmail.modify) 로 빌드."""
+    """Gmail 서비스 — `$KV_CONFIG/google/token.json`(gmail.modify) 로 빌드."""
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
 
-    tok = secrets.credential("gmail/token.json")
+    tok = secrets.credential("google/token.json")
     creds = Credentials.from_authorized_user_file(str(tok), _SCOPES)
     return build("gmail", "v1", credentials=creds)
 
