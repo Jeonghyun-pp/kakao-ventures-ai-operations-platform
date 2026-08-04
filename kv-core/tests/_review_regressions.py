@@ -108,6 +108,103 @@ def test_run_error_event() -> None:
           f"state={d.state}")
 
 
+# ── H3: backfill 중간 실패가 영구 구멍이 되지 않는가 ────────────────────────
+# 수정 전: 8/2✗·8/3✓·8/4✓ → last_success=8/4, 8/2 는 다시는 due 가 안 됨.
+
+def test_h3_backfill_no_hole() -> None:
+    print("[H3] backfill 중간 실패 → 이후 주기 중단(순차 드레인)")
+    from datetime import date
+    from kv_core import scheduler
+    from kv_core.registry import Task
+
+    t = Task(name="h3-backfill", skill=SKILL, kind="routine", cadence="daily",
+             catch_up="backfill", watermark="last_success")
+    # 워터마크: 3일 전 성공 → 밀린 주기 3개
+    scheduler.write_watermark(t, {"last_success": "2026-08-01"})
+
+    calls: list[str] = []
+
+    def runner(task, period) -> bool:
+        calls.append(period.isoformat())
+        return period.isoformat() != "2026-08-02"   # 첫 주기(8/2)만 실패
+
+    rep = scheduler.run_due([t], runner, now=date(2026, 8, 4))
+    wm = scheduler.read_watermark(t)
+    check("실패 주기에서 중단(이후 주기 미실행)", calls == ["2026-08-02"], f"calls={calls}")
+    check("last_success 가 실패 주기를 넘지 않음", wm.get("last_success") == "2026-08-01",
+          f"last_success={wm.get('last_success')}")
+
+    # 다음 기동: 실패 주기부터 재시도되는가 (구멍 없음)
+    calls.clear()
+
+    def runner_ok(task, period) -> bool:
+        calls.append(period.isoformat())
+        return True
+
+    scheduler.run_due([t], runner_ok, now=date(2026, 8, 4))
+    check("다음 기동이 실패 주기(8/2)부터 재개", calls and calls[0] == "2026-08-02",
+          f"calls={calls}")
+
+
+# ── H4: runner!=local task 를 스케줄러가 건드리지 않는가 (규칙 01) ───────────
+
+def test_h4_external_runner_skip() -> None:
+    print("[H4] runner: github-actions → 로컬 스케줄러 스킵")
+    from datetime import date
+    from kv_core import scheduler
+    from kv_core.registry import Task
+
+    ext = Task(name="h4-external", skill=SKILL, kind="routine", cadence="daily",
+               catch_up="backfill", watermark="last_success", runner="github-actions")
+    dues = scheduler.due_tasks([ext], now=date(2026, 8, 4))
+    check("외부 러너 task 는 due 에 없음", dues == [], f"dues={[d.task.name for d in dues]}")
+
+    # 실제 tasks.yaml 의 appstore-snapshot 이 external 로 선언됐는지
+    from kv_core import registry
+    tasks = registry.load()
+    app = next(t for t in tasks if t.name == "appstore-snapshot")
+    check("tasks.yaml appstore-snapshot runner=github-actions",
+          app.runner == "github-actions", f"runner={app.runner}")
+
+
+# ── 규칙08: 스케줄러 이중 기동 → 두 번째 인스턴스가 물러나는가 ──────────────
+
+def test_scheduler_double_start() -> None:
+    print("[규칙08] 스케줄러 락 점유 중 재기동 → 빈 리포트로 물러남")
+    from datetime import date
+    from kv_core import scheduler
+
+    with job.heavy_slot("scheduler"):               # 첫 인스턴스가 락 보유 중이라고 가정
+        rep = scheduler.run_due([], lambda t, p: True, now=date(2026, 8, 4))
+        check("두 번째 인스턴스는 실행 0·빈 리포트", rep == [], f"report={rep}")
+
+
+# ── D4: stale 락 회수가 안전한가 (죽은 pid 회수 + 산 락 존중) ────────────────
+
+def test_d4_stale_lock() -> None:
+    print("[D4] stale 락 회수 + 산 락 SlotBusy")
+    kind = "d4-test-slot"
+    p = job._slot_path(kind)
+
+    # 죽은 pid(99999999 — 존재 불가)의 락 → 회수돼야 함
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("99999999")
+    try:
+        with job.heavy_slot(kind):
+            check("죽은 pid 락 회수 성공", True)
+    except job.SlotBusy:
+        check("죽은 pid 락 회수 성공", False, "SlotBusy")
+
+    # 산 프로세스(내 pid)의 락 → SlotBusy 로 존중돼야 함
+    p.write_text(str(os.getpid()))
+    try:
+        with job.heavy_slot(kind):
+            check("산 락은 SlotBusy", False, "뚫고 들어감")
+    except job.SlotBusy:
+        check("산 락은 SlotBusy", True)
+    p.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     print(f"=== 리뷰 회귀 테스트 (KV_DATA={os.environ['KV_DATA']}) ===\n")
     test_h1_validating_resume()
@@ -116,7 +213,15 @@ if __name__ == "__main__":
     print()
     test_run_error_event()
     print()
+    test_h3_backfill_no_hole()
+    print()
+    test_h4_external_runner_skip()
+    print()
+    test_scheduler_double_start()
+    print()
+    test_d4_stale_lock()
+    print()
     if FAIL:
         print(f"❌ 실패 {len(FAIL)}건: {FAIL}")
         raise SystemExit(1)
-    print("✅ 배치 1 회귀 전부 통과")
+    print("✅ 리뷰 회귀 전부 통과")

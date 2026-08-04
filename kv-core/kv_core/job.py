@@ -299,11 +299,21 @@ class heavy_slot:
         try:
             self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            if self._stale():
-                self.path.unlink(missing_ok=True)
-                self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            else:
+            if not self._stale():
                 raise SlotBusy(f"heavy 슬롯 점유 중: {self.path}")
+            # stale 회수 — unlink 로 경쟁하면 두 프로세스가 서로의 새 락을 지워 둘 다 진입할 수
+            # 있다(리뷰 D4). rename 은 원자적이라 **한 프로세스만** 소유권을 선점한다.
+            claim = self.path.with_suffix(f".reap-{os.getpid()}")
+            try:
+                os.rename(self.path, claim)
+            except FileNotFoundError:
+                raise SlotBusy(f"heavy 슬롯 회수 경쟁 중 — 물러난다: {self.path}")
+            claim.unlink(missing_ok=True)
+            try:
+                self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                # 회수 직후 제3자가 정당하게 선점 — SlotBusy 로 변환해 조용한 크래시를 막는다.
+                raise SlotBusy(f"heavy 슬롯 점유 중(회수 직후 선점됨): {self.path}")
         os.write(self.fd, str(os.getpid()).encode())
         return self
 

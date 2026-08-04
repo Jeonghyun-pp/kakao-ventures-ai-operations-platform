@@ -94,6 +94,8 @@ def due_tasks(tasks: list[Task], *, now: date | None = None) -> list[Due]:
     for t in tasks:
         if not t.scheduled:
             continue                               # 온디맨드·슬롯은 스케줄 대상 아님
+        if t.runner != "local":
+            continue                               # 외부 러너(GH Actions 등)가 돌린다 — 이중실행 금지(규칙 01)
         last = _last_run(t, read_watermark(t))
         if cadence.interval_elapsed(t.cadence, last, today=now, where=t.name):
             out.append(Due(t, _missed_periods(t, last, now)))
@@ -108,29 +110,49 @@ def run_due(tasks: list[Task], runner: Runner, *, now: date | None = None) -> li
     """due task 들을 실행하고 워터마크를 갱신한다. 반환: 실행 리포트.
 
     last_attempt 는 시도할 때마다 전진. last_success 는 성공했을 때만 전진(결정 B).
+    한 task 의 주기 실행 중 실패하면 **그 task 의 이후 주기를 진행하지 않는다** — 나중 주기의
+    성공이 워터마크를 덮어써 실패 주기가 영구 구멍이 되는 것을 막는다(리뷰 H3, 순차 드레인).
+    스케줄러 자체는 배타 락으로 이중 기동을 막는다(규칙 08 — 오발사 방지가 자가복구보다 먼저).
     """
     now = now or _utc_today()
-    report: list[dict] = []
-    for due in due_tasks(tasks, now=now):
-        t = due.task
-        for period in due.periods:
-            ok = False
-            try:
-                ok = runner(t, period)
-            except Exception as e:                 # noqa: BLE001  러너 실패 = 이 실행 실패(다음에 재시도)
-                print(f"🔴 {t.name} {period} 실행 예외: {e!r}")
-            wm = read_watermark(t)
-            wm["last_attempt"] = period.isoformat()
-            if ok:
-                wm["last_success"] = period.isoformat()
-            write_watermark(t, wm)
-            report.append({"task": t.name, "period": period.isoformat(), "ok": ok})
-    return report
+    try:
+        slot = job.heavy_slot("scheduler")
+        slot.__enter__()
+    except job.SlotBusy:
+        print("⚠️  다른 스케줄러 인스턴스가 실행 중 — 이번 기동은 물러난다(이중 발화 방지, 규칙 08).")
+        return []
+    try:
+        report: list[dict] = []
+        for due in due_tasks(tasks, now=now):
+            t = due.task
+            for period in due.periods:
+                ok = False
+                try:
+                    ok = runner(t, period)
+                except Exception as e:             # noqa: BLE001  러너 실패 = 이 실행 실패(다음에 재시도)
+                    print(f"🔴 {t.name} {period} 실행 예외: {e!r}")
+                wm = read_watermark(t)
+                wm["last_attempt"] = period.isoformat()
+                if ok:
+                    wm["last_success"] = period.isoformat()
+                write_watermark(t, wm)
+                report.append({"task": t.name, "period": period.isoformat(), "ok": ok})
+                if not ok:
+                    # 순차 드레인: 실패 주기 이후는 다음 기동에서 여기부터 재시도된다.
+                    print(f"⚠️  {t.name}: {period} 실패 — 이후 주기 진행 중단(구멍 방지).")
+                    break
+        return report
+    finally:
+        slot.__exit__(None, None, None)
 
 
 # ─────────────────────────── 진입점 ───────────────────────────
 
 def _dry(tasks: list[Task], now: date) -> None:
+    ext = [t for t in tasks if t.scheduled and t.runner != "local"]
+    if ext:
+        print("· 외부 러너 스킵(이중실행 방지, 규칙 01): "
+              + ", ".join(f"{t.name}→{t.runner}" for t in ext))
     dues = due_tasks(tasks, now=now)
     if not dues:
         print(f"[{now}] 지금 due 인 task 없음.")
