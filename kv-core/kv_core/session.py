@@ -66,18 +66,23 @@ def run_session(
     """
     _assert_safe_tools(allowed_tools)
 
-    cmd = ["claude", "-p", prompt]
+    # prompt 는 argv 가 아니라 **stdin** 으로 넘긴다 — 판단 대상 데이터가 "-" 로 시작해도
+    # CLI 플래그로 해석될 수 없다(리뷰 W5-med, 인자 주입 차단).
+    cmd = ["claude", "-p"]
     if system:
         cmd += ["--append-system-prompt", system]
     if allowed_tools:
         cmd += ["--allowedTools", *allowed_tools]
     cmd += ["--disallowedTools", *_FORBIDDEN_TOOLS]   # 항상 위험 도구 차단(belt-and-suspenders)
+    # 전역 설정(~/.claude)의 MCP 서버·allowlist 를 세션에 상속하지 않는다(리뷰 H5).
+    # --strict-mcp-config + --mcp-config 미지정 = MCP 0개 — "도구 0개"가 비로소 구조가 된다.
+    cmd += ["--strict-mcp-config"]
     if model:
         cmd += ["--model", model]
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd,
+            cmd, input=prompt, capture_output=True, text=True, timeout=timeout, cwd=cwd,
         )
     except subprocess.TimeoutExpired as e:
         raise SessionError(f"claude -p timeout({timeout}s) — 권한 프롬프트에 걸렸거나 과부하") from e

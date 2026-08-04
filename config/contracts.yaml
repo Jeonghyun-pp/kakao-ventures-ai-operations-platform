@@ -6,10 +6,13 @@
 #     halt       = 하나라도 어긋나면 전체 중단(발송 등 비가역 스테이지)
 #     quarantine = 어긋난 것만 DLQ 격리하고 나머지 진행(판정 기입 등 가역 스테이지)
 #   schema: {필드: {type, required, enum, nonempty}}
+#   min_records: 통과 레코드 최소 기대치 — 0건 성공(진공 통과)을 침묵 실패와 구분한다(규칙05).
+#     판정 스테이지는 후보가 있을 때만 도니 최소 1. meeting-mail 은 "보낼 대상 없음"이 정당해서 0(기본).
 
 # ── 그물망 소싱 판단 (노션 Tier 기입 = 가역) ──
 judge:
   on_invalid: quarantine          # 오판 한 건은 다음 회차가 주움. recall 우선.
+  min_records: 1                  # 후보를 넣고 판정 0건이면 이상 신호(인증 만료·프로즈 출력 등)
   schema:
     id:      {type: int, required: true}
     verdict: {type: str, required: true, enum: [keep, promo, unsure]}
@@ -18,6 +21,7 @@ judge:
 # ── 링크드인/스레드 Tier 판정 (노션 select 기입 = 가역) ──
 judge-tier:
   on_invalid: quarantine
+  min_records: 1
   schema:
     id:      {type: int, required: true}
     tier:    {type: str, required: true, enum: [Catch, Trend, Wait]}   # 노션 select 옵션과 정확히 일치

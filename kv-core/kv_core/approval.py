@@ -31,9 +31,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _assert_no_send() -> None:
-    """발송 경로가 불리면 즉시 멈춘다 — 구조로 막는다(선언 아님)."""
-    raise RuntimeError("승인 브릿지는 발송하지 않는다 — 초안·알림까지만. 발송은 사람(버튼).")
+# (구) _assert_no_send 마커 함수는 삭제 — 어디서도 호출되지 않는 데드코드였다(리뷰 D2).
+# 실제 무발송 보장 = 이 모듈과 kv_core.gmail 에 send 호출이 없다는 사실이며,
+# tests/_synthetic_slice.py ④ 가 AST 로 상시 검증한다.
 
 
 def _route(kind: str, origin: str, partner: str | None) -> tuple[str, str]:

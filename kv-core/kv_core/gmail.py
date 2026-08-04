@@ -2,7 +2,12 @@
 
 승인 브릿지가 '발송할 메일'을 Gmail 초안으로 만들 때 쓴다. `drafts().create` 만 부르고
 `messages().send` 는 이 모듈에 **존재하지 않는다** — 발송은 사람이 Gmail 에서 직접(버튼).
-OAuth 스코프도 `gmail.modify`(발송 불가)라 API 레벨에서도 send 가 막혀 있다.
+
+⚠️ 발송을 막는 것은 **"코드에 send 호출이 없다"는 사실 하나**다. 스코프(`gmail.modify`)는
+구글 문서상 `messages.send` 를 **허용**하므로 API 레벨 차단이 아니다(W0-W5 리뷰 H6 에서 정정
+— 이전 주석은 이중 방어라고 잘못 주장했다). 그래서 "send 호출 0건"을 사람 눈이 아니라
+**AST 검사**(tests/_synthetic_slice.py ④)가 상시 확인한다. 이 모듈에 send 헬퍼를 추가하면
+그 테스트가 깨진다 — 그게 의도다(발송 승격은 W10 승인 브릿지 경유로만).
 (triage/core/gmail.py 의 초안 로직을 kv-core 로 승격 — 승인 브릿지가 스킬에 의존하지 않게.)
 """
 from __future__ import annotations
@@ -12,12 +17,7 @@ from email.mime.text import MIMEText
 
 from . import secrets
 
-_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]   # send 없음
-
-
-def _assert_no_send() -> None:
-    """발송 경로가 불리면 즉시 멈춘다 — 선언이 아니라 구조로 막는다."""
-    raise RuntimeError("kv_core.gmail 은 발송하지 않는다 — 초안까지만. 발송은 사람이 Gmail 에서.")
+_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]   # 주의: 이 스코프는 send 를 막지 않는다(위 참조)
 
 
 def service():

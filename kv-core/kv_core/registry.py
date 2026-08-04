@@ -16,12 +16,13 @@ from pathlib import Path
 
 import yaml
 
-from . import paths
+from . import cadence, paths
 
 _KINDS = {"routine", "ondemand"}
 _CATCHUP = {"coalesce", "backfill"}
 _WATERMARK = {"last_success", "last_attempt"}
 _ORIGIN = {"system", "partner"}
+_RUNNERS = {"local", "github-actions"}   # local=우리 스케줄러 · 그 외=외부 실행 주체(스케줄러는 건드리지 않음)
 
 
 @dataclass
@@ -38,6 +39,8 @@ class Task:
     covers: list[str] = field(default_factory=list)
     status: str = "slot"
     notes: str = ""
+    runner: str = "local"       # 실행 주체. "local"만 스케줄러가 돌린다 — 카탈로그(무슨 일이 있나)와
+                                # 실행 주체(누가 돌리나)의 분리. 외부 러너 이중실행 방지(불변규칙 01).
 
     @property
     def scheduled(self) -> bool:
@@ -70,8 +73,11 @@ def load(path: Path | None = None) -> list[Task]:
             raise ValueError(f"task '{t.name}': watermark 는 {_WATERMARK} (got '{t.watermark}')")
         if t.origin not in _ORIGIN:
             raise ValueError(f"task '{t.name}': origin 은 {_ORIGIN} (got '{t.origin}')")
-        if t.scheduled and t.resources == [] and t.skill != "net-sourcing":
-            pass  # 자원 없는 스케줄 task 는 허용(appstore 처럼 $0). 경고만 하지 않는다.
+        if t.runner not in _RUNNERS:
+            raise ValueError(f"task '{t.name}': runner 는 {_RUNNERS} (got '{t.runner}')")
+        if t.scheduled and t.cadence not in cadence.DAYS:
+            # 오타(dayly 등)가 런타임 weekly 폴백으로 조용히 굳지 않게 load 시점에 잡는다(fail-loud).
+            raise ValueError(f"task '{t.name}': cadence 는 {sorted(cadence.DAYS)} (got '{t.cadence}')")
         out.append(t)
     _assert_unique_names(out)
     return out

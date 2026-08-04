@@ -79,7 +79,7 @@ _ALLOWED: dict[str, tuple[str, ...]] = {
     "requested":  ("queued", "failed"),
     "queued":     ("running", "failed"),
     "running":    ("validating", "running", "failed"),  # running→running: 재개 시 무해한 재진입
-    "validating": ("completed", "failed"),
+    "validating": ("running", "completed", "failed"),   # validating→running: 검증 중 죽은 잡의 재개(검증 재진입)
     "completed":  (),   # 종단
     "failed":     (),   # 종단
 }
@@ -129,16 +129,37 @@ def atomic_write(path: Path, text: str) -> None:
 # ─────────────────────────── 이벤트(진실) ───────────────────────────
 # append-only 장부. 이 함수만이 진실을 기록한다. 나머지(state·cursor)는 전부 이걸 재생한 결과다.
 
+def _repair_torn_tail(p: Path) -> None:
+    """크래시로 개행 없이 끝난(반쯤 써진) 마지막 줄을 잘라낸다.
+
+    이 복구가 없으면 다음 append 가 torn 줄 **위에 이어붙어** 파일 중간에 병합줄이 생기고,
+    read_events 가 영구 크래시한다(W0-W5 리뷰 H2, 실측 재현). 반쯤 써진 이벤트는 fsync 를
+    통과하지 못한 것이라 "기록된 적 없음" — 잘라내는 것이 append-only 규약의 복원이다.
+    """
+    if not p.exists() or p.stat().st_size == 0:
+        return
+    with open(p, "rb+") as f:
+        f.seek(-1, os.SEEK_END)
+        if f.read(1) == b"\n":
+            return                                    # 정상 종료 — 손댈 것 없음
+        data = p.read_bytes()
+        cut = data.rfind(b"\n") + 1                   # 마지막 완전한 줄의 끝(없으면 0)
+        f.truncate(cut)
+        f.flush()
+        os.fsync(f.fileno())
+
+
 def append_event(skill: str, job_id: str, kind: str, **data: Any) -> dict:
     """events.jsonl 에 한 줄 추가한다. **덮어쓰지 않는다 — 중단돼도 앞부분이 남는다.**
 
-    append + fsync 로 쓴다. 마지막 한 줄이 크래시로 반쯤 써질 수는 있으나, 재생 시
-    깨진 마지막 줄은 무시한다(rebuild 참조). 앞줄들은 이미 온전하다.
+    append + fsync 로 쓴다. 마지막 한 줄이 크래시로 반쯤 써질 수 있으므로, append 전에
+    torn 꼬리를 복구해(_repair_torn_tail) "깨질 수 있는 건 마지막 줄뿐" 규약을 유지한다.
     """
     ev = {"ts": _now_iso(), "kind": kind, **data}
     line = json.dumps(ev, ensure_ascii=False)
     p = _events_path(skill, job_id)
     p.parent.mkdir(parents=True, exist_ok=True)
+    _repair_torn_tail(p)
     with open(p, "a", encoding="utf-8") as f:
         f.write(line + "\n")
         f.flush()
@@ -278,11 +299,21 @@ class heavy_slot:
         try:
             self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            if self._stale():
-                self.path.unlink(missing_ok=True)
-                self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            else:
+            if not self._stale():
                 raise SlotBusy(f"heavy 슬롯 점유 중: {self.path}")
+            # stale 회수 — unlink 로 경쟁하면 두 프로세스가 서로의 새 락을 지워 둘 다 진입할 수
+            # 있다(리뷰 D4). rename 은 원자적이라 **한 프로세스만** 소유권을 선점한다.
+            claim = self.path.with_suffix(f".reap-{os.getpid()}")
+            try:
+                os.rename(self.path, claim)
+            except FileNotFoundError:
+                raise SlotBusy(f"heavy 슬롯 회수 경쟁 중 — 물러난다: {self.path}")
+            claim.unlink(missing_ok=True)
+            try:
+                self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                # 회수 직후 제3자가 정당하게 선점 — SlotBusy 로 변환해 조용한 크래시를 막는다.
+                raise SlotBusy(f"heavy 슬롯 점유 중(회수 직후 선점됨): {self.path}")
         os.write(self.fd, str(os.getpid()).encode())
         return self
 
@@ -440,6 +471,11 @@ def run(
                    done=done_n, skipped=skipped)
         _materialize(skill, job_id, rebuild(skill, job_id))
         return rebuild(skill, job_id)
+    except Exception as e:                            # noqa: BLE001
+        # 실패는 이벤트를 남기고 전파한다(불변규칙 06) — run_pipeline 과 달리 failed 로
+        # 전이하지 않는다: 잡 단위 재시도(재개)가 run() 의 계약이라 종단시키면 안 된다.
+        append_event(skill, job_id, "run_error", error=repr(e))
+        raise
     finally:
         slot_cm.__exit__(None, None, None)
 

@@ -163,13 +163,17 @@ def main() -> int:
     ok_all &= p3
     del os.environ["INJECT_BAD"]
 
-    print("④ 구조적 무발송 (gmail._assert_no_send 살아있음, 초안=로컬 파일)")
-    try:
-        gmail._assert_no_send()
-        p4 = False
-    except RuntimeError:
-        p4 = True
-    print(f"   → _assert_no_send 여전히 차단={p4}, 초안 경로={_drafts()} · {'PASS' if p4 else 'FAIL'}")
+    print("④ 구조적 무발송 (AST: gmail.py 에 .send() 호출 0건, 초안=로컬 파일)")
+    # 예전 검증(_assert_no_send 호출→raise 확인)은 동어반복이었다 — send 헬퍼가 추가돼도
+    # 통과했다(리뷰 D2). 이제 소스 AST 에서 실제 .send 호출 부재를 직접 단언한다.
+    import ast as _ast
+    _src = Path(gmail.__file__).read_text(encoding="utf-8")
+    _send_calls = [n for n in _ast.walk(_ast.parse(_src))
+                   if isinstance(n, _ast.Call) and isinstance(n.func, _ast.Attribute)
+                   and n.func.attr == "send"]
+    p4 = not _send_calls
+    print(f"   → gmail.py 실제 .send() 호출 {len(_send_calls)}건(0 기대), "
+          f"초안 경로={_drafts()} · {'PASS' if p4 else 'FAIL'}")
     ok_all &= p4
 
     print("\n" + ("🎉 W5 수직선 증명 전부 PASS" if ok_all else "🔴 일부 FAIL"))

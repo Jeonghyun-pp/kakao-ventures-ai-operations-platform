@@ -46,6 +46,8 @@
   resources: []              # $0·무인증
   stages: [snapshot]
   origin: system
+  runner: github-actions     # ⚠️ GH Actions cron 이 실행 주체 — 로컬 스케줄러는 스킵(이중실행 방지, 규칙 01).
+                             # 로컬로 컷오버하려면 W6 에서 GH Actions 은퇴 결정 후 runner: local 로 변경(3일 검증 규율).
   covers: [그물망]
   status: done
 
