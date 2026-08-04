@@ -205,6 +205,58 @@ def test_d4_stale_lock() -> None:
     p.unlink(missing_ok=True)
 
 
+# ── W5-med: validate.py 경계 5종 (리뷰 프로브의 상설화) ─────────────────────
+
+def test_validate_boundaries() -> None:
+    print("[W5-med] validate 경계 — 오추출·bool·results:[]·DLQ append·진공")
+    from pathlib import Path
+    from kv_core import validate as v
+
+    # P6: 프로즈 괄호 2개 → 예전엔 틀린 부분구조를 조용히 반환. 이제 모호=ValueError(fail-closed)
+    txt = '먼저 [1, 2] 를 보고, 판정: [{"id": 0, "verdict": "keep"}]'
+    try:
+        got = v.parse_json(txt)
+        check("모호한 다중 JSON → fail-closed", False, f"조용히 반환: {got!r}")
+    except ValueError:
+        check("모호한 다중 JSON → fail-closed", True)
+    # 깨끗한 단일 배열은 여전히 통과(관대함 유지)
+    clean = v.parse_json('판정 결과:\n[{"id": 0, "verdict": "keep"}]')
+    check("단일 JSON 은 여전히 관대하게 추출", clean == [{"id": 0, "verdict": "keep"}])
+
+    # P7: bool 이 int 로 통과하던 것 → 위반
+    errs = v.check_record({"id": True, "verdict": "keep"},
+                          {"id": {"type": "int", "required": True},
+                           "verdict": {"type": "str", "required": True}})
+    check("bool 은 int 계약 위반", any("bool" in e for e in errs), f"errs={errs}")
+
+    # P12: {"results": []} = 정당한 0건 — 통짜 dict 로 둔갑해 부당 위반이 되지 않아야
+    c0 = v.Contract(schema={"to": {"type": "str", "required": True}}, on_invalid="halt")
+    ok, bad = v.validate_text('{"results": []}', c0)
+    check('{"results": []} → 0건으로 정상 해석(부당 halt 없음)', ok == [] and bad == [])
+
+    # P10b: DLQ 가 회차 간 append 로 보존되는가
+    dlq = Path(os.environ["KV_DATA"]) / "dlq-test" / "q.jsonl"
+    cq = v.Contract(schema={"id": {"type": "int", "required": True}}, on_invalid="quarantine")
+    v.validate_records([{"bad": 1}], cq, dlq_path=dlq)
+    v.validate_records([{"bad": 2}], cq, dlq_path=dlq)
+    lines = [ln for ln in dlq.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    check("DLQ 회차 간 보존(append)", len(lines) == 2, f"lines={len(lines)}")
+
+    # 진공 통과: min_records=1 인 halt 계약에서 0건 → ValidationHalt
+    c1 = v.Contract(schema={"id": {"type": "int", "required": True}},
+                    on_invalid="halt", min_records=1)
+    try:
+        v.validate_records([], c1)
+        check("min_records 미달 halt → ValidationHalt", False, "통과해버림")
+    except v.ValidationHalt:
+        check("min_records 미달 halt → ValidationHalt", True)
+    # meeting-mail(min_records 0)은 0건이 정당 — contracts.yaml 로드로 확인
+    cs = v.load_contracts(Path(__file__).resolve().parents[2] / "config" / "contracts.yaml")
+    check("contracts: judge=1·meeting-mail=0",
+          cs["judge"].min_records == 1 and cs["meeting-mail"].min_records == 0,
+          f"judge={cs['judge'].min_records}, mail={cs['meeting-mail'].min_records}")
+
+
 if __name__ == "__main__":
     print(f"=== 리뷰 회귀 테스트 (KV_DATA={os.environ['KV_DATA']}) ===\n")
     test_h1_validating_resume()
@@ -220,6 +272,8 @@ if __name__ == "__main__":
     test_scheduler_double_start()
     print()
     test_d4_stale_lock()
+    print()
+    test_validate_boundaries()
     print()
     if FAIL:
         print(f"❌ 실패 {len(FAIL)}건: {FAIL}")

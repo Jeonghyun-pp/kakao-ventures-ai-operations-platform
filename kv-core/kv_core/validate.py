@@ -36,6 +36,7 @@ class ValidationHalt(Exception):
 class Contract:
     schema: dict            # {field: {type, required, enum, nonempty}}
     on_invalid: str = "halt"   # halt | quarantine
+    min_records: int = 0    # 통과 레코드 최소 기대치 — 0건 성공(진공 통과)을 침묵 실패와 구분한다(규칙05)
 
     def __post_init__(self):
         if self.on_invalid not in ("halt", "quarantine"):
@@ -57,13 +58,26 @@ def parse_json(text: str):
         return json.loads(t)
     except json.JSONDecodeError:
         pass
-    for open_c, close_c in (("[", "]"), ("{", "}")):   # 앞뒤 프로즈 제거: 첫 괄호~마지막 괄호
-        i, j = t.find(open_c), t.rfind(close_c)
-        if 0 <= i < j:
+    # 프로즈 속에서 완전한 JSON 값들을 스캔한다. 예전의 "첫 괄호~마지막 괄호" 슬라이스는
+    # 프로즈 괄호가 섞이면 틀린 부분구조를 **조용히** 반환했다(리뷰 W5-med, N건이 1건으로 축소).
+    # 후보가 정확히 1개면 그것, 2개 이상이면 모호 — fail-closed 로 파싱 실패 처리한다.
+    dec = json.JSONDecoder()
+    candidates: list = []
+    i = 0
+    while i < len(t):
+        if t[i] in "[{":
             try:
-                return json.loads(t[i:j + 1])
-            except json.JSONDecodeError:
+                obj, end = dec.raw_decode(t, i)
+                candidates.append(obj)
+                i = end
                 continue
+            except json.JSONDecodeError:
+                pass
+        i += 1
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        raise ValueError(f"JSON 후보가 {len(candidates)}개 — 모호해서 채택하지 않는다(fail-closed)")
     raise ValueError("JSON 파싱 실패 — soft 출력이 계약을 어겼다")
 
 
@@ -84,6 +98,9 @@ def check_record(rec: dict, schema: dict) -> list[str]:
         want = spec.get("type")
         if want and want in _TYPES and not isinstance(val, _TYPES[want]):
             errs.append(f"{field} 타입 {type(val).__name__} ≠ {want}")
+        elif want in ("int", "float") and isinstance(val, bool):
+            # bool 은 int 의 서브클래스라 isinstance 를 통과한다 — 계약상 True 는 숫자가 아니다.
+            errs.append(f"{field} 타입 bool ≠ {want}")
         enum = spec.get("enum")
         if enum and val not in enum:
             errs.append(f"{field}={val!r} 는 허용값 아님 {enum}")
@@ -112,11 +129,26 @@ def validate_records(
             f"halt 계약 위반 {len(bad)}건 — 아무것도 발행하지 않음. 예: {sample}"
         )
     if bad and dlq_path is not None:              # quarantine: 격리 기록
-        dlq_path.parent.mkdir(parents=True, exist_ok=True)
-        dlq_path.write_text(
-            json.dumps([{"record": r, "errors": e} for r, e in bad],
-                       ensure_ascii=False, indent=2), encoding="utf-8")
+        _dlq_append(dlq_path, [{"record": r, "errors": e} for r, e in bad])
+
+    if len(ok) < contract.min_records:            # 진공 통과 방지(규칙05): 0건 성공 ≠ 성공
+        msg = f"통과 레코드 {len(ok)}건 < 계약 최소 {contract.min_records}건"
+        if contract.on_invalid == "halt":
+            raise ValidationHalt(msg)
+        print(f"⚠️  validate: {msg} — quarantine 계약이라 진행하나 산출이 기대에 못 미친다.")
+        if dlq_path is not None:
+            _dlq_append(dlq_path, [{"batch_error": msg}])
     return ok, bad
+
+
+def _dlq_append(dlq_path: Path, entries: list[dict]) -> None:
+    """DLQ 는 **append(jsonl)** — 덮어쓰면 지난 회차 격리분이 유실된다(리뷰 W5-med)."""
+    from datetime import datetime, timezone
+    dlq_path.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with open(dlq_path, "a", encoding="utf-8") as f:
+        for e in entries:
+            f.write(json.dumps({"ts": ts, **e}, ensure_ascii=False) + "\n")
 
 
 def validate_text(
@@ -132,11 +164,16 @@ def validate_text(
         if contract.on_invalid == "halt":
             raise ValidationHalt(f"파싱 실패(halt): {e}") from e
         if dlq_path is not None:
-            dlq_path.parent.mkdir(parents=True, exist_ok=True)
-            dlq_path.write_text(json.dumps({"parse_error": str(e), "raw": text},
-                                           ensure_ascii=False, indent=2), encoding="utf-8")
+            _dlq_append(dlq_path, [{"parse_error": str(e), "raw": text}])
         return [], [({"_raw": text}, [str(e)])]
-    records = data if isinstance(data, list) else data.get("results") or data.get("rows") or [data]
+    if isinstance(data, list):
+        records = data
+    elif data.get("results") is not None:   # `or` 금지 — 빈 [] (정당한 0건)가 falsy 로 둔갑한다(리뷰 W5-med)
+        records = data["results"]
+    elif data.get("rows") is not None:
+        records = data["rows"]
+    else:
+        records = [data]
     return validate_records(records, contract, dlq_path=dlq_path)
 
 
@@ -149,5 +186,6 @@ def load_contracts(path: str | Path) -> dict[str, Contract]:
     out: dict[str, Contract] = {}
     for stage, spec in raw.items():
         out[stage] = Contract(schema=spec.get("schema") or {},
-                              on_invalid=spec.get("on_invalid", "halt"))
+                              on_invalid=spec.get("on_invalid", "halt"),
+                              min_records=int(spec.get("min_records", 0)))
     return out
