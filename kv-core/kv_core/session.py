@@ -18,13 +18,18 @@ claude 출력은 **soft** 다 — 스키마를 프롬프트에 줘도 강제가 
 코드펜스로 감싸일 수 있다. 그 검증은 이 모듈이 아니라 `validate.py`(WAP 의 Audit) 몫이다.
 여기서는 stdout 원문(str)을 그대로 돌려준다.
 
-## 쿼터
-구독 쿼터 감시(게이트 재타깃)는 W6 다. 자원 직렬화는 파이프라인 레벨에서
-`run_pipeline(resources=["claude"])` 로 한다(이 모듈이 아니라).
+## 쿼터 [W6]
+구독엔 사용량 API 가 없어 **호출 수를 프록시**로 잰다. 이 모듈이 유일한 통로라 여기가 계측
+지점(chokepoint metering): spawn 전 `gate.check_calls("claude")` 로 어드미션, spawn 시도 후
+(성공/실패/timeout 공통) `gate.record_call` 로 1콜 기록. 게이트에 막힌 호출은 spawn 자체가
+없으므로 카운트되지 않는다. 임계는 config/resources.yaml `claude:` 선언(하드코딩 0).
+자원 직렬화는 파이프라인 레벨 `run_pipeline(resources=["claude"])` (이 모듈이 아니라).
 """
 from __future__ import annotations
 
 import subprocess
+
+from . import gate
 
 # 부작용이 가역·로컬이라 허용 가능한 도구(굳이 줄 때만).
 _SAFE_TOOLS = {"Read", "Write", "Edit", "Grep", "Glob", "LS"}
@@ -66,6 +71,12 @@ def run_session(
     """
     _assert_safe_tools(allowed_tools)
 
+    # [W6] 어드미션 — 일일 호출 게이트. 막히면 spawn 없이 시끄럽게 실패(카운트 안 됨).
+    v = gate.check_calls("claude")
+    if not v.allowed:
+        gate.notify_blocked(v)
+        raise SessionError(f"claude 일일 호출 게이트 차단: {v.reason}")
+
     # prompt 는 argv 가 아니라 **stdin** 으로 넘긴다 — 판단 대상 데이터가 "-" 로 시작해도
     # CLI 플래그로 해석될 수 없다(리뷰 W5-med, 인자 주입 차단).
     cmd = ["claude", "-p"]
@@ -85,10 +96,13 @@ def run_session(
             cmd, input=prompt, capture_output=True, text=True, timeout=timeout, cwd=cwd,
         )
     except subprocess.TimeoutExpired as e:
+        gate.record_call("claude", ok=False, err="timeout")   # timeout 도 쿼터를 태웠다 — 카운트
         raise SessionError(f"claude -p timeout({timeout}s) — 권한 프롬프트에 걸렸거나 과부하") from e
     except FileNotFoundError as e:
+        # spawn 자체가 없었음 — 쿼터 소모 0, 카운트하지 않는다
         raise SessionError("claude 실행 파일을 못 찾음 — CLI 설치·PATH 확인") from e
 
+    gate.record_call("claude", ok=(proc.returncode == 0))
     if proc.returncode != 0:
         raise SessionError(
             f"claude -p 비정상 종료 rc={proc.returncode}: {(proc.stderr or '').strip()[:300]}"
