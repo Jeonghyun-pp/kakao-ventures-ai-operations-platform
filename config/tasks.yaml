@@ -23,7 +23,21 @@
   origin: system
   covers: [그물망]
   status: partial
-  notes: judge=claude -p 세션(현 주1회 수동→W5 무인 승격) · meeting-mail(auto-mail) 노션에만·리포 미이식
+  notes: judge 는 별도 judge task 로 분리(W6, 무인) · meeting-mail(auto-mail) 노션에만·리포 미이식(W8 승인브릿지와 함께)
+
+- name: judge                # [W6] 무인 판정 — 미판정(Tier/판정 is_empty) 행 → claude → 검증 → 기입(가역)
+  skill: net-sourcing
+  kind: routine
+  cadence: daily             # 07:00 appstore-sourcing 크론이 매일 미판정 행을 만든다
+  catch_up: coalesce
+  watermark: last_success
+  resources: [claude, notion]
+  stages: [criteria-gate, export, judge-apply]
+  origin: system
+  runner: local
+  covers: [그물망]
+  status: partial
+  notes: references/judge-criteria.md 룰 본문이 비어 있으면 criteria-gate 가 fail-loud 스킵 — 룰 기입 즉시 코드 변경 0으로 가동
 
 - name: sourcing-followup
   skill: net-sourcing
@@ -41,15 +55,31 @@
   skill: net-sourcing
   kind: routine
   cadence: daily
-  catch_up: backfill         # 일일 랭킹 — 하루 빠지면 시계열에 구멍(무료라 backfill 부담 0)
+  catch_up: coalesce         # [W6] backfill→coalesce: 애플은 과거 순위를 안 준다 — backfill 은 오늘을
+                             # N번 재수집하며 워터마크에 거짓 "과거 성공"을 남길 뿐. 결손은 staleness 로 관측(W7).
   watermark: last_success
   resources: []              # $0·무인증
   stages: [snapshot]
   origin: system
-  runner: github-actions     # ⚠️ GH Actions cron 이 실행 주체 — 로컬 스케줄러는 스킵(이중실행 방지, 규칙 01).
-                             # 로컬로 컷오버하려면 W6 에서 GH Actions 은퇴 결정 후 runner: local 로 변경(3일 검증 규율).
+  runner: github-actions     # primary 는 여전히 GH Actions(data 브랜치) — 이중실행 방지(규칙 01).
+  shadow: true               # [W6] 로컬 스케줄러가 검증용 병행 실행(로컬 ~/kv-data, 저장소 분리라 충돌 0).
+                             # 컷오버(3일 검증 후): runner: local 로 바꾸고 shadow 제거 — 그게 스위치 전부다.
   covers: [그물망]
   status: done
+
+- name: appstore-sourcing    # [W6] 카탈로그 등재 — 실행 주체는 기존 plist(스케줄러 불관여)
+  skill: net-sourcing
+  kind: routine
+  cadence: daily
+  catch_up: coalesce
+  watermark: last_attempt
+  resources: [notion]
+  stages: [collect, land]
+  origin: system
+  runner: launchd-direct     # 실행체 = ~/Library/LaunchAgents/com.kv.net-sourcing.appstore.plist (07:00 KST)
+  covers: [그물망]
+  status: done
+  notes: main.py run --channel appstore ($0·수집→노션 착지 138행/일). 스케줄러 이관은 appstore-snapshot 컷오버 검증 후 검토.
 
 - name: mail-triage
   skill: mail-harness

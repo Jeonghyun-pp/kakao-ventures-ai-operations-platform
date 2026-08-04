@@ -9,7 +9,7 @@
 #   min_records: 통과 레코드 최소 기대치 — 0건 성공(진공 통과)을 침묵 실패와 구분한다(규칙05).
 #     판정 스테이지는 후보가 있을 때만 도니 최소 1. meeting-mail 은 "보낼 대상 없음"이 정당해서 0(기본).
 
-# ── 그물망 소싱 판단 (노션 Tier 기입 = 가역) ──
+# ── (테스트 전용) 합성 수직선 계약 — tests/_synthetic_slice.py 가 쓴다. 실 파이프라인 계약 아님. ──
 judge:
   on_invalid: quarantine          # 오판 한 건은 다음 회차가 주움. recall 우선.
   min_records: 1                  # 후보를 넣고 판정 0건이면 이상 신호(인증 만료·프로즈 출력 등)
@@ -18,13 +18,25 @@ judge:
     verdict: {type: str, required: true, enum: [keep, promo, unsure]}
     reason:  {type: str, required: false, nonempty: true}
 
-# ── 링크드인/스레드 Tier 판정 (노션 select 기입 = 가역) ──
+# ── 스레드·링크드인 Tier 판정 (노션 select 기입 = 가역) ──
+# [W6] 실형으로 교체: 실키는 노션 page UUID(str) — 구 id:int 는 합성 전용 형이었다.
+#      Cut 추가(judge-criteria.md A12 확정). 최종 권위는 judge_cli.apply 의 행별 allowed(라이브 스키마) — 이중 방어.
 judge-tier:
   on_invalid: quarantine
   min_records: 1
   schema:
-    id:      {type: int, required: true}
-    tier:    {type: str, required: true, enum: [Catch, Trend, Wait]}   # 노션 select 옵션과 정확히 일치
+    page_id:   {type: str, required: true, nonempty: true}
+    verdict:   {type: str, required: true, enum: [Catch, Trend, Wait, Cut]}
+    reason:    {type: str, required: false, nonempty: true}
+    one_liner: {type: str, required: false, nonempty: true}
+
+# ── 앱스토어 판정 (노션 '판정' select = 가역) ── [W6 신규]
+judge-appstore:
+  on_invalid: quarantine
+  min_records: 1
+  schema:
+    page_id: {type: str, required: true, nonempty: true}
+    verdict: {type: str, required: true, enum: [Pass, Drop]}
     reason:  {type: str, required: false, nonempty: true}
 
 # ── 그물망 미팅요청 메일 초안 (발송 = 비가역) ──

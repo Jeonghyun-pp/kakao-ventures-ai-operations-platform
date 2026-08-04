@@ -28,6 +28,11 @@ apify:
   #   net-sourcing      preflight $12  / run $16   (회당 추정 $10.5)
   #   ai-consumer-pulse preflight $0.8 / run $1.5  (회당 추정 ~$0.35)
 
-# Anthropic 은 여기 없다 — 현재 전부 Claude Code 구독으로 돌고 종량 과금이 $0 이다.
-# 무인화(W6)가 시작되면 구독 쿼터를 사람과 자동화가 나눠 쓰게 되므로 그때 다시 본다.
-# 가정: Max 20x 쿼터가 무인화 부하를 흡수한다. 깨지는 증상 = 돈은 안 나가는데 아침에 사람이 막힘.
+# [W6] claude — 구독(Max x20)이라 $ 이 아니라 **호출 수가 프록시 지표**다(직접 쿼터 계측 API 없음).
+# 계측: session.py(단일 통로)가 $KV_DATA/_usage/claude/<UTC날짜>.jsonl 에 1콜=1줄 append.
+# 기준일 = UTC(워터마크와 동일) — KST 09:00 에 일일 창이 리셋됨에 주의.
+# 이 게이트가 지키는 것 = 폭주 방화벽(재시도 루프가 밤새 수백 번 부르는 것) + 사람 몫 잠식 방지(W2 레슨 #1).
+# 현 baseline ~5콜/일(judge 25배치 상한 포함해도 <30) — Max x20 여유 반영해 느슨하게.
+claude:
+  daily_calls_warn: 30
+  daily_calls_block: 50
