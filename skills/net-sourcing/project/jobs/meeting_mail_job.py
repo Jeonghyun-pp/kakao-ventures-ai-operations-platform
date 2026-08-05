@@ -61,7 +61,7 @@ def _work(job_id: str) -> Path:
 def s_collect_catch(skill: str, job_id: str) -> None:
     from core import notion
     cfg = _cfg()
-    token = notion._token(cfg)
+    token = notion._token()
     ch_dbs: dict = (cfg.get("notion") or {}).get("channel_db_ids") or {}
     qdir = paths.data("_approvals")
 
@@ -154,7 +154,19 @@ def _stages() -> list[Stage]:
 
 
 def run(period: date) -> int:
-    jid = f"meeting-mail-{period.isoformat()}"
+    # attempt-suffix (judge_job 과 동일한 T2 처방): 당일 실패 잡이 종단이어도 -r2·-r3 로
+    # 같은 날 재시도. 멱등 가드(선필터·dedup_key·process_items 커서)가 중복을 막는다.
+    base = f"meeting-mail-{period.isoformat()}"
+    jid = None
+    for n in range(1, 4):
+        cand = base if n == 1 else f"{base}-r{n}"
+        if job.rebuild(SKILL, cand).state == "failed":
+            continue
+        jid = cand
+        break
+    if jid is None:
+        print(f"🔴 {base}: 당일 attempt 3회 전부 실패 — 내일 재시도. 로그 확인 요망.")
+        return 1
     job.create(SKILL, {"kind": "meeting-mail", "period": period.isoformat()}, jid)
     d = job.run_pipeline(SKILL, jid, _stages(), resources=["claude", "notion"])
     print(f"[meeting-mail] {jid} → {d.state}")
