@@ -30,12 +30,25 @@ _PY = paths.repo_root() / ".venv" / "bin" / "python"
 # ─────────────────────────── appstore-snapshot ───────────────────────────
 
 def _board_files_today() -> int:
-    """오늘자 보드 스냅샷 파일 수 — 기준일은 board.py 와 동일한 **로컬(KST) date.today()**.
+    """오늘자 **유효한** 보드 스냅샷 수 — 기준일은 board.py 와 동일한 로컬(KST) date.today().
 
-    스케줄러의 period 는 UTC 라 00~09시 KST 에 하루 어긋난다 — UTC 로 세면 오탐(리스크 메모).
+    [중간점검 T4] 존재만 세면 0바이트/절단 파일 84개도 통과한다(실증됨) — 검증은
+    "몇 개 있나"가 아니라 "몇 개가 **온전한가**": 비어있지 않은 JSON 배열만 센다(규칙 05·07).
+    스케줄러의 period 는 UTC 라 00~09시 KST 에 하루 어긋난다 — UTC 로 세면 오탐.
     """
+    import json
     snap = paths.data("net-sourcing", "snapshots")
-    return len(list(snap.glob(f"appstore_board_*_{date.today().isoformat()}.json")))
+    n = 0
+    for p in snap.glob(f"appstore_board_*_{date.today().isoformat()}.json"):
+        try:
+            if p.stat().st_size == 0:
+                continue
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, list) and data:
+                n += 1
+        except (json.JSONDecodeError, OSError):
+            continue                                  # 파손 = 무효 (카운트 제외 → 임계가 잡는다)
+    return n
 
 
 def run_appstore_snapshot(task: Task, period: date) -> bool:
@@ -53,12 +66,15 @@ def run_appstore_snapshot(task: Task, period: date) -> bool:
     # GH 의 관용치 40 보다 빡빡하게 — 재시도 비용 0: 같은 날 파일 멱등 덮어쓰기).
     n = _board_files_today()
     if n < 80:
-        print(f"🔴 {tag}appstore-snapshot: 오늘자 파일 {n}/84 (<80) — 실패 처리(다음 wake 재시도)")
+        print(f"🔴 {tag}appstore-snapshot: 오늘자 유효 파일 {n}/84 (<80) — 실패 처리(다음 wake 재시도)")
         return False
     if n < 84:
-        print(f"⚠️  {tag}appstore-snapshot: 오늘자 파일 {n}/84 — 부분 결손, 성공 처리하나 확인 요망")
+        msg = f"⚠️ {tag}appstore-snapshot: 오늘자 유효 파일 {n}/84 — 부분 결손(해당 차트는 영구 손실 가능)"
+        print(msg)
+        from . import notify
+        notify.slack(msg)      # [중간점검 A5] 영구 결손은 stdout 침묵으로 두지 않는다(best-effort)
     else:
-        print(f"✅ {tag}appstore-snapshot: 오늘자 파일 {n}/84")
+        print(f"✅ {tag}appstore-snapshot: 오늘자 유효 파일 {n}/84")
     return True
 
 
@@ -87,4 +103,10 @@ WIRED: dict[str, Runner] = {
 
 
 def dispatch(task: Task, period: date) -> bool:
-    return WIRED[task.name](task, period)
+    # [중간점검 A11] 방어: 스케줄러의 이름 필터를 우회해 미배선 task 가 들어오면 —
+    # KeyError 가 "실행 실패"로 조용히 흡수돼 시도 없이 last_attempt 만 전진한다. loud 처리.
+    fn = WIRED.get(task.name)
+    if fn is None:
+        print(f"🔴 dispatch 버그: 미배선 task '{task.name}' 가 필터를 우회해 들어옴 — 실행 없음")
+        return False
+    return fn(task, period)

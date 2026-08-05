@@ -32,6 +32,8 @@
   <dict>
     <key>PATH</key>
     <string>/home/example/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- [중간점검 A4] 블록버퍼링이 부모/자식 로그를 역순 기록 + SIGKILL 시 부모 라인 소실 -->
+    <key>PYTHONUNBUFFERED</key><string>1</string>
   </dict>
   <key>StandardOutPath</key><string>/home/example/kv-data/_scheduler/launchd.log</string>
   <key>StandardErrorPath</key><string>/home/example/kv-data/_scheduler/launchd.log</string>

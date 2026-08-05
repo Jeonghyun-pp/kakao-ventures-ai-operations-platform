@@ -83,7 +83,8 @@ def _fill(n):
     for f in snap.glob("appstore_board_*.json"):
         f.unlink()
     for i in range(n):
-        (snap / f"appstore_board_{i}_top-free_{date.today().isoformat()}.json").write_text("[]")
+        # [T4 반영] 검증이 "존재"가 아니라 "온전함"을 재므로 유효(비어있지 않은) 배열이어야 함
+        (snap / f"appstore_board_{i}_top-free_{date.today().isoformat()}.json").write_text('["app1","app2"]')
 
 
 _fill(84)
