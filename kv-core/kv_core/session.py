@@ -101,6 +101,11 @@ def run_session(
     except FileNotFoundError as e:
         # spawn 자체가 없었음 — 쿼터 소모 0, 카운트하지 않는다
         raise SessionError("claude 실행 파일을 못 찾음 — CLI 설치·PATH 확인") from e
+    except Exception as e:                                # noqa: BLE001  [중간점검 B7]
+        # 그 외 예외(OSError 등)도 spawn 은 시도됐을 수 있다 — 카운트 + SessionError 변환
+        # ("실패는 SessionError" 계약 준수 — 원시 예외를 그대로 흘리지 않는다).
+        gate.record_call("claude", ok=False, err=type(e).__name__)
+        raise SessionError(f"claude -p 예기치 못한 실패: {e!r}") from e
 
     gate.record_call("claude", ok=(proc.returncode == 0))
     if proc.returncode != 0:

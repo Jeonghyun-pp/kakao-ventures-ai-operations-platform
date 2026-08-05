@@ -113,33 +113,51 @@ def calls_today(resource: str) -> int:
 
 
 def record_call(resource: str, **meta) -> None:
-    """호출 1건 기록 — O_APPEND 라 동시 기록도 안전. session.py 가 spawn 시도 후 부른다."""
+    """호출 1건 기록 — O_APPEND 라 동시 기록은 안전. session.py 가 spawn 시도 후 부른다.
+
+    [중간점검 B8, 감수] 자정(UTC)을 걸친 호출은 기록 시각 날짜에 착지 — 다음 날 1건 선소모.
+    방화벽 목적상 ±1은 무해라 감수한다. 크래시-torn 꼬리는 job.py 와 같은 규율로 복구(B6).
+    """
     from datetime import datetime, timezone
+    from .job import _repair_torn_tail
     d = usage_dir(resource)
     d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{_utc_today_str()}.jsonl"
+    _repair_torn_tail(p)                        # [B6] torn 꼬리 위 병합줄 방지(장부 규율 통일)
     line = json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), **meta},
                       ensure_ascii=False)
-    with open(d / f"{_utc_today_str()}.jsonl", "a", encoding="utf-8") as f:
+    with open(p, "a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+_warned_no_block: set[str] = set()   # 키 미설정 notify 는 프로세스당 1회(스팸 방지)
 
 
 def check_calls(resource: str, estimate_calls: int = 1, *, quiet: bool = False) -> Verdict:
     """[W6] 호출 수 게이트 — 실행 **전**. `오늘누적 + 이번추정 > 차단선` → 차단.
 
-    resources.yaml 에 daily_calls_block 이 없으면 **허용 + 경고**(조회불가 패턴과 동일 철학:
-    가드 부재를 아는 것과 모르는 것은 다르다 — 시끄럽게 알리고 지나간다).
+    resources.yaml 에 daily_calls_block 이 없으면(None) **허용 + 시끄러운 경고**.
+    `daily_calls_block: 0` 은 **전면 동결**로 동작한다(falsy 함정 봉쇄 — 중간점검 B3).
+
+    [B5, 감수] check→record 는 원자적이지 않다(TOCTOU) — 동시 세션 수만큼(±수 콜) 초과
+    가능. 파이프라인은 `resources:["claude"]` 직렬화가 전제고, 이 게이트의 목적은 정밀
+    회계가 아니라 폭주 방화벽이라 감수한다. [B9, 감수] config() 캐시는 프로세스 수명 —
+    스케줄러 발화가 단명 프로세스라 stale 창이 실질 0.
     """
     rc = (config().get(resource) or {})
     block = rc.get("daily_calls_block")
     warn = rc.get("daily_calls_warn")
     used = calls_today(resource)
 
-    if not block:
+    if block is None:                            # [B3] 0 은 "미설정"이 아니라 동결
         v = Verdict(resource, allowed=True, unit="calls", used_usd=float(used),
                     ceiling_usd=None,
                     warnings=[f"[{resource}] daily_calls_block 미설정 — 호출 게이트 미작동"])
         if not quiet:
             print(f"⚠️  {v.warnings[0]}")
+        if resource not in _warned_no_block:     # [B4] 무인에서도 보이게 — 1회 notify
+            _warned_no_block.add(resource)
+            notify.slack(f"⚠️ {v.warnings[0]} (config/resources.yaml 확인)")
         return v
 
     v = Verdict(resource, allowed=True, unit="calls",
@@ -147,8 +165,10 @@ def check_calls(resource: str, estimate_calls: int = 1, *, quiet: bool = False) 
     if used + estimate_calls > int(block):
         v.allowed = False
         v.reason = f"일일 호출 차단선 초과: 오늘 {used} + {estimate_calls} > {block}"
-    elif warn and used >= int(warn):
+    elif warn is not None and used >= int(warn):
         v.warnings.append(f"[{resource}] 경고선 도달: 오늘 {used}콜 ≥ {warn} (차단 {block})")
+        if used == int(warn):                    # [B4] 교차 시점 정확히 1회만 notify(스팸 방지)
+            notify.slack(f"⚠️ {v.warnings[-1]}")
     if not quiet:
         for w in v.warnings:
             print(f"⚠️  {w}")
@@ -180,6 +200,8 @@ class Verdict:
         if self.used_usd is None:
             return f"[{self.resource}] 사용량 조회 불가 — 월 가드 미작동"
         if self.unit == "calls":
+            if self.ceiling_usd is None:            # [중간점검 B2] 차단선 미설정 verdict 도 크래시 없이
+                return f"[{self.resource}] 오늘 {self.used_usd:.0f}콜 (차단선 미설정 — 게이트 미작동)"
             return (f"[{self.resource}] 오늘 {self.used_usd:.0f}콜 / 차단 {self.ceiling_usd:.0f} "
                     f"· 잔여 {self.remaining_usd:.0f}콜")
         return (f"[{self.resource}] 이번 달 ${self.used_usd:.2f} / 상한 ${self.ceiling_usd:.0f} "

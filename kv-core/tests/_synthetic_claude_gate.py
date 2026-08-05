@@ -18,7 +18,13 @@ from pathlib import Path
 assert os.environ.get("KV_DATA"), "KV_DATA 스크래치 경로 필수 (실카운터 보호)"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kv_core import gate, session  # noqa: E402
+from kv_core import gate, notify, session  # noqa: E402
+
+# [중간점검 B1] notify 를 스텁으로 캡처 — 이 스텁이 없으면 차단 시나리오가 **실 슬랙 웹훅**으로
+# 가짜 "차단" 경보를 발송한다(실측 사고). 테스트는 외부 부작용 0 이어야 한다.
+_slack_captured: list[str] = []
+notify.slack = lambda text, **kw: (_slack_captured.append(text), True)[1]
+gate.notify = notify   # gate 가 참조하는 모듈 객체도 동일 스텁을 보게
 
 FAIL: list[str] = []
 
@@ -94,6 +100,33 @@ try:
 except session.SessionError:
     pass
 check("④ timeout 도 카운트(쿼터 소모)", gate.calls_today("claude") == n_before + 1)
+
+# ⑤ [B3] block: 0 = 전면 동결 (falsy 함정 회귀)
+gate._cfg = {"claude": {"daily_calls_warn": 0, "daily_calls_block": 0}}
+v0 = gate.check_calls("claude", quiet=True)
+check("⑤ block=0 → 전면 동결(허용 아님)", v0.allowed is False, f"allowed={v0.allowed}")
+
+# ⑥ [B2] 차단선 미설정 verdict 의 summary 가 크래시 없이
+gate._cfg = {"claude": {}}
+v_none = gate.check_calls("claude", quiet=True)
+try:
+    s = v_none.summary()
+    check("⑥ ceiling None summary 무크래시", "미설정" in s, s[:50])
+except TypeError as e:
+    check("⑥ ceiling None summary 무크래시", False, repr(e))
+
+# ⑦ [B1] 차단·경고가 실 슬랙이 아니라 스텁에 캡처됐는지
+check("⑦ notify 전부 스텁 캡처(실발송 0)", len(_slack_captured) >= 1,
+      f"captured={len(_slack_captured)}건")
+
+# ⑧ [E6] 두 파일에 걸친 불변식 기계검증: judge 상한 25 < claude 경고선 30
+import yaml
+_repo = Path(__file__).resolve().parents[2]
+res = yaml.safe_load((_repo / "config" / "resources.yaml").read_text(encoding="utf-8"))
+ncfg = yaml.safe_load((_repo / "skills/net-sourcing/project/config.yaml").read_text(encoding="utf-8"))
+mb = int(ncfg["judge"]["max_batches_per_run"])
+wr = int(res["claude"]["daily_calls_warn"])
+check("⑧ 불변식: max_batches_per_run < daily_calls_warn", mb < wr, f"{mb} < {wr}")
 
 # 정리
 session.subprocess.run = subprocess_run_orig
