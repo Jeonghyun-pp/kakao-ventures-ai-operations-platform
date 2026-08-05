@@ -30,6 +30,16 @@ def service():
     return build("gmail", "v1", credentials=creds)
 
 
+def get_draft(draft_id: str, *, svc=None) -> dict | None:
+    """초안 1건 조회 — [W8] read-back 검증용("만들었다 ≠ 반영됐다"). 읽기 전용."""
+    svc = svc or service()
+    try:
+        return svc.users().drafts().get(userId="me", id=draft_id).execute()
+    except Exception as e:                        # noqa: BLE001
+        print(f"⚠️  gmail.get_draft 실패({draft_id}): {type(e).__name__}")
+        return None
+
+
 def create_draft(to, subject: str, body_text: str, *, svc=None) -> str:
     """초안 1개 생성 → draft id. **발송 안 함**(drafts().create 만)."""
     svc = svc or service()
