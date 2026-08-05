@@ -18,8 +18,8 @@
   cadence: weekly
   catch_up: coalesce         # Apify 회당 ~$10.5 — backfill 은 새 데이터 0 인데 돈만 태움
   watermark: last_success    # 수집 실패 = 후보 0 → 다시 시도
-  resources: [apify, claude, notion, gmail]   # meeting-mail = claude -p 스테이지 [ADR 0003]
-  stages: [collect, land, meeting-mail]       # [중간점검 E7] judge 는 W6 에서 별도 task 로 분리 — 잔존 선언 제거
+  resources: [apify, notion]                  # [W8] claude·gmail 은 분리된 judge·meeting-mail task 소관
+  stages: [collect, land]                     # [W8] meeting-mail 도 별도 task 로 분리(승인 브릿지와 함께)
   origin: system
   covers: [그물망]
   status: partial
@@ -38,6 +38,20 @@
   covers: [그물망]
   status: partial
   notes: references/judge-criteria.md 룰 본문이 비어 있으면 criteria-gate 가 fail-loud 스킵 — 룰 기입 즉시 코드 변경 0으로 가동
+
+- name: meeting-mail         # [W8] Catch 창업자 → claude 초안 → 승인 큐 (Gmail 초안은 승인 후 tick)
+  skill: net-sourcing
+  kind: routine
+  cadence: daily
+  catch_up: coalesce
+  watermark: last_success
+  resources: [claude, notion]   # gmail 없음 — draft-after-approve 라 gmail 부작용은 approvals tick 소관
+  stages: [collect-catch, draft, request-approval]
+  origin: system
+  runner: local
+  covers: [그물망]
+  status: partial
+  notes: 수신자 W8 고정 hello@ · halt 계약 · dedup_key=page_id (선필터=claude 절약 커서)
 
 - name: sourcing-followup
   skill: net-sourcing

@@ -96,9 +96,21 @@ def run_judge(task: Task, period: date) -> bool:
 
 Runner = Callable[[Task, date], bool]
 
+def run_meeting_mail(task: Task, period: date) -> bool:
+    print(f"▶ meeting-mail ({period}) — jobs/meeting_mail_job.py")
+    try:
+        rc = subprocess.run([str(_PY), "jobs/meeting_mail_job.py", "--period", period.isoformat()],
+                            cwd=_PROJ, timeout=1800, check=False).returncode
+    except subprocess.TimeoutExpired:
+        print("🔴 meeting-mail: 30분 timeout — 실패 처리")
+        return False
+    return rc == 0
+
+
 WIRED: dict[str, Runner] = {
     "appstore-snapshot": run_appstore_snapshot,
     "judge": run_judge,
+    "meeting-mail": run_meeting_mail,
 }
 
 
