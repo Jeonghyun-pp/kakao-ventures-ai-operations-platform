@@ -36,7 +36,10 @@ def _utc_today() -> date:
 # ─────────────────────────── 워터마크 ───────────────────────────
 
 def _wm_path(task: Task) -> Path:
-    return paths.data(task.skill, "cadence") / f"{task.name}.json"
+    # create=False — 읽기 경로에 mkdir 부작용이 있으면 read-only 관측자(orrery)가 오염된다
+    # (중간점검 D1: paths.data 기본 create=True 가 관측 중 스킬 디렉토리를 만들었다).
+    # 쓰기는 atomic_write 가 parent.mkdir 를 하므로 문제없다.
+    return paths.data(task.skill, "cadence", create=False) / f"{task.name}.json"
 
 
 def read_watermark(task: Task) -> dict:
