@@ -193,6 +193,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {'✅' if r['ok'] else '🔴'} {r['task']} {r['period']}")
     if not report:
         print(f"[{now}] 실행할 배선 task 없음(전부 최신).")
+
+    # [W7] 러닝 끝 다이제스트 — best-effort: 관측 실패가 실행을 죽이면 안 된다(notify 규약).
+    # 소음 제어: **뭔가 실제로 돌았을 때만** 발송(4h 간격 발화의 no-op 틱은 침묵) —
+    # daily 리듬이면 사실상 하루 1회. 문제(🔴)는 돌았던 발화에 실려 온다.
+    if report:
+        try:
+            from . import orrery, secrets
+            secrets.load()                              # 웹훅 env
+            d = orrery.gather(with_network=False)       # 발화 컨텍스트에선 외부 조회 생략(빠르게)
+            orrery.push_slack(d)
+        except Exception as e:                          # noqa: BLE001
+            print(f"⚠️  orrery 다이제스트 실패(실행에는 무영향): {e!r}")
     return 0
 
 
