@@ -18,8 +18,8 @@
   cadence: weekly
   catch_up: coalesce         # Apify 회당 ~$10.5 — backfill 은 새 데이터 0 인데 돈만 태움
   watermark: last_success    # 수집 실패 = 후보 0 → 다시 시도
-  resources: [apify, claude, notion, gmail]   # judge·meeting-mail = claude -p 스테이지 [ADR 0003]
-  stages: [collect, judge, land, meeting-mail]
+  resources: [apify, claude, notion, gmail]   # meeting-mail = claude -p 스테이지 [ADR 0003]
+  stages: [collect, land, meeting-mail]       # [중간점검 E7] judge 는 W6 에서 별도 task 로 분리 — 잔존 선언 제거
   origin: system
   covers: [그물망]
   status: partial

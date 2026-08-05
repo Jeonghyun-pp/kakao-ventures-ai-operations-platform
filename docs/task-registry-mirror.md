@@ -42,9 +42,11 @@
 
 | task | 스킬 | 스테이지(파이프라인) | cadence | catch-up·watermark | 자원 | status |
 |---|---|---|---|---|---|---|
-| `sourcing` | net-sourcing | collect→**judge-sourcing(판단)**→land→**미팅요청 메일초안**→승인브릿지 | weekly | coalesce·last_success | apify·notion·gmail | 🔶 판단 L0만·미팅메일 노션에만 |
-| `sourcing-followup` | net-sourcing | DB 인물 재확인 | 3–4개월 | coalesce·last_success | notion | 🔶 골격 |
-| `appstore-snapshot` | net-sourcing/board | 랭킹 스냅샷 | daily | **backfill**·last_success | 없음($0) | ✅ 운영중 |
+| `sourcing` | net-sourcing | collect→land→**미팅요청 메일초안**→승인브릿지 | weekly | coalesce·last_success | apify·claude·notion·gmail | 🔶 미팅메일 노션에만 |
+| `judge` | net-sourcing | criteria-gate→export→judge-apply | daily | coalesce·last_success | claude·notion | 🔶 [W6 분리] 배선 완료·룰 대기 |
+| `sourcing-followup` | net-sourcing | DB 인물 재확인 | 3–4개월 | coalesce·last_success | claude·notion | 🔶 골격 |
+| `appstore-snapshot` | net-sourcing/board | 랭킹 스냅샷 | daily | **coalesce**·last_success (W6: 과거 순위 재수집 불가라 backfill 무의미) | 없음($0) | ✅ GH primary + 로컬 shadow(컷오버 검증 중) |
+| `appstore-sourcing` | net-sourcing | collect→land ($0) | daily | coalesce·last_attempt | notion | ✅ launchd-direct(07:00 plist) — 카탈로그 등재 |
 | `mail-triage` | mail-harness | 인박스 sweep→분류→초안→승인브릿지 | daily | coalesce·last_attempt | gmail-inbox | 🔶 컷오버전(W5) |
 | `bplan` | mail-harness | sync(접수·배분·기입)→**scoring(판단)**→드랍초안/후속미팅초안→승인브릿지 | daily | coalesce·last_attempt | gmail·sheet-A1·notion-bplan | 🔶 sync/drop✅·scoring/후속🔴 |
 
@@ -64,7 +66,7 @@
 
 ## 확정된 설계 판단 (2026-08-03)
 - **AI = claude -p 구독 단일화 (ADR 0003)** — 모든 판단·분류·초안 스테이지는 `claude -p` 세션이 수행(API 키 없음). 코드=결정론적 통제, claude=판단/생성. `claude`는 공유 자원(`tasks.yaml` 등록)이라 세션 직렬화. 출력은 soft → `validating` 스테이지가 되읽기 검증(W5). `core/llm.py`(API) 은퇴, `kv_core/session.py` 단일 통로 신설.
-- **판단은 부모 스킬의 스테이지** — judge-sourcing은 net-sourcing에, judge-bplan은 bplan에 흡수. 편향이 반대(살림 vs 거름)라 기준은 도메인별, **판단 골격**(티어링·evidence·사람검수·오탐 실측)만 kv-core 공유. **제품 완성 후에도 지속 튜닝**.
+- ~~**판단은 부모 스킬의 스테이지**~~ → **[W6 개정] judge 는 별도 daily task 로 분리** — 소싱(weekly·apify 과금)과 판정(daily·claude·$0)은 cadence 와 자원이 달라 한 파이프라인에 묶으면 판정이 주 1회로 묶인다. 판단 기준은 여전히 도메인별(judge-criteria.md), 골격만 kv-core 공유. judge-bplan 은 여전히 bplan 스테이지(미구현 슬롯).
 - **승인 브릿지가 모든 판단·발송의 공통 출구** — 심사역 Slack/메일 초안. (W8)
 - **뷰티·consumer-pulse 스코프 제외.**
 
