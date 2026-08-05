@@ -163,16 +163,22 @@ def main() -> int:
     ok_all &= p3
     del os.environ["INJECT_BAD"]
 
-    print("④ 구조적 무발송 (AST: gmail.py 에 .send() 호출 0건, 초안=로컬 파일)")
+    print("④ 구조적 무발송 (AST: gmail·approvals_tick·slackbot 에 .send() 호출 0건)")
     # 예전 검증(_assert_no_send 호출→raise 확인)은 동어반복이었다 — send 헬퍼가 추가돼도
     # 통과했다(리뷰 D2). 이제 소스 AST 에서 실제 .send 호출 부재를 직접 단언한다.
+    # [W8] 검사 대상 확장: 승인 실행기·슬랙봇도 — 검사의 목적은 **gmail 발송** 차단이다
+    # (slack chat.postMessage 는 requests.post 라 .send 패턴에 안 걸림 — 의도된 범위).
     import ast as _ast
-    _src = Path(gmail.__file__).read_text(encoding="utf-8")
-    _send_calls = [n for n in _ast.walk(_ast.parse(_src))
-                   if isinstance(n, _ast.Call) and isinstance(n.func, _ast.Attribute)
-                   and n.func.attr == "send"]
+    from kv_core import approvals_tick as _at, slackbot as _sb
+    _send_calls = []
+    for _mod in (gmail, _at, _sb):
+        _src = Path(_mod.__file__).read_text(encoding="utf-8")
+        _send_calls += [f"{Path(_mod.__file__).name}:L{n.lineno}"
+                        for n in _ast.walk(_ast.parse(_src))
+                        if isinstance(n, _ast.Call) and isinstance(n.func, _ast.Attribute)
+                        and n.func.attr == "send"]
     p4 = not _send_calls
-    print(f"   → gmail.py 실제 .send() 호출 {len(_send_calls)}건(0 기대), "
+    print(f"   → 3개 모듈 .send() 호출 {len(_send_calls)}건(0 기대){_send_calls or ''}, "
           f"초안 경로={_drafts()} · {'PASS' if p4 else 'FAIL'}")
     ok_all &= p4
 

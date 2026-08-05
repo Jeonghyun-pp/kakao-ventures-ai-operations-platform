@@ -108,15 +108,17 @@ def _task_failures() -> list[tuple[str, str]]:
             continue
         wm = scheduler.read_watermark(t)
         la, ls = wm.get("last_attempt"), wm.get("last_success")
-        if not la:
-            continue                              # 시도 자체가 없으면 미배선/대기 — 다이제스트 몫
+        if not la or not ls:
+            # 시도 없음(미배선) 또는 성공 이력 없음(judge 룰 대기 같은 온보딩 상태) —
+            # 즉시 푸시가 아니라 다이제스트 몫. 이 알림의 의미론은 **회귀**(되던 게 멈춤)다.
+            continue
         gap = cadence.gap_days(t.cadence, where=t.name)
         try:
             la_d = _date.fromisoformat(str(la)[:10])
-            ls_d = _date.fromisoformat(str(ls)[:10]) if ls else None
+            ls_d = _date.fromisoformat(str(ls)[:10])
         except ValueError:
             continue
-        behind = (la_d - ls_d).days if ls_d else 9999
+        behind = (la_d - ls_d).days
         if behind >= gap * mult:
             tail = f"성공 {ls or '없음'} · 시도 {la}"
             out.append((f"task-fail-{t.name}",

@@ -169,12 +169,23 @@ def _approvals() -> list[dict]:
                                                  # pending()의 _queue_dir 가 mkdir 부작용을 가짐(read-only 보호)
     try:
         from . import approval
-        return [{"key": r.get("dedup_key", "?"), "kind": r.get("kind", "?"),
-                 "task": r.get("task", "?"), "status": r.get("status", "?")}
+        # [W8] key 표기 정정(레코드 필드는 dedup_key 가 아니라 key) + decision 라벨 포함
+        return [{"key": r.get("key", "?"), "kind": r.get("kind", "?"),
+                 "task": r.get("task", "?"), "status": r.get("status", "?"),
+                 "decision": r.get("decision"), "draft_id": r.get("draft_id")}
                 for r in approval.pending()]
     except Exception as e:                       # noqa: BLE001
         print(f"⚠️  orrery: 승인 큐 조회 실패 — {e!r}")
         return []
+
+
+def _alerts_today() -> list[str]:
+    """오늘(UTC) 발송된 즉시 알림 identity — 마커 디렉토리 읽기(존재 확인 먼저, read-only)."""
+    d = paths.data_root() / "_alerts" / "sent"
+    if not d.exists():
+        return []
+    today = _utc_today().isoformat()
+    return sorted(p.name[: -len(today) - 1] for p in d.glob(f"*-{today}"))
 
 
 def _cost(*, with_network: bool = True) -> dict:
@@ -203,6 +214,7 @@ def gather(now: date | None = None, *, with_network: bool = True) -> dict:
     return {"now": now.isoformat(), "log_last_touch": last_touch,
             "tasks": _task_rows(now), "failures": _recent_failures(),
             "dlq": _dlq_summary(), "approvals": _approvals(),
+            "alerts_today": _alerts_today(),
             "cost": _cost(with_network=with_network)}
 
 
@@ -241,11 +253,19 @@ def render_text(d: dict) -> str:
     if not dlq_ok and not dlq_broken:
         L.append("║  (없음)")
     ap = d["approvals"]
-    L.append(f"║ ── 승인 대기 ({len(ap)}건) ──")
-    for a in ap[:5]:
-        L.append(f"║  ⏳ [{a['kind']}] {a['task']} · {a['key']} ({a['status']})")
+    und = [a for a in ap if a.get("decision") is None]
+    apv = [a for a in ap if a.get("decision") == "approved"]
+    apv_wait = [a for a in apv if a.get("kind") == "mail" and not a.get("draft_id")]
+    rej = [a for a in ap if a.get("decision") == "rejected"]
+    L.append(f"║ ── 승인 큐 (⏳미결 {len(und)} · ✅승인 {len(apv)}"
+             f"{f'(실행대기 {len(apv_wait)})' if apv_wait else ''} · ❌거부 {len(rej)}) ──")
+    for a in und[:5]:
+        L.append(f"║  ⏳ [{a['kind']}] {a['task']} · {a['key']}")
     if not ap:
         L.append("║  (없음)")
+    al = d.get("alerts_today") or []
+    if al:
+        L.append(f"║ ── 오늘 즉시 알림 ({len(al)}건) ── {' · '.join(al[:4])}")
     c = d["cost"]
     cl = c["claude"]
     warn = "미설정" if cl["warn"] is None else cl["warn"]
@@ -285,8 +305,9 @@ def render_slack(d: dict) -> str:
         L.append(f"⚠️ DLQ 격리 {dlq_n}건")
     if dlq_broken:                                             # [D5] 슬랙에서도 파손 은닉 금지
         L.append(f"🔴 DLQ 파일 파손 {len(dlq_broken)}개")
-    if ap:
-        L.append(f"⏳ 승인 대기 {len(ap)}건")
+    und_n = sum(1 for a in ap if a.get("decision") is None)
+    if und_n:
+        L.append(f"⏳ 승인 대기 {und_n}건 — ✅/❌ 이모지로 결정")
     block = "미설정" if cl["block"] is None else cl["block"]
     L.append(f"claude {cl['calls']}콜/일 (차단 {block}, UTC 기준)")
     return "\n".join(L)
