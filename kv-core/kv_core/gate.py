@@ -259,14 +259,15 @@ def check(resource: str, estimate_usd: float = 0.0, *, quiet: bool = False) -> V
 def notify_blocked(v: Verdict) -> bool:
     """게이트에 막혔을 때 알린다 (결정 B5: 실패 + 알림).
 
-    큐잉해서 나중에 자동 재개하는 것은 W3(잡 러너)이 있어야 성립한다.
-    지금은 **실패시키고 사람에게 알린다** — 나중에 큐잉으로 승격하기 쉬운 방향이다.
+    [W8] alerts 경유 — identity 당 **하루 1회 dedup**(4h 틱마다 최대 6회 울리던 것 정정)
+    + 이벤트 장부 기록(발송 실패는 approvals 틱의 scan 이 보상 재푸시).
     """
-    return notify.slack(
-        f"🔴 *예산 게이트 차단* — {v.resource}\n"
-        f"{v.reason}\n"
-        f"```{v.summary()}```\n"
-        f"이번 실행은 중단됐습니다. 한도를 올리거나 다음 주기를 기다려야 합니다.")
+    from . import alerts
+    text = (f"🔴 *게이트 차단* — {v.resource}\n{v.reason}\n"
+            f"```{v.summary()}```\n이번 실행은 중단됐습니다.")
+    pushed = alerts.push(f"gate-block-{v.resource}", text)
+    alerts.append_event("gate_block", resource=v.resource, reason=v.reason, pushed=pushed)
+    return pushed
 
 
 # ───────────────────────── 실행 중 차단선 ─────────────────────────

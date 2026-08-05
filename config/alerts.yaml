@@ -1,0 +1,13 @@
+# 실패 푸시 정책 — kv_core.alerts 가 읽는다. 코드 하드코딩 0. [W8]
+#
+# 철학: 알림의 가치는 희소성에서 나온다(alert fatigue). "즉시"는 사람이 하루를 못 기다리는
+# 3클래스뿐이고, 나머지는 orrery 다이제스트에 실린다. 임계는 실관찰하며 여기서만 조정한다.
+
+auth_suspect:
+  consecutive_session_errors: 3   # _usage/claude jsonl 꼬리 연속 ok:false → 인증 열화 의심
+
+task_failure:
+  consecutive_periods: 3          # last_attempt-last_success 격차 ≥ 주기×N → 구조적 실패
+
+dedup:
+  per_identity_per_day: 1         # 같은 identity 는 하루 1회만 푸시 ($KV_DATA/_alerts/sent/ 마커)
