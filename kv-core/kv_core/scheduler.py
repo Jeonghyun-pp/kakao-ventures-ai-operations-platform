@@ -137,6 +137,11 @@ def run_due(tasks: list[Task], runner: Runner, *, now: date | None = None) -> li
                     except Exception as e:         # noqa: BLE001  러너 실패 = 이 실행 실패(다음에 재시도)
                         print(f"🔴 {t.name} {period} 실행 예외: {e!r}")
                     wm = read_watermark(t)
+                    # [W9 점검] first_attempt 는 **최초 1회만** 기록하고 이후 보존한다.
+                    # 이게 없으면 alerts 의 never-succeeded 판정이 last_attempt 로 폴백하는데,
+                    # 그 값은 매일 갱신되므로 "배선 후 경과일"이 영원히 0 이 되어
+                    # **한 번도 성공 못 한 task 가 영영 알림에 안 걸린다**(실환경에서 실증됨).
+                    wm.setdefault("first_attempt", period.isoformat())
                     wm["last_attempt"] = period.isoformat()
                     if ok:
                         wm["last_success"] = period.isoformat()

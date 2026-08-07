@@ -163,6 +163,30 @@ check("B-F3 유예 안에선 미발동(배선 당일)",
       not any(i.startswith("never-succeeded") for i in alerts.scan()))
 _reg.load = _orig_load
 
+# [점검 후속] first_attempt 를 **스케줄러가 실제로 기록**하는가 — 이게 없으면 never-succeeded
+# 판정이 last_attempt 로 폴백해 경과일이 영원히 0 이 된다(실환경에서 알림이 침묵했다).
+t_fa = _T(name="syn-firstattempt", skill="_alerts-syn", cadence="daily",
+          catch_up="coalesce", watermark="last_success")
+scheduler.run_due([t_fa], lambda task, p: False, now=today)          # 1일차 실패
+wm_fa = scheduler.read_watermark(t_fa)
+check("점검 first_attempt 최초 기록", wm_fa.get("first_attempt") == today.isoformat(), f"{wm_fa}")
+scheduler.run_due([t_fa], lambda task, p: False, now=today + timedelta(days=1))
+wm_fa2 = scheduler.read_watermark(t_fa)
+check("점검 first_attempt 는 이후 보존(덮어쓰지 않음)",
+      wm_fa2.get("first_attempt") == today.isoformat()
+      and wm_fa2.get("last_attempt") == (today + timedelta(days=1)).isoformat(), f"{wm_fa2}")
+
+# 구 스키마(first_attempt 없음) 폴백이 **오작동하지 않는지** — 폴백은 안전하게 보수적이어야
+t_old = _T(name="syn-oldwm", skill="_alerts-syn", cadence="daily",
+           catch_up="coalesce", watermark="last_success")
+scheduler.write_watermark(t_old, {"last_attempt": today.isoformat()})   # first_attempt 없음
+_reg.load = lambda *a, **k: [t_old]
+for m in (paths.data_root() / "_alerts" / "sent").glob("never-*"):
+    m.unlink()
+check("점검 구 스키마는 폴백으로 미발동(오탐 0)",
+      not any(i.startswith("never-succeeded") for i in alerts.scan()))
+_reg.load = _orig_load
+
 # B-F8: identity 위생 — 경로 문자가 있어도 raise 하지 않는다
 try:
     rid = alerts.push("net-sourcing/threads:x", "identity 위생 테스트")

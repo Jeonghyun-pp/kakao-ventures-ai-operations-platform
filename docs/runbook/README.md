@@ -22,6 +22,24 @@ tail -20 ~/kv-data/_approvals/launchd.log  # 승인 리컨실러(10분) 틱 이�
 | 4 | [승인 큐 이상](04-approval-queue.md) | 카드가 안 뜸 / ✅ 눌러도 반영 안 됨 / 초안 중복 |
 | 5 | [스케줄러 미발화](05-scheduler-silent.md) | 아무 일도 안 일어남 — 가장 늦게 발견되는 유형 |
 
+## CI 가 지키는 것 (`.github/workflows/ci.yml`)
+
+커밋마다 자동으로 도는 합성 스위트 12본 + 구조 검사 2종. **테스트를 사람 기억에서 구조로**
+옮긴 것이고(2026-08-07 신설), 지키는 계약은 다음과 같다:
+
+| 검사 | 지키는 계약 |
+|---|---|
+| worker·pipeline·chaos_lab | 상태 규약 — kill-9 재개·항목 멱등·events 무손상·장애 내성 7종 |
+| review_regressions | 과거 결함 재발 방지(H1·H2·T2·T4 등) + **실발송 킬 스위치 메타 검증** |
+| orrery | 관측자 read-only 계약(AST) · absence 감지 임계 |
+| approval_decide·approvals_tick | **무승인 무실행** · 결정 멱등 · 실행 보상 · 굶주림 방지 |
+| alerts·claude_gate | 알림 3클래스 발동 · dedup · 쿼터 게이트 |
+| AST 무발송 | gmail·approvals_tick·slackbot·approval 에 `.send()` 호출 0건 — **W10 이후 유일한 물리적 안전장치** |
+| 선언 정합 | registry·contracts 로드 + claude 호출 상한 불변식(최악치 < 경고선) |
+
+시크릿 0 · 외부 접근 0(`KV_NO_SEND=1` + 전면 스텁). 실 claude 를 부르는 `_synthetic_slice.py`
+만 제외되며, 그 파일의 핵심(무발송 AST)은 위 별도 스텝이 대신한다.
+
 ## 원칙
 
 - **워터마크가 진실**: 로그가 없어도 `~/kv-data/<skill>/cadence/*.json` 이 마지막 성공을 안다.
