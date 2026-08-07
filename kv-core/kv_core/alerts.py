@@ -112,14 +112,15 @@ def _task_failures() -> list[tuple[str, str]]:
             # 시도 없음(미배선) 또는 성공 이력 없음(judge 룰 대기 같은 온보딩 상태) —
             # 즉시 푸시가 아니라 다이제스트 몫. 이 알림의 의미론은 **회귀**(되던 게 멈춤)다.
             continue
-        gap = cadence.gap_days(t.cadence, where=t.name)
+        # [W9] 신선도 한계는 선언(freshness_days) 우선 — orrery 와 같은 함수를 공유
+        limit = cadence.freshness_limit(t)
         try:
             la_d = _date.fromisoformat(str(la)[:10])
             ls_d = _date.fromisoformat(str(ls)[:10])
         except ValueError:
             continue
         behind = (la_d - ls_d).days
-        if behind >= gap * mult:
+        if behind >= limit * mult:
             tail = f"성공 {ls or '없음'} · 시도 {la}"
             out.append((f"task-fail-{t.name}",
                         f"🔴 {t.name}: 주기×{mult} 이상 연속 실패 의심 ({tail}) — 로그 확인 요망."))

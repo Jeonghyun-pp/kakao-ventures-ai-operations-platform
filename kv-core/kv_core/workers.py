@@ -71,8 +71,10 @@ def run_appstore_snapshot(task: Task, period: date) -> bool:
     if n < 84:
         msg = f"⚠️ {tag}appstore-snapshot: 오늘자 유효 파일 {n}/84 — 부분 결손(해당 차트는 영구 손실 가능)"
         print(msg)
-        from . import notify
-        notify.slack(msg)      # [중간점검 A5] 영구 결손은 stdout 침묵으로 두지 않는다(best-effort)
+        # [중간점검 A5 + W9] 영구 결손은 stdout 침묵으로 두지 않는다. alerts 경유로 **하루 1회**
+        # dedup — notify 직접 호출은 dedup 이 없어 반복 발화 시 소음이 된다(규율 통일).
+        from . import alerts
+        alerts.push(f"partial-{task.name}", msg)
     else:
         print(f"✅ {tag}appstore-snapshot: 오늘자 유효 파일 {n}/84")
     return True

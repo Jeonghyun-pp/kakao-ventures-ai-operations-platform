@@ -7,6 +7,9 @@ process() 는 호출될 때마다 invocations.log 에 START/END 를 남겨, 재�
 from __future__ import annotations
 
 import os
+os.environ.setdefault("KV_NO_SEND", "1")   # [W9] 실발송 킬 스위치 — 스텁 누락 시의 최후 방어
+
+import os
 import sys
 import time
 from pathlib import Path

@@ -31,7 +31,11 @@ def _auth() -> tuple[str, str] | None:
 
 def post(text: str) -> tuple[str, str] | None:
     """승인 카드 발송 → (ts, channel). 실패/미설정 → None + loud."""
+    import os
     import requests
+    if os.environ.get("KV_NO_SEND"):          # [W9] 발송 킬 스위치 (notify.py 와 동일 규율)
+        print(f"  🚫 KV_NO_SEND — 슬랙 카드 발송 안 함: {text[:80]}")
+        return None
     auth = _auth()
     if auth is None:
         return None

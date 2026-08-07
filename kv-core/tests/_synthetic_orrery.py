@@ -7,6 +7,9 @@
 """
 from __future__ import annotations
 
+import os
+os.environ.setdefault("KV_NO_SEND", "1")   # [W9] 실발송 킬 스위치 — 스텁 누락 시의 최후 방어
+
 import ast
 import json
 import os
@@ -103,6 +106,52 @@ d3 = dict(d2, failures=[{"skill": "s", "job": "j-broken", "ts": "", "broken": Tr
                         {"skill": "s", "job": "j-recent", "ts": "2026-08-05T01:00", "broken": False}])
 sl3 = orrery.render_slack(d3)
 check("⑦ 슬랙 '최근' 자리에 파손 아닌 잡", "j-recent" in sl3 and "j-broken" not in sl3.split("\n")[1] if len(sl3.split("\n")) > 1 else True, sl3)
+
+# ── ⑧ [W9] 해결된 실패 강등 (alert fatigue 방지) ────────────────────────────
+print()
+SK = "_orrery-w9"
+# (a) 실패 후 같은 base 의 -r2 가 성공 → 해결됨
+job.create(SK, {"t": 1}, "tk-2026-08-06")
+job.transition(SK, "tk-2026-08-06", "queued"); job.transition(SK, "tk-2026-08-06", "running")
+job.transition(SK, "tk-2026-08-06", "failed")
+job.create(SK, {"t": 1}, "tk-2026-08-06-r2")
+job.transition(SK, "tk-2026-08-06-r2", "queued"); job.transition(SK, "tk-2026-08-06-r2", "running")
+job.transition(SK, "tk-2026-08-06-r2", "validating"); job.transition(SK, "tk-2026-08-06-r2", "completed")
+# (b) 재시도 없이 계속 실패 → 미해결
+job.create(SK, {"t": 1}, "solo-2026-08-06")
+job.transition(SK, "solo-2026-08-06", "queued"); job.transition(SK, "solo-2026-08-06", "running")
+job.transition(SK, "solo-2026-08-06", "failed")
+
+fails = orrery._recent_failures()
+by = {f["job"]: f.get("resolved") for f in fails}
+check("⑧ -r2 성공 → 원 실패 '해결됨' 강등", by.get("tk-2026-08-06") is True, f"{by}")
+check("⑧ 재시도 없는 실패 → 미해결 유지", by.get("solo-2026-08-06") is False)
+
+d8 = dict(d2, failures=[{"skill": SK, "job": "tk-2026-08-06", "ts": "2026-08-06T00:00",
+                         "broken": False, "resolved": True},
+                        {"skill": SK, "job": "solo-2026-08-06", "ts": "2026-08-06T01:00",
+                         "broken": False, "resolved": False}])
+txt8, sl8 = orrery.render_text(d8), orrery.render_slack(d8)
+check("⑧ 텍스트 렌더: 미해결 1 · 해결됨 1 표기",
+      "미해결 1건 · 해결됨 1건" in txt8 and "solo-2026-08-06" in txt8
+      and "tk-2026-08-06 " not in txt8)
+check("⑧ 슬랙 렌더: 미해결만 카운트",
+      "미해결 실패 잡 1건" in sl8 and "solo" in sl8, sl8.split("\n")[1] if "\n" in sl8 else sl8)
+
+# ── ⑨ [W9] freshness 선언 우선 (orrery·alerts 공용 헬퍼) ────────────────────
+from kv_core import cadence as _cad
+t_decl = Task(name="f-decl", skill="s", cadence="daily", catch_up="coalesce",
+              watermark="last_success", freshness_days=5)
+t_auto = Task(name="f-auto", skill="s", cadence="daily", catch_up="coalesce",
+              watermark="last_success")
+check("⑨ freshness_days 선언 우선", _cad.freshness_limit(t_decl) == 5)
+check("⑨ 미지정 시 주기 기반(daily=유예0)", _cad.freshness_limit(t_auto) == 1)
+ls5 = (date(2026, 8, 10) - timedelta(days=4)).isoformat()
+check("⑨ 선언 5일: 4일 경과는 🔴 아님",
+      orrery._freshness(t_decl, ls5, None, date(2026, 8, 10))["status"] != "🔴")
+ls6 = (date(2026, 8, 10) - timedelta(days=6)).isoformat()
+check("⑨ 선언 5일: 6일 경과는 🔴",
+      orrery._freshness(t_decl, ls6, None, date(2026, 8, 10))["status"] == "🔴")
 
 print()
 if FAIL:

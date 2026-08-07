@@ -30,6 +30,21 @@ DAYS: dict[str, int] = {
 _warned: set[str] = set()          # 같은 오타로 로그를 도배하지 않는다
 
 
+def freshness_limit(task) -> int:
+    """[W9] 이 task 의 데이터가 며칠까지 신선한가 — **선언 우선, 없으면 주기 기반 규칙**.
+
+    `tasks.yaml` 의 `freshness_days` 가 있으면 그 값(SLO 선언). 없으면 주기 + 유예:
+    daily 는 유예 0(하루 밀리면 곧 결손), 그 외는 +1(수면·보조틱 흡수).
+    관측(orrery)과 알림(alerts)이 **이 함수 하나**를 공유해야 "다이제스트는 ✅인데
+    알림은 🔴" 같은 이중 진실원이 안 생긴다.
+    """
+    declared = getattr(task, "freshness_days", None)
+    if declared:
+        return int(declared)
+    gap = gap_days(getattr(task, "cadence", None), where=getattr(task, "name", ""))
+    return gap + (0 if gap <= 1 else 1)
+
+
 def _utc_today() -> date:
     """UTC 기준 오늘. 로컬 타임존에 의존하지 않는다(계층 A 타임존 사고 방지)."""
     return datetime.now(timezone.utc).date()

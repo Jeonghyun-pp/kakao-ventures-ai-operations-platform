@@ -94,10 +94,10 @@ def _freshness(t, last_success: str | None, last_attempt: str | None, now: date)
     except ValueError:                           # [D2] 파손 1개가 브리핑 전체를 못 죽인다
         return {"status": "⚠️", "note": f"워터마크 파손(last_success={last_success!r}) — 파일 확인"}
     late = (now - last).days
-    # [D9] 유예: daily 는 0(한 주기만 밀려도 🔴 — 하루가 곧 결손), 그 외는 +1(수면·보조틱 흡수)
-    grace = 0 if gap <= 1 else 1
-    if late > gap + grace:
-        return {"status": "🔴", "note": f"{late}일 밀림 (주기 {gap}일 + 유예 {grace}일 초과)"}
+    # [W9] 신선도 한계는 선언(freshness_days) 우선 — 관측·알림이 같은 함수를 공유(D9 유예 규칙 포함)
+    limit = cadence.freshness_limit(t)
+    if late > limit:
+        return {"status": "🔴", "note": f"{late}일 밀림 (신선도 한계 {limit}일 초과)"}
     if late > gap:
         return {"status": "⚠️", "note": f"{late}일 경과 (주기 {gap}일)"}
     return {"status": "✅", "note": f"{late}일 전 성공"}
@@ -127,27 +127,65 @@ def _launchd_direct_health(t, now: date) -> dict:
         return {"status": "⚠️", "note": "헬스 파일 파손", "last_success": None}
 
 
+_ATTEMPT_RE = __import__("re").compile(r"-r\d+$")
+
+
+def _job_base(job_id: str) -> str:
+    """attempt-suffix 제거 — `judge-2026-08-06-r2` → `judge-2026-08-06`."""
+    return _ATTEMPT_RE.sub("", job_id)
+
+
 def _recent_failures(days: int = 7, cap: int = 10) -> list[dict]:
-    """최근 failed 잡 — state.json mtime 기준 최근 N일만 훑는다(전량 스캔 회피)."""
-    out: list[dict] = []
+    """최근 failed 잡 — state.json mtime 기준 최근 N일만 훑는다(전량 스캔 회피).
+
+    [W9] **해결 여부**를 함께 판정한다. 실측(8/7)에서 다이제스트가 매일 "실패 4건"이라
+    알렸는데 실제 미해결은 0건이었다 — 전부 나중 attempt(-r2)가 성공했거나 수정 전 잔재.
+    거짓 경보가 반복되면 진짜 실패가 묻힌다(alert fatigue). 해결 판정 두 갈래:
+      ① 같은 base job_id 의 다른 attempt 가 completed  ② 그 task 의 last_success ≥ 실패 시각
+    """
+    rows: list[dict] = []
+    completed_bases: set[tuple[str, str]] = set()      # (skill, base) — 성공한 attempt 보유
     cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
     root = paths.data_root()
     if not root.exists():
-        return out
+        return rows
     for sp in sorted(root.glob("*/jobs/*/state.json")):
+        skill, jid = sp.parts[-4], sp.parts[-2]
         try:
             if sp.stat().st_mtime < cutoff:
                 continue
             st = json.loads(sp.read_text(encoding="utf-8"))
-            if st.get("state") == "failed":
-                out.append({"skill": sp.parts[-4], "job": sp.parts[-2],
-                            "ts": st.get("updated", ""), "broken": False})
+            state = st.get("state")
+            if state == "completed":
+                completed_bases.add((skill, _job_base(jid)))
+            elif state == "failed":
+                rows.append({"skill": skill, "job": jid, "ts": st.get("updated", ""),
+                             "broken": False})
         except (json.JSONDecodeError, OSError):
             # [D8] 파손은 ts="" 로 정렬 맨 뒤 — '파손' 문자열이 유니코드 정렬로 최신 자리를
             # 무기한 점유하던 것 정정. 표기는 렌더러가 broken 플래그로 한다.
-            out.append({"skill": sp.parts[-4], "job": sp.parts[-2], "ts": "", "broken": True})
-    out.sort(key=lambda r: str(r["ts"]), reverse=True)
-    return out[:cap]
+            rows.append({"skill": skill, "job": jid, "ts": "", "broken": True})
+
+    # task 별 last_success 수집(워터마크) — 실패 이후 성공했으면 그 실패는 해결된 것
+    last_ok: dict[str, str] = {}
+    for t in registry.load():
+        if not t.scheduled:
+            continue
+        ls = scheduler.read_watermark(t).get("last_success")
+        if ls:
+            last_ok[f"{t.skill}/{t.name}"] = str(ls)[:10]
+
+    for r in rows:
+        base = _job_base(r["job"])
+        resolved = (r["skill"], base) in completed_bases
+        if not resolved and r["ts"]:
+            # job_id 가 `<task>-<날짜>` 관례라 task 명을 앞에서 뽑는다(날짜 10자 + 하이픈)
+            task = base[:-11] if len(base) > 11 and base[-11] == "-" else base
+            ls = last_ok.get(f"{r['skill']}/{task}")
+            resolved = bool(ls and ls >= str(r["ts"])[:10])
+        r["resolved"] = resolved
+    rows.sort(key=lambda r: str(r["ts"]), reverse=True)
+    return rows[:cap]
 
 
 def _dlq_summary() -> list[dict]:
@@ -234,13 +272,17 @@ def render_text(d: dict) -> str:
         tail = f"(last_success={r.get('last_success')})" if r.get("last_success") else ""
         L.append(f"║  {r['status']} {r['name']:18} {r['cadence']:9}{tag:15} {note} {tail}")
     L.append("║")
+    # [W9] 미해결만 🔴 — 해결분(나중 attempt 성공·이후 last_success)은 요약 1줄로 강등
     fails = d["failures"]
-    L.append(f"║ ── 실패 잡 (최근 7일, {len(fails)}건) ──")
-    for f in fails[:5]:
+    unresolved = [f for f in fails if not f.get("resolved")]
+    resolved_n = len(fails) - len(unresolved)
+    L.append(f"║ ── 실패 잡 (최근 7일, 미해결 {len(unresolved)}건"
+             + (f" · 해결됨 {resolved_n}건" if resolved_n else "") + ") ──")
+    for f in unresolved[:5]:
         ts = "state 파손" if f.get("broken") else str(f["ts"])[:16]
         L.append(f"║  🔴 {f['skill']}/{f['job']}  ({ts})")
-    if not fails:
-        L.append("║  (없음)")
+    if not unresolved:
+        L.append("║  (미해결 없음)")
     # [D5] 파손(-1)은 합산에서 제외하고 별도 표기 — 센티널을 산술에 섞지 않는다
     dlq_ok = [q for q in d["dlq"] if q["count"] > 0]
     dlq_broken = [q for q in d["dlq"] if q["count"] < 0]
@@ -297,9 +339,10 @@ def render_slack(d: dict) -> str:
     for r in warn:
         tag = "[shadow-local] " if r.get("shadow") else ""
         L.append(f"⚠️ {tag}{r['name']}: {r['note']}")
-    if fails:
-        recent = next((f for f in fails if not f.get("broken")), fails[0])
-        L.append(f"🔴 실패 잡 {len(fails)}건 (최근: {recent['skill']}/{recent['job']})")
+    unresolved = [f for f in fails if not f.get("resolved")]   # [W9] 미해결만 알린다
+    if unresolved:
+        recent = next((f for f in unresolved if not f.get("broken")), unresolved[0])
+        L.append(f"🔴 미해결 실패 잡 {len(unresolved)}건 (최근: {recent['skill']}/{recent['job']})")
     dlq_broken = [q for q in d["dlq"] if q["count"] < 0]
     if dlq_n:
         L.append(f"⚠️ DLQ 격리 {dlq_n}건")

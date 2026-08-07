@@ -10,6 +10,9 @@
 from __future__ import annotations
 
 import os
+os.environ.setdefault("KV_NO_SEND", "1")   # [W9] 실발송 킬 스위치 — 스텁 누락 시의 최후 방어
+
+import os
 import sys
 from pathlib import Path
 
@@ -261,8 +264,34 @@ def test_validate_boundaries() -> None:
           f"judge={cs['judge'].min_records}, mail={cs['meeting-mail'].min_records}")
 
 
+def test_no_send_guard() -> None:
+    """[W9] 실발송 킬 스위치 메타 검증 — 스텁 누락이 실 채널로 새는 것을 **구조로** 막는다.
+
+    두 번 데였다: T3(게이트 테스트가 가짜 차단 경보 발송) · W9(dispatch 테스트가 부분결손
+    경보 발송). 원인은 매번 "이 테스트에도 스텁이 필요한지" 사람이 기억해야 했던 것.
+    이제 ①전 테스트가 KV_NO_SEND 를 켜고 ②발송 함수가 그 스위치를 존중하는지 기계가 단언한다.
+    """
+    print("[W9] 실발송 킬 스위치 (메타 검증)")
+    tdir = Path(__file__).resolve().parent
+    missing = [p.name for p in sorted(tdir.glob("*.py"))
+               if "KV_NO_SEND" not in p.read_text(encoding="utf-8")]
+    check("전 테스트가 KV_NO_SEND 를 켠다", not missing, f"누락={missing}")
+
+    from kv_core import notify, slackbot
+    for mod, fn in ((notify, "slack"), (slackbot, "post")):
+        src = Path(mod.__file__).read_text(encoding="utf-8")
+        body = src.split(f"def {fn}(", 1)[-1]
+        check(f"{mod.__name__}.{fn} 가 킬 스위치를 존중", "KV_NO_SEND" in body)
+
+    os.environ["KV_NO_SEND"] = "1"
+    check("킬 스위치 켜짐 → notify.slack 이 실발송 없이 True", notify.slack("메타검증(발송 안 됨)") is True)
+    check("킬 스위치 켜짐 → slackbot.post 가 None(카드 미발송)", slackbot.post("메타검증") is None)
+
+
 if __name__ == "__main__":
     print(f"=== 리뷰 회귀 테스트 (KV_DATA={os.environ['KV_DATA']}) ===\n")
+    test_no_send_guard()
+    print()
     test_h1_validating_resume()
     print()
     test_h2_torn_tail()

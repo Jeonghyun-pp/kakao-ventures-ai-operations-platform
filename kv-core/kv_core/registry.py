@@ -43,6 +43,9 @@ class Task:
     notes: str = ""
     runner: str = "local"       # 실행 주체. "local"만 스케줄러가 돌린다 — 카탈로그(무슨 일이 있나)와
                                 # 실행 주체(누가 돌리나)의 분리. 외부 러너 이중실행 방지(불변규칙 01).
+    freshness_days: int | None = None   # [W9] 신선도 SLO — "이 데이터는 며칠까지 유효한가".
+                                        # 미지정이면 주기 기반 기본값(cadence.freshness_limit).
+                                        # 관측·알림이 이 선언 하나를 공유한다(이중 진실원 방지).
     shadow: bool = False        # [W6] 외부 러너가 primary 인 task 를 스케줄러가 **검증용으로 병행 실행**.
                                 # 컷오버 = runner: local 로 바꾸고 이 플래그 제거(한 줄). 저장소가 분리된
                                 # 경우에만 안전(appstore: GH=data 브랜치 vs 로컬=~/kv-data — 충돌 0).
@@ -82,6 +85,8 @@ def load(path: Path | None = None) -> list[Task]:
             raise ValueError(f"task '{t.name}': runner 는 {_RUNNERS} (got '{t.runner}')")
         if t.shadow and t.runner == "local":
             raise ValueError(f"task '{t.name}': shadow 는 외부 러너 task 전용 — runner: local 이면 그냥 실행이다")
+        if t.freshness_days is not None and int(t.freshness_days) < 1:
+            raise ValueError(f"task '{t.name}': freshness_days 는 1 이상 (got {t.freshness_days})")
         if t.scheduled and t.cadence not in cadence.DAYS:
             # 오타(dayly 등)가 런타임 weekly 폴백으로 조용히 굳지 않게 load 시점에 잡는다(fail-loud).
             raise ValueError(f"task '{t.name}': cadence 는 {sorted(cadence.DAYS)} (got '{t.cadence}')")

@@ -29,7 +29,16 @@ def slack(text: str, *, webhook: str | None = None) -> bool:
 
     실패해도 예외를 던지지 않는다 — 호출부가 알림 때문에 죽으면 안 된다.
     """
+    import os
     import requests
+
+    # [W9] **발송 킬 스위치** — KV_NO_SEND=1 이면 실발송 없이 stdout 에만 남긴다.
+    # 왜 프로덕션 코드에 있나: 테스트가 스텁을 깜빡하면 실 채널에 가짜 경보가 간다.
+    # 두 번 데였다(T3 게이트 테스트 · W9 dispatch 테스트) — 스텁은 기억이고 이건 구조다.
+    # 합성 테스트 전부가 이 변수를 켜고, 메타 검증이 그 사실을 단언한다.
+    if os.environ.get("KV_NO_SEND"):
+        print(f"  🚫 KV_NO_SEND — 발송 안 함(내용): {text[:120]}")
+        return True
 
     url = webhook or secrets.get("SLACK_WEBHOOK_URL", required=False)
     if not url:
