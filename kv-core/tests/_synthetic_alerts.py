@@ -112,6 +112,10 @@ print()
 print("[W9 리뷰 회귀]")
 
 # B-F2: 발송 실패 시 claim 반납 → 복구 후 재푸시 가능 (예전엔 마커가 막아 영구 유실)
+# [W9 Phase0] **억제를 잠시 끈다** — push 는 미발송을 "억제(의도)"와 "실패(사고)"로 나누는데,
+# KV_NO_SEND 가 켜진 채로는 전부 억제로 분류된다(정상 동작). 이 케이스가 보려는 건 실패다.
+# 이 블록은 notify.slack 을 스텁으로 잡고 있으므로 실발송 위험은 0이다.
+_no_send_saved = os.environ.pop("KV_NO_SEND", None)
 _fail_mode = {"on": True}
 notify.slack = lambda text, **kw: (False if _fail_mode["on"]
                                    else (_sent.append(text), True)[1])
@@ -122,6 +126,18 @@ r2 = alerts.push("recover-test", "2차(복구 후)")
 check("B-F2 복구 후 재푸시 성공(claim 반납됨)", r2 == "sent", f"{r2}")
 r3 = alerts.push("recover-test", "3차")
 check("B-F2 성공 후에는 dedup", r3 == "deduped", f"{r3}")
+
+# [W9 Phase0] **킬 스위치가 이 파일의 검증을 무력화하지 않는가** — 이 파일이 실제로 겪은 함정.
+# 억제 판정을 push 맨 앞에 뒀더니, notify.slack 을 스텁으로 갈아끼운 이 테스트까지 전부
+# 억제돼 ①~④ 가 한꺼번에 죽었다. 스텁이 이미 실발송을 막고 있는데 스위치가 한 번 더
+# 막은 것 — 그건 방어가 아니라 **검증 능력의 파괴**다. 억제 판정은 발송 경계에만 둔다.
+# (억제 의미론 자체는 _review_regressions·_p0_probes 가 실 경로로 검증한다)
+os.environ["KV_NO_SEND"] = "1"
+notify.slack = lambda text, **kw: (_sent.append(text), True)[1]
+r4 = alerts.push("stub-wins-test", "스텁이 걸렸으면 알림 로직이 검증돼야 한다")
+check("킬 스위치가 스텁 건 테스트의 알림 경로를 막지 않음", r4 == "sent", f"{r4}")
+if _no_send_saved is None:
+    os.environ.pop("KV_NO_SEND", None)            # [A-M9 교훈] 환경은 반드시 원복
 
 # B-F1: 인증 만료(rc0 + 빈 출력)가 ok:false 로 기록되는가 — session 실경로 스텁
 import subprocess as _sp

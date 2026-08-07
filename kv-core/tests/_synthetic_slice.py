@@ -83,10 +83,15 @@ def s_judge(skill: str, job_id: str) -> None:
 
 
 def s_draft(skill: str, job_id: str) -> None:
-    """claude -p: keep 후보에게 미팅요청 초안 생성 → WAP Audit(halt) → 로컬 초안 파일.
+    """claude -p: keep 후보에게 미팅요청 초안 생성 → WAP Audit → 로컬 초안 파일.
 
-    halt 계약이므로 **전량 검증을 먼저** 통과해야 한 건이라도 쓴다(비가역 발송 앞 안전).
-    검증 통과 후에야 process_items 로 멱등하게 파일을 쓴다(재개 시 중복 0).
+    [W9 Phase0] 계약은 **quarantine** 이다(contracts.yaml `meeting-mail`). 이 독스트링과
+    아래 ③ 케이스가 오래 "halt" 라고 적혀 있었는데 선언은 W6 에 quarantine 으로 바뀌었다 —
+    테스트가 **선언이 아니라 기억을 단언**하던 것(W9 '선언 불일치' 유형). 초안 생성은
+    발송이 아니고 뒤에 승인 게이트가 있으므로, 한 건 어긋났다고 전량 중단할 이유가 없다.
+
+    다만 격리는 **기록으로 남아야** 한다 — dlq_path 없이 quarantine 을 부르면 어긋난
+    레코드가 조용히 사라진다(불변 규칙: 조용한 삭제 없음). 그래서 DLQ 를 넘긴다.
     """
     verdicts = json.loads((_work() / "verdicts.json").read_text(encoding="utf-8"))
     keeps = [v for v in verdicts if v.get("verdict") == "keep"]
@@ -108,7 +113,8 @@ def s_draft(skill: str, job_id: str) -> None:
         drafts.append({"to": "x", "subject": "결함", "body": "", "_id": "BAD"})
 
     # WAP Audit(halt) — 하나라도 어긋나면 ValidationHalt 로 스테이지 실패(아무것도 발행 안 함)
-    ok, _ = V.validate_records(drafts, CONTRACTS["meeting-mail"])
+    ok, _ = V.validate_records(drafts, CONTRACTS["meeting-mail"],
+                               dlq_path=_work() / "draft_dlq.jsonl")
 
     # 통과분만 로컬 초안으로(멱등). gmail 은 부르지 않는다 — 발송 아님.
     def _write(rec: dict) -> None:
@@ -157,12 +163,18 @@ def main() -> int:
     print(f"   → 상태={d2.state}, 새 claude 호출 {new_calls}회, 초안 {n_drafts2}건(불변) · {'PASS' if p2 else 'FAIL'}")
     ok_all &= p2
 
-    print("③ halt 결함 주입 (발송 앞 계약 위반 → 전체 중단, 발행 0)")
+    print("③ 결함 주입 (계약 위반 초안 → 격리·기록, 발행 0 / 정상분은 진행)")
     os.environ["INJECT_BAD"] = "1"
-    d3 = _run("halt-test")
+    d3 = _run("quarantine-test")
     bad_drafts = _drafts() / "BAD.txt"
-    p3 = d3.state == "failed" and not bad_drafts.exists()
-    print(f"   → 상태={d3.state}(failed 기대), BAD 초안 파일={bad_drafts.exists()}(False 기대) · {'PASS' if p3 else 'FAIL'}")
+    dlq = _work() / "draft_dlq.jsonl"
+    # [W9 Phase0] 단언을 **선언과 일치**시켰다. 예전엔 state=="failed"(halt)를 기대했는데
+    # contracts.yaml 은 quarantine 이라 영구 FAIL 이었다. quarantine 의 계약은 세 가지:
+    #   ① 어긋난 건은 발행되지 않는다 ② 정상분은 진행한다 ③ **격리가 기록에 남는다**
+    dlq_has_bad = dlq.exists() and "BAD" in dlq.read_text(encoding="utf-8")
+    p3 = d3.state == "completed" and not bad_drafts.exists() and dlq_has_bad
+    print(f"   → 상태={d3.state}(completed 기대), BAD 초안={bad_drafts.exists()}(False 기대), "
+          f"DLQ 격리기록={dlq_has_bad}(True 기대) · {'PASS' if p3 else 'FAIL'}")
     ok_all &= p3
     del os.environ["INJECT_BAD"]
 

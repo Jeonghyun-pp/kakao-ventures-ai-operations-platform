@@ -71,7 +71,15 @@ def push(identity: str, text: str) -> str:
         marker.write_text(f'{{"delivered":true,"ts":"{datetime.now(timezone.utc).isoformat()}"}}',
                           encoding="utf-8")
         return "sent"
-    marker.unlink(missing_ok=True)                # 발송 실패 → claim 반납(다음 틱 재시도 가능)
+    marker.unlink(missing_ok=True)                # 미발송 → claim 반납(다음 틱 재시도 가능)
+    # [W9 Phase0 0-5] **억제 판정은 발송 경계(notify.slack)에만 두고, 여기서는 결과를 해석한다.**
+    # 처음엔 이 함수 맨 앞에서 is_suppressed() 를 검사했는데, 그러면 notify.slack 을 스텁으로
+    # 갈아끼운 테스트까지 억제돼 알림 로직 자체가 검증 불가가 됐다(_synthetic_alerts 4건 전멸).
+    # 킬 스위치의 목적은 "스텁을 깜빡했을 때"의 방어다 — 스텁이 걸렸으면 방어할 대상이 없다.
+    # 억제와 실패를 구분하는 건 유지한다(억제를 실패로 세면 가짜 경보가 된다, B-H2).
+    if notify.is_suppressed():
+        print(f"  🚫 알림 억제됨(KV_NO_SEND) — {identity}: {text[:80]}")
+        return "suppressed"
     return "failed"
 
 

@@ -277,15 +277,37 @@ def test_no_send_guard() -> None:
                if "KV_NO_SEND" not in p.read_text(encoding="utf-8")]
     check("전 테스트가 KV_NO_SEND 를 켠다", not missing, f"누락={missing}")
 
-    from kv_core import notify, slackbot
+    from kv_core import alerts, notify, slackbot
     for mod, fn in ((notify, "slack"), (slackbot, "post")):
         src = Path(mod.__file__).read_text(encoding="utf-8")
         body = src.split(f"def {fn}(", 1)[-1]
-        check(f"{mod.__name__}.{fn} 가 킬 스위치를 존중", "KV_NO_SEND" in body)
+        check(f"{mod.__name__}.{fn} 가 킬 스위치를 존중", "is_suppressed" in body)
 
     os.environ["KV_NO_SEND"] = "1"
-    check("킬 스위치 켜짐 → notify.slack 이 실발송 없이 True", notify.slack("메타검증(발송 안 됨)") is True)
-    check("킬 스위치 켜짐 → slackbot.post 가 None(카드 미발송)", slackbot.post("메타검증") is None)
+    # [W9 Phase0] 계약을 정정했다. 예전 단언은 "notify.slack → True"·"slackbot.post → None"
+    # 이었는데, 그 두 값이 각각 **거짓 성공**과 **거짓 실패**를 뜻해 실해를 냈다:
+    #   True  → alerts.push 가 delivered 마커를 태워 그날 알림이 영구 유실(B-H1)
+    #   None  → _announce 가 전건 실패로 세어 slackbot-down 가짜 경보(A-M10)
+    # 억제는 성공도 실패도 아닌 제3의 상태다 — 그렇게 표현되는지를 단언한다.
+    check("킬 스위치 → notify.slack 은 False(미발송)", notify.slack("메타검증(발송 안 됨)") is False)
+    check("킬 스위치 → slackbot.post 는 SUPPRESSED(실패 아님)",
+          slackbot.post("메타검증") is slackbot.SUPPRESSED)
+    check("킬 스위치 → alerts.push 는 'suppressed'", alerts.push("meta-x", "메타검증") == "suppressed")
+
+    # 억제 판정은 **한 곳**에서만 한다 — 모듈마다 제 방식으로 환경변수를 읽으면
+    # `KV_NO_SEND=0` 이 어떤 모듈엔 '켜짐'이고 어떤 모듈엔 '꺼짐'이 된다(오늘 실제로 그랬다).
+    others = [p.name for p in (Path(notify.__file__).parent).glob("*.py")
+              if p.name != "notify.py" and "KV_NO_SEND" in p.read_text(encoding="utf-8")
+              and "environ" in p.read_text(encoding="utf-8").split("KV_NO_SEND")[0][-200:]]
+    check("KV_NO_SEND 를 직접 읽는 모듈은 notify.py 뿐", not others, f"직접읽기={others}")
+    for bad in ("0", "false", "no", ""):
+        os.environ["KV_NO_SEND"] = bad
+        if notify.is_suppressed():
+            check(f"KV_NO_SEND={bad!r} 를 '켜짐'으로 오해하지 않음", False)
+            break
+    else:
+        check("KV_NO_SEND 의 0/false/no/'' 는 억제 아님(truthy 함정 제거)", True)
+    os.environ["KV_NO_SEND"] = "1"
 
 
 if __name__ == "__main__":

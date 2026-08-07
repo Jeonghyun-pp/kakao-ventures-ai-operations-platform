@@ -28,6 +28,10 @@ _ANNOUNCE_CAP = 30            # [W9 A-F8] announce 에도 상한(예전엔 recon
 _RECONCILE_CAP = 100          # 틱당 반응 조회 상한 — Slack Tier3 실한도(분당 50+)·10분 틱 기준 여유
 
 
+def _now_z() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _age_days(created: str) -> float:
     """레코드 나이(일). [W9 A-F7] 파싱 실패 = **신규 취급(0)** + loud.
 
@@ -83,11 +87,14 @@ def _announce() -> int:
                     f"승인 정체 의심. `python -m kv_core.approval list` 로 확인 요망.")
     for r in targets:
         res = slackbot.post(_card(r))
+        if res is slackbot.SUPPRESSED:
+            continue          # [0-6] 억제는 실패가 아니다 — 경보를 만들지 않는다(A-M10)
         if res is None:
             fail += 1
             continue                              # [A-F8] head-of-line blocking 제거
-        r["slack_ts"], r["slack_channel"] = res
-        approval.save(r)
+        # [W9 Phase0 0-3] 스냅샷 전체 저장 금지 — post 가 15초 걸리는 동안 내려진 결정을
+        # 지웠다(A-H2 실증). 부분 갱신만 한다.
+        approval.update(r["key"], slack_ts=res[0], slack_channel=res[1])
         n += 1
     if fail:
         from . import alerts
@@ -167,46 +174,40 @@ def _execute() -> int:
     todo = approval.approved_unexecuted()
     if not todo:
         return 0
-    try:
-        slots = job.resource_slots(["gmail-inbox"])   # [C-M9] tasks.yaml 과 같은 자원명
-        slots.__enter__()
-    except job.SlotBusy:
-        print("⚠️  gmail-inbox 자원 점유 중 — 실행은 다음 틱으로(틱은 계속).")
-        return 0
-    try:
-        for r in todo:
-            p = r.get("payload") or {}
-            to = approval.recipient_of(r)                     # [A-F2] 단일 진실
-            try:
-                if not to:
-                    raise RuntimeError("수신자 없음 — payload.to/partner 둘 다 비어 있다")
-                if r.get("executing_at") and not r.get("draft_id"):
-                    # [A-F6] 이전 틱이 초안 생성 직후 죽었을 수 있다 — 중복 위험 경고
-                    print(f"⚠️  {r['key']}: 이전 실행 흔적 있음(중복 초안 가능) — Gmail 확인 요망")
-                    alerts.push("approval-exec", f"⚠️ 승인건 재실행: {r['key']} — 초안 중복 가능")
-                r["executing_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                approval.save(r)                             # 의도 마커 먼저
-                draft_id = gmail.create_draft(to, p.get("subject", ""), p.get("body", ""))
-                got = gmail.get_draft(draft_id)              # read-back — "만들었다 ≠ 반영됐다"
-                if not got or got.get("id") != draft_id:
-                    raise RuntimeError(f"read-back 불일치: {draft_id}")
-                r["draft_id"] = draft_id
-                r["executed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                r["status"] = "executed"
-                r.pop("execute_error", None)
-                approval.save(r)
-                print(f"✅ 실행: {r['key']} → Gmail 초안 {draft_id} (To: {to} · 발송 아님)")
-                n += 1
-            except Exception as e:                # noqa: BLE001  보상: 결정 유지 + 재시도
-                fresh = approval.load(r["key"]) or r         # [A-F14] 부분 기록 방지 — 재조회
-                fresh["execute_error"] = f"{type(e).__name__}: {e}"
-                fresh.pop("draft_id", None)                  # 좀비(가드에 걸려 재시도 불가) 방지
-                approval.save(fresh)
-                print(f"🔴 실행 실패(다음 틱 재시도): {r['key']} — {e!r}")
-                # [B-F14] identity 는 집계형 — 승인 건마다 다른 identity 면 상한이 무의미
-                alerts.push("approval-exec", f"🔴 승인건 실행 실패: {r['key']} — {e}")
-    finally:
-        slots.__exit__(None, None, None)
+    # [W9 Phase0 0-1] `resource_slots(["gmail-inbox"])` 제거 — 그 자원을 선언한 task
+    # (mail-triage·bplan)는 전부 **미배선**이라 지키는 게 없었고, 유령 락 하나로 실행이
+    # 영구 침묵할 위험만 순증했다(A-H4 실증: 3틱 연속 execute 0·알림 0).
+    for r in todo:
+        key = r["key"]
+        p = r.get("payload") or {}
+        to = approval.recipient_of(r)                     # [A-F2] 단일 진실
+        try:
+            if not to:
+                raise RuntimeError("수신자 없음 — payload.to/partner 둘 다 비어 있다")
+            # [W9 Phase0 0-3] 갱신은 항상 재읽기·병합 — 스냅샷 저장은 결정 유실을 만든다(A-H1)
+            fresh = approval.update(key, executing_at=_now_z())   # 의도 마커 먼저
+            if fresh is None or fresh.get("decision") != "approved":
+                # 실행 직전 재확인 — 그 사이 거부됐으면 실행하지 않는다(no-approval-no-execute)
+                print(f"⚠️  {key}: 실행 직전 결정이 바뀌었다({fresh and fresh.get('decision')}) — 건너뜀")
+                continue
+            draft_id = gmail.create_draft(to, p.get("subject", ""), p.get("body", ""))
+            got = gmail.get_draft(draft_id)              # read-back — "만들었다 ≠ 반영됐다"
+            if not got or got.get("id") != draft_id:
+                raise RuntimeError(f"read-back 불일치: {draft_id}")
+            approval.update(key, draft_id=draft_id, executed_at=_now_z(), status="executed",
+                            execute_error=approval.DELETE,
+                            executing_at=approval.DELETE)   # [A-M9] 성공하면 마커를 남기지 않는다
+            print(f"✅ 실행: {key} → Gmail 초안 {draft_id} (To: {to} · 발송 아님)")
+            n += 1
+        except Exception as e:                # noqa: BLE001  보상: 결정 유지 + 재시도
+            # [A-M9] create_draft 이전 실패면 초안이 없으므로 마커도 지운다 — 다음 틱의
+            # "중복 초안 가능" 오탐을 만들지 않는다(정상 재시도가 경보가 되면 늑대소년).
+            pre_draft = isinstance(e, RuntimeError) and "수신자 없음" in str(e)
+            approval.update(key, execute_error=f"{type(e).__name__}: {e}",
+                            draft_id=approval.DELETE,
+                            **({"executing_at": approval.DELETE} if pre_draft else {}))
+            print(f"🔴 실행 실패(다음 틱 재시도): {key} — {e!r}")
+            alerts.push("approval-exec", f"🔴 승인건 실행 실패: {key} — {e}")
     return n
 
 

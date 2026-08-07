@@ -19,6 +19,18 @@ APPROVE_EMOJI = {"white_check_mark", "heavy_check_mark"}
 REJECT_EMOJI = {"x", "negative_squared_cross_mark"}
 
 
+class _Suppressed:
+    """킬 스위치로 **의도적으로 안 보낸** 상태 — 실패(None)와 구분한다. [W9 Phase0 0-6]"""
+    def __repr__(self) -> str:
+        return "SUPPRESSED"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+SUPPRESSED = _Suppressed()
+
+
 def _auth() -> tuple[str, str] | None:
     token = secrets.get("SLACK_BOT_TOKEN", required=False)
     channel = secrets.get("SLACK_APPROVAL_CHANNEL", required=False)
@@ -31,11 +43,13 @@ def _auth() -> tuple[str, str] | None:
 
 def post(text: str) -> tuple[str, str] | None:
     """승인 카드 발송 → (ts, channel). 실패/미설정 → None + loud."""
-    import os
     import requests
-    if os.environ.get("KV_NO_SEND"):          # [W9] 발송 킬 스위치 (notify.py 와 동일 규율)
+    from . import notify
+    # [W9 Phase0 0-6] 억제는 **실패가 아니다** — 예전엔 None(실패)을 돌려줘서 `_announce` 가
+    # 전건 실패로 집계하고 `slackbot-down` 경보를 매일 띄웠다(A-M10). 센티널로 구분한다.
+    if notify.is_suppressed():
         print(f"  🚫 KV_NO_SEND — 슬랙 카드 발송 안 함: {text[:80]}")
-        return None
+        return SUPPRESSED
     auth = _auth()
     if auth is None:
         return None

@@ -21,7 +21,20 @@ webhook이 없거나 발송이 실패해도 **예외를 던지지 않고 False�
 """
 from __future__ import annotations
 
+import os
+
 from . import secrets
+
+_SUPPRESS_VALUES = {"1", "true", "yes", "on"}
+
+
+def is_suppressed() -> bool:
+    """발송 억제 상태인가 — `KV_NO_SEND` 가 **명시적으로** 켜졌을 때만 참.
+
+    관측 표면(orrery)이 이 함수를 읽어 "🚫 억제됨"을 표시한다. 스위치가 켜진 줄 모르고
+    "알림이 안 온다"를 정상으로 오해하는 것이 이 스위치의 최대 위험이었다.
+    """
+    return str(os.environ.get("KV_NO_SEND", "")).strip().lower() in _SUPPRESS_VALUES
 
 
 def slack(text: str, *, webhook: str | None = None) -> bool:
@@ -32,13 +45,14 @@ def slack(text: str, *, webhook: str | None = None) -> bool:
     import os
     import requests
 
-    # [W9] **발송 킬 스위치** — KV_NO_SEND=1 이면 실발송 없이 stdout 에만 남긴다.
-    # 왜 프로덕션 코드에 있나: 테스트가 스텁을 깜빡하면 실 채널에 가짜 경보가 간다.
-    # 두 번 데였다(T3 게이트 테스트 · W9 dispatch 테스트) — 스텁은 기억이고 이건 구조다.
-    # 합성 테스트 전부가 이 변수를 켜고, 메타 검증이 그 사실을 단언한다.
-    if os.environ.get("KV_NO_SEND"):
+    # [W9] **발송 킬 스위치** — 테스트가 스텁을 깜빡해도 실 채널로 새지 않게 하는 최후 방어.
+    # [W9 Phase0 0-4 정정] 두 가지를 고쳤다:
+    #   ① `True`(성공) 반환 → **False**. True 를 주면 호출부(alerts.push)가 "발송됨"으로
+    #      기록해 dedup 마커를 태우고, 그날 알림이 영구 유실됐다(B-H1 실증).
+    #   ② truthy 판정 → 명시 값만. `KV_NO_SEND=0`·`false`·`no` 가 전부 "켜짐"이었다(직관 정반대).
+    if is_suppressed():
         print(f"  🚫 KV_NO_SEND — 발송 안 함(내용): {text[:120]}")
-        return True
+        return False
 
     url = webhook or secrets.get("SLACK_WEBHOOK_URL", required=False)
     if not url:

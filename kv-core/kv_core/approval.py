@@ -157,8 +157,44 @@ def load(key: str) -> dict | None:
 
 
 def save(record: dict) -> None:
+    """⚠️ 전체 덮어쓰기 — **레코드를 오래 들고 있다가 저장하면 안 된다.**
+
+    W9 리뷰 A-H1/H2 실증: `_execute` 가 스냅샷을 들고 Gmail API(초 단위)를 건넌 뒤 저장하면
+    그 사이 내려진 결정(CLI 거부)이 사라진다 — 거부건에 초안이 생성됐다.
+    **새 코드는 `update()` 를 쓴다.** 이 함수는 신규 생성 경로 전용으로만 남긴다.
+    """
     job.atomic_write(_queue_dir() / f"{record['key']}.json",
                      json.dumps(record, ensure_ascii=False, indent=2))
+
+
+def update(key: str, **fields) -> dict | None:
+    """부분 갱신 — **재읽기 후 필드 병합** 저장. 락 없이 lost-update 를 막는다.
+
+    [W9 Phase0 0-2/0-3] 락(heavy_slot)을 쓰면 유령 락 하나로 승인 전체가 영구 no-op 이
+    될 수 있었다(A-H3, pid 재사용 시). 락 대신 **쓰기 창을 최소화**하는 쪽이 옳다:
+    읽기→병합→원자 쓰기가 μs 단위라 실질 경합이 사라지고, 무엇보다 **다른 필드를
+    덮어쓰지 않는다**(경합해도 서로의 갱신을 지우지 않는다).
+    """
+    r = load(key)
+    if r is None:
+        return None
+    for k, v in fields.items():
+        if v is _DELETE:
+            r.pop(k, None)
+        else:
+            r[k] = v
+    save(r)
+    return r
+
+
+class _Delete:
+    """update(key, field=DELETE) — 필드 제거 표식."""
+    def __repr__(self) -> str:
+        return "DELETE"
+
+
+_DELETE = _Delete()
+DELETE = _DELETE
 
 
 def decide(key: str, decision: str, *, by: str = "cli") -> dict | None:
@@ -171,22 +207,15 @@ def decide(key: str, decision: str, *, by: str = "cli") -> dict | None:
     """
     if decision not in ("approved", "rejected"):
         raise ValueError(f"decision 은 approved|rejected (got '{decision}')")
-    from .job import SlotBusy, heavy_slot
-    try:
-        with heavy_slot("approvals-write"):
-            r = load(key)
-            if r is None:
-                return None
-            if r.get("decision") is not None:      # first-decision-wins
-                return r
-            r["decision"] = decision
-            r["decided_at"] = _now()
-            r["decided_by"] = by
-            save(r)
-            return r
-    except SlotBusy:
-        print(f"⚠️  {key}: 다른 결정이 쓰는 중 — 그 결정이 이긴다(first-decision-wins)")
-        return load(key)
+    # [W9 Phase0 0-2] heavy_slot 제거 — 유령 락(pid 재사용) 하나로 **모든 decide 가 영구
+    # no-op** 이 되는 새 단일 장애점이었다(A-H3 실증: CLI 는 "이미 결정됨" 거짓보고, 알림 0).
+    # 대신 읽기→검사→병합쓰기 창을 μs 로 줄이고, update 가 다른 필드를 안 덮게 한다.
+    r = load(key)
+    if r is None:
+        return None
+    if r.get("decision") is not None:              # first-decision-wins
+        return r
+    return update(key, decision=decision, decided_at=_now(), decided_by=by)
 
 
 def undecided() -> list[dict]:

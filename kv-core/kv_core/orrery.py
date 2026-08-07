@@ -79,11 +79,32 @@ def _task_rows(now: date) -> list[dict]:
     return rows
 
 
+def _wm_of(t) -> dict:
+    """워터마크 읽기(관측 전용) — 파손·부재는 빈 dict."""
+    try:
+        return scheduler.read_watermark(t)
+    except Exception:                            # noqa: BLE001
+        return {}
+
+
 def _freshness(t, last_success: str | None, last_attempt: str | None, now: date) -> dict:
     gap = cadence.gap_days(t.cadence, where=t.name)
     if not last_success:
         if last_attempt:
-            return {"status": "⚠️", "note": "시도는 있으나 성공 0 — 로그 확인"}
+            # [W9 Phase0 0-7] 예전엔 여기서 조기 return 하며 ⚠️ 로 고정했다 — judge 가 4일째
+            # 전멸인데 다이제스트 헤더는 🔴0 이었다(alerts 는 🔴 라고 답하는데, C-H4).
+            # 같은 질문에 두 답이 나오면 사람은 더 낙관적인 쪽을 믿는다. 승격 기준을 맞춘다.
+            wm = _wm_of(t)
+            first = str(wm.get("first_attempt") or last_attempt)[:10]
+            try:
+                days = (now - date.fromisoformat(first)).days
+            except ValueError:
+                days = 0
+            limit = cadence.freshness_limit(t)
+            if days >= limit * 3:                 # alerts._task_failures 와 같은 기준
+                return {"status": "🔴",
+                        "note": f"배선 후 {days}일간 성공 0 (한계 {limit}일×3 초과) — 확인 요망"}
+            return {"status": "⚠️", "note": f"시도는 있으나 성공 0 ({days}일째) — 로그 확인"}
         if _WIRED is None:                       # [D3] workers 로드 실패 — 미상을 정상으로 위장 금지
             return {"status": "⚠️", "note": "배선 상태 미상(workers 로드 실패) — 로그 확인"}
         if t.name not in _WIRED and t.runner == "local":
@@ -135,7 +156,7 @@ def _job_base(job_id: str) -> str:
     return _ATTEMPT_RE.sub("", job_id)
 
 
-def _recent_failures(days: int = 7, cap: int = 10) -> list[dict]:
+def _recent_failures(days: int = 7, cap: int = 10, unresolved_cap: int = 50) -> list[dict]:
     """최근 failed 잡 — state.json mtime 기준 최근 N일만 훑는다(전량 스캔 회피).
 
     [W9] **해결 여부**를 함께 판정한다. 실측(8/7)에서 다이제스트가 매일 "실패 4건"이라
@@ -185,7 +206,17 @@ def _recent_failures(days: int = 7, cap: int = 10) -> list[dict]:
             resolved = bool(ls and ls >= str(r["ts"])[:10])
         r["resolved"] = resolved
     rows.sort(key=lambda r: str(r["ts"]), reverse=True)
-    return rows[:cap]
+
+    # [W9 Phase0 0-8] cap 을 **미해결/해결 분리 후** 각각 적용한다.
+    # 예전엔 정렬 직후 `rows[:cap]` 이었다 — 해결된 실패가 더 최신이면 상위 10칸을 채우고
+    # 미해결 2건이 잘려 다이제스트가 "미해결 0건"이라 답했다(C-H1). 오늘 넣은 resolved 강등이
+    # **잘라내기보다 뒤에** 있었던 순서 오류다. 미해결은 소음이 아니므로 넉넉히 남긴다.
+    unresolved = [r for r in rows if not r["resolved"]]
+    resolved = [r for r in rows if r["resolved"]]
+    dropped = len(unresolved) - unresolved_cap
+    if dropped > 0:
+        print(f"⚠️  orrery: 미해결 실패 {len(unresolved)}건 중 {dropped}건 생략(cap {unresolved_cap})")
+    return unresolved[:unresolved_cap] + resolved[:cap]
 
 
 def _dlq_summary() -> list[dict]:
