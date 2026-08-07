@@ -72,6 +72,12 @@ def request(task: str, kind: str, payload: dict, *,
         "key": key, "task": task, "kind": kind, "origin": origin, "partner": partner,
         "channel": channel, "target": target, "created": _now(),
         "status": "drafted", "sent": False, "delivered": False, "payload": payload,
+        # [W8] 결정 라벨 — 큐 파일이 곧 라벨 저장소(label-as-byproduct).
+        "decision": None,      # None(미결) | "approved" | "rejected"
+        "decided_at": None,
+        "decided_by": None,    # "cli" | "slack:<user_id>"
+        "modified": None,      # W8 은 항상 None — 무수정 여부 측정은 W10(sent-mail 대조)
+        # slack_ts/slack_channel/draft_id/executed_at/execute_error 는 approvals_tick 이 나중에 써넣는다
     }
 
     if live:                                               # 실제 초안/알림(발송 아님)
@@ -102,3 +108,102 @@ def pending() -> list[dict]:
         if not r.get("sent"):
             out.append(r)
     return out
+
+
+# ─────────────────────────── [W8] 결정(라벨) API ───────────────────────────
+# 구 스키마 레코드(decision 필드 없음)는 .get("decision") → None = 미결로 자연 해석 —
+# 마이그레이션 불필요(테스트가 보증).
+
+def load(key: str) -> dict | None:
+    """큐 레코드 1건. 없거나 파손이면 None (파손은 loud)."""
+    p = _queue_dir() / f"{key}.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"⚠️  approval: 레코드 파손 {p.name} — {e!r}")
+        return None
+
+
+def save(record: dict) -> None:
+    job.atomic_write(_queue_dir() / f"{record['key']}.json",
+                     json.dumps(record, ensure_ascii=False, indent=2))
+
+
+def decide(key: str, decision: str, *, by: str = "cli") -> dict | None:
+    """결정 기록 — **멱등(first-decision-wins)**: 이미 결정된 레코드는 그대로 반환.
+
+    CLI 와 슬랙 수거가 경합해도 먼저 기록된 결정이 이긴다(재결정 없음 — 감사 기록 불변).
+    """
+    if decision not in ("approved", "rejected"):
+        raise ValueError(f"decision 은 approved|rejected (got '{decision}')")
+    r = load(key)
+    if r is None:
+        return None
+    if r.get("decision") is not None:              # first-decision-wins
+        return r
+    r["decision"] = decision
+    r["decided_at"] = _now()
+    r["decided_by"] = by
+    save(r)
+    return r
+
+
+def undecided() -> list[dict]:
+    """미결 목록 — 슬랙 announce·수거의 대상."""
+    return [r for r in pending() if r.get("decision") is None]
+
+
+def approved_unexecuted() -> list[dict]:
+    """승인됐으나 아직 실행 안 된 mail 건 — executor 의 유일한 입력.
+
+    kind!=mail 은 실행이 없다(decision=라벨일 뿐) — no-approval-no-execute 의 절반은
+    이 필터의 kind 의미론이 담당한다.
+    """
+    out = []
+    for p in sorted(_queue_dir().glob("*.json")):
+        try:
+            r = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if (r.get("decision") == "approved" and r.get("kind") == "mail"
+                and not r.get("draft_id")):
+            out.append(r)
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI — 슬랙 폴백 겸 토큰 전 기본 승인 경로. `python -m kv_core.approval …`"""
+    import argparse
+    ap = argparse.ArgumentParser(description="승인 큐 CLI (list|show|approve|reject)")
+    ap.add_argument("cmd", choices=["list", "show", "approve", "reject"])
+    ap.add_argument("key", nargs="?", default=None)
+    args = ap.parse_args(argv)
+
+    if args.cmd == "list":
+        rows = pending()
+        if not rows:
+            print("승인 큐 비어 있음")
+            return 0
+        for r in rows:
+            d = r.get("decision") or "⏳미결"
+            print(f"  [{r.get('kind')}] {r.get('key')}  {d}  ({r.get('task')}, {r.get('created')})")
+        return 0
+    if not args.key:
+        print("🔴 key 가 필요하다")
+        return 1
+    if args.cmd == "show":
+        r = load(args.key)
+        print(json.dumps(r, ensure_ascii=False, indent=2) if r else f"🔴 없음: {args.key}")
+        return 0 if r else 1
+    r = decide(args.key, "approved" if args.cmd == "approve" else "rejected", by="cli")
+    if r is None:
+        print(f"🔴 없음: {args.key}")
+        return 1
+    print(f"✅ {args.key} → {r['decision']} (by {r['decided_by']}, {r['decided_at']})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

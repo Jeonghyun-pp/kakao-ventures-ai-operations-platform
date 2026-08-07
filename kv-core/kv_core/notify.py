@@ -1,9 +1,11 @@
-"""Slack 단일 경로.
+"""Slack **단방향 알림** 경로 (webhook).
 
-## 왜 필요한가
+## 경로가 둘인 이유 [W8 정정]
 
-통합 전에는 두 방식이 공존했다 — webhook(mail-harness)과 bot 토큰(bplan).
-알림 경로가 둘이면 "왜 안 왔지"를 두 군데서 찾아야 한다.
+webhook 은 발송만 가능하고 ts 를 돌려주지 않는다 — 반응(이모지) 조회가 불가능하다.
+그래서 **양방향(승인 카드·이모지 수거)은 kv_core.slackbot**(bot 토큰, chat.postMessage→ts)이
+맡는다. 역할이 겹치지 않는다: 알림=여기(webhook), 승인=slackbot(bot). "왜 안 왔지"의
+탐색 지점: 다이제스트·경보 → 이 파일 / 승인 카드 → slackbot.py.
 
 ## 설계 원칙 — 알림 실패가 파이프라인을 죽이지 않는다
 

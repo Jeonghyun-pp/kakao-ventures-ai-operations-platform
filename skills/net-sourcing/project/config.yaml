@@ -551,6 +551,15 @@ judge:
   surface_threshold: 0.5                 # [A8] (AI 판단 도입 시) surface/borderline 경계
   include_borderline_in_sync: false      # [D2]
 
+  # ── [W6] 무인 judge 러너 (jobs/judge_job.py) ──
+  # 배치=세션 1콜. 불변식: judge 25 + meeting_mail 3 < 게이트 경고선 30 (테스트가 기계검증).
+  batch_size: 20                         # 세션 1콜당 판정 행 수
+  max_batches_per_run: 25                # 런당 claude 호출 상한(초과분은 다음 회차가 소화)
+
+# ── [W8] 미팅메일 초안 (jobs/meeting_mail_job.py) ──
+meeting_mail:
+  max_drafts_per_run: 3                  # 후보당 세션 1콜 — 위 불변식의 나머지 항
+
   # ── LLM 사실분류 (규칙 위에 얹는 2단) ──
   # "좋은 팀인가"는 판단하지 않는다. "홍보글인가"(스레드) · "대기업인가"(앱스토어)라는
   # **정답이 있는 사실 질문**만 던진다. 정규식이 원리적으로 못 하는 영역을 메운다.

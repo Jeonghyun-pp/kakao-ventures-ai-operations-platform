@@ -39,6 +39,7 @@ net-sourcing 은 월 상한을 $45 로 알고 있었는데 **Apify 플랜의 실
 """
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -89,6 +90,93 @@ def _apify_usage() -> tuple[float, float] | None:
 _USAGE_PROBES = {"apify": _apify_usage}
 
 
+# ── [W6] 호출 수 프록시 계측 — claude 구독 쿼터 ──
+# 구독엔 사용량 API 가 없다 → session.py(단일 통로)가 남긴 로컬 카운터를 읽는다(chokepoint metering).
+# 대리 지표의 한계(호출당 토큰 상이)는 알고 감수 — 이 게이트의 역할은 정밀 회계가 아니라
+# 폭주 방화벽(재시도 루프)·사람 몫 잠식 방지다.
+
+def usage_dir(resource: str) -> Path:
+    return paths.data_root() / "_usage" / resource
+
+
+def _utc_today_str() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def calls_today(resource: str) -> int:
+    """오늘(UTC) 호출 수 = 카운터 jsonl 줄 수. 파일 없으면 0."""
+    p = usage_dir(resource) / f"{_utc_today_str()}.jsonl"
+    if not p.exists():
+        return 0
+    return sum(1 for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip())
+
+
+def record_call(resource: str, **meta) -> None:
+    """호출 1건 기록 — O_APPEND 라 동시 기록은 안전. session.py 가 spawn 시도 후 부른다.
+
+    [중간점검 B8, 감수] 자정(UTC)을 걸친 호출은 기록 시각 날짜에 착지 — 다음 날 1건 선소모.
+    방화벽 목적상 ±1은 무해라 감수한다. 크래시-torn 꼬리는 job.py 와 같은 규율로 복구(B6).
+    """
+    from datetime import datetime, timezone
+    from .job import _repair_torn_tail
+    d = usage_dir(resource)
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{_utc_today_str()}.jsonl"
+    _repair_torn_tail(p)                        # [B6] torn 꼬리 위 병합줄 방지(장부 규율 통일)
+    line = json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), **meta},
+                      ensure_ascii=False)
+    with open(p, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+_warned_no_block: set[str] = set()   # 키 미설정 notify 는 프로세스당 1회(스팸 방지)
+
+
+def check_calls(resource: str, estimate_calls: int = 1, *, quiet: bool = False) -> Verdict:
+    """[W6] 호출 수 게이트 — 실행 **전**. `오늘누적 + 이번추정 > 차단선` → 차단.
+
+    resources.yaml 에 daily_calls_block 이 없으면(None) **허용 + 시끄러운 경고**.
+    `daily_calls_block: 0` 은 **전면 동결**로 동작한다(falsy 함정 봉쇄 — 중간점검 B3).
+
+    [B5, 감수] check→record 는 원자적이지 않다(TOCTOU) — 동시 세션 수만큼(±수 콜) 초과
+    가능. 파이프라인은 `resources:["claude"]` 직렬화가 전제고, 이 게이트의 목적은 정밀
+    회계가 아니라 폭주 방화벽이라 감수한다. [B9, 감수] config() 캐시는 프로세스 수명 —
+    스케줄러 발화가 단명 프로세스라 stale 창이 실질 0.
+    """
+    rc = (config().get(resource) or {})
+    block = rc.get("daily_calls_block")
+    warn = rc.get("daily_calls_warn")
+    used = calls_today(resource)
+
+    if block is None:                            # [B3] 0 은 "미설정"이 아니라 동결
+        v = Verdict(resource, allowed=True, unit="calls", used_usd=float(used),
+                    ceiling_usd=None,
+                    warnings=[f"[{resource}] daily_calls_block 미설정 — 호출 게이트 미작동"])
+        if not quiet:
+            print(f"⚠️  {v.warnings[0]}")
+        if resource not in _warned_no_block:     # [B4] 무인에서도 보이게 — 1회 notify
+            _warned_no_block.add(resource)
+            notify.slack(f"⚠️ {v.warnings[0]} (config/resources.yaml 확인)")
+        return v
+
+    v = Verdict(resource, allowed=True, unit="calls",
+                used_usd=float(used), ceiling_usd=float(block))
+    if used + estimate_calls > int(block):
+        v.allowed = False
+        v.reason = f"일일 호출 차단선 초과: 오늘 {used} + {estimate_calls} > {block}"
+    elif warn is not None and used >= int(warn):
+        v.warnings.append(f"[{resource}] 경고선 도달: 오늘 {used}콜 ≥ {warn} (차단 {block})")
+        if used == int(warn):                    # [B4] 교차 시점 정확히 1회만 notify(스팸 방지)
+            notify.slack(f"⚠️ {v.warnings[-1]}")
+    if not quiet:
+        for w in v.warnings:
+            print(f"⚠️  {w}")
+        if not v.allowed:
+            print(f"🔴 {v.reason}")
+    return v
+
+
 # ────────────────────────────── 판정 ──────────────────────────────
 
 @dataclass
@@ -100,6 +188,7 @@ class Verdict:
     ceiling_usd: float | None = None
     estimate_usd: float = 0.0
     warnings: list[str] = field(default_factory=list)
+    unit: str = "usd"           # "usd"(월 청구액) | "calls"(일일 호출 수 — claude 프록시 지표) [W6]
 
     @property
     def remaining_usd(self) -> float | None:
@@ -110,6 +199,11 @@ class Verdict:
     def summary(self) -> str:
         if self.used_usd is None:
             return f"[{self.resource}] 사용량 조회 불가 — 월 가드 미작동"
+        if self.unit == "calls":
+            if self.ceiling_usd is None:            # [중간점검 B2] 차단선 미설정 verdict 도 크래시 없이
+                return f"[{self.resource}] 오늘 {self.used_usd:.0f}콜 (차단선 미설정 — 게이트 미작동)"
+            return (f"[{self.resource}] 오늘 {self.used_usd:.0f}콜 / 차단 {self.ceiling_usd:.0f} "
+                    f"· 잔여 {self.remaining_usd:.0f}콜")
         return (f"[{self.resource}] 이번 달 ${self.used_usd:.2f} / 상한 ${self.ceiling_usd:.0f} "
                 f"· 잔여 ${self.remaining_usd:.2f} · 이번 실행 추정 ${self.estimate_usd:.2f}")
 
@@ -165,14 +259,15 @@ def check(resource: str, estimate_usd: float = 0.0, *, quiet: bool = False) -> V
 def notify_blocked(v: Verdict) -> bool:
     """게이트에 막혔을 때 알린다 (결정 B5: 실패 + 알림).
 
-    큐잉해서 나중에 자동 재개하는 것은 W3(잡 러너)이 있어야 성립한다.
-    지금은 **실패시키고 사람에게 알린다** — 나중에 큐잉으로 승격하기 쉬운 방향이다.
+    [W8] alerts 경유 — identity 당 **하루 1회 dedup**(4h 틱마다 최대 6회 울리던 것 정정)
+    + 이벤트 장부 기록(발송 실패는 approvals 틱의 scan 이 보상 재푸시).
     """
-    return notify.slack(
-        f"🔴 *예산 게이트 차단* — {v.resource}\n"
-        f"{v.reason}\n"
-        f"```{v.summary()}```\n"
-        f"이번 실행은 중단됐습니다. 한도를 올리거나 다음 주기를 기다려야 합니다.")
+    from . import alerts
+    text = (f"🔴 *게이트 차단* — {v.resource}\n{v.reason}\n"
+            f"```{v.summary()}```\n이번 실행은 중단됐습니다.")
+    pushed = alerts.push(f"gate-block-{v.resource}", text)
+    alerts.append_event("gate_block", resource=v.resource, reason=v.reason, pushed=pushed)
+    return pushed
 
 
 # ───────────────────────── 실행 중 차단선 ─────────────────────────

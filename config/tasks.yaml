@@ -18,12 +18,40 @@
   cadence: weekly
   catch_up: coalesce         # Apify 회당 ~$10.5 — backfill 은 새 데이터 0 인데 돈만 태움
   watermark: last_success    # 수집 실패 = 후보 0 → 다시 시도
-  resources: [apify, claude, notion, gmail]   # judge·meeting-mail = claude -p 스테이지 [ADR 0003]
-  stages: [collect, judge, land, meeting-mail]
+  resources: [apify, notion]                  # [W8] claude·gmail 은 분리된 judge·meeting-mail task 소관
+  stages: [collect, land]                     # [W8] meeting-mail 도 별도 task 로 분리(승인 브릿지와 함께)
   origin: system
   covers: [그물망]
   status: partial
-  notes: judge=claude -p 세션(현 주1회 수동→W5 무인 승격) · meeting-mail(auto-mail) 노션에만·리포 미이식
+  notes: judge 는 별도 judge task 로 분리(W6, 무인) · meeting-mail(auto-mail) 노션에만·리포 미이식(W8 승인브릿지와 함께)
+
+- name: judge                # [W6] 무인 판정 — 미판정(Tier/판정 is_empty) 행 → claude → 검증 → 기입(가역)
+  skill: net-sourcing
+  kind: routine
+  cadence: daily             # 07:00 appstore-sourcing 크론이 매일 미판정 행을 만든다
+  catch_up: coalesce
+  watermark: last_success
+  resources: [claude, notion]
+  stages: [criteria-gate, export, judge-apply]
+  origin: system
+  runner: local
+  covers: [그물망]
+  status: partial
+  notes: references/judge-criteria.md 룰 본문이 비어 있으면 criteria-gate 가 fail-loud 스킵 — 룰 기입 즉시 코드 변경 0으로 가동
+
+- name: meeting-mail         # [W8] Catch 창업자 → claude 초안 → 승인 큐 (Gmail 초안은 승인 후 tick)
+  skill: net-sourcing
+  kind: routine
+  cadence: daily
+  catch_up: coalesce
+  watermark: last_success
+  resources: [claude, notion]   # gmail 없음 — draft-after-approve 라 gmail 부작용은 approvals tick 소관
+  stages: [collect-catch, draft, request-approval]
+  origin: system
+  runner: local
+  covers: [그물망]
+  status: partial
+  notes: 수신자 W8 고정 hello@ · halt 계약 · dedup_key=page_id (선필터=claude 절약 커서)
 
 - name: sourcing-followup
   skill: net-sourcing
@@ -41,15 +69,34 @@
   skill: net-sourcing
   kind: routine
   cadence: daily
-  catch_up: backfill         # 일일 랭킹 — 하루 빠지면 시계열에 구멍(무료라 backfill 부담 0)
+  catch_up: coalesce         # [W6] backfill→coalesce: 애플은 과거 순위를 안 준다 — backfill 은 오늘을
+                             # N번 재수집하며 워터마크에 거짓 "과거 성공"을 남길 뿐. 결손은 staleness 로 관측(W7).
   watermark: last_success
   resources: []              # $0·무인증
   stages: [snapshot]
   origin: system
-  runner: github-actions     # ⚠️ GH Actions cron 이 실행 주체 — 로컬 스케줄러는 스킵(이중실행 방지, 규칙 01).
-                             # 로컬로 컷오버하려면 W6 에서 GH Actions 은퇴 결정 후 runner: local 로 변경(3일 검증 규율).
+  runner: local              # ✅ [컷오버 2026-08-07] 3일 검증 통과(8/5·8/6·8/7 로컬 84 = GH 84 완전 일치)
+                             # → 로컬 스케줄러가 primary. shadow 플래그 제거 = 스위치 전부였다.
   covers: [그물망]
   status: done
+  notes: |
+    GH Actions 는 은퇴 전 **1주 백업 병행**(~2026-08-14) — 섀도의 역방향(reverse shadow: 구가 신을 백업).
+    저장소 분리(GH=data 브랜치 · 로컬=~/kv-data)라 규칙 01(신·구 병행 금지) 위반 아님.
+    은퇴 절차: .github/workflows/appstore-snapshot.yml 의 schedule 제거(수동 dispatch 만 남김).
+
+- name: appstore-sourcing    # [W6] 카탈로그 등재 — 실행 주체는 기존 plist(스케줄러 불관여)
+  skill: net-sourcing
+  kind: routine
+  cadence: daily
+  catch_up: coalesce
+  watermark: last_attempt
+  resources: [notion]
+  stages: [collect, land]
+  origin: system
+  runner: launchd-direct     # 실행체 = ~/Library/LaunchAgents/com.kv.net-sourcing.appstore.plist (07:00 KST)
+  covers: [그물망]
+  status: done
+  notes: main.py run --channel appstore ($0·수집→노션 착지 138행/일). 스케줄러 이관은 appstore-snapshot 컷오버 검증 후 검토.
 
 - name: mail-triage
   skill: mail-harness

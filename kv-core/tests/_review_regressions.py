@@ -159,12 +159,16 @@ def test_h4_external_runner_skip() -> None:
     dues = scheduler.due_tasks([ext], now=date(2026, 8, 4))
     check("외부 러너 task 는 due 에 없음", dues == [], f"dues={[d.task.name for d in dues]}")
 
-    # 실제 tasks.yaml 의 appstore-snapshot 이 external 로 선언됐는지
+    # 실 tasks.yaml 에 외부 러너 선언이 살아 있는지 (appstore-snapshot 은 2026-08-07 컷오버로
+    # runner: local 승격 — 이제 launchd-direct 인 appstore-sourcing 이 이 규율의 대표 사례).
     from kv_core import registry
     tasks = registry.load()
+    src = next(t for t in tasks if t.name == "appstore-sourcing")
+    check("tasks.yaml appstore-sourcing runner=launchd-direct(외부 실행 주체)",
+          src.runner == "launchd-direct", f"runner={src.runner}")
     app = next(t for t in tasks if t.name == "appstore-snapshot")
-    check("tasks.yaml appstore-snapshot runner=github-actions",
-          app.runner == "github-actions", f"runner={app.runner}")
+    check("컷오버 완료: appstore-snapshot runner=local·shadow 해제",
+          app.runner == "local" and not app.shadow, f"runner={app.runner} shadow={app.shadow}")
 
 
 # ── 규칙08: 스케줄러 이중 기동 → 두 번째 인스턴스가 물러나는가 ──────────────

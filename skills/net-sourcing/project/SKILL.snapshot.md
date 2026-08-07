@@ -1,3 +1,7 @@
+> 🧊 **동결본 (스냅샷)** — 편집하지 않는다. 이 문서의 수치 일부는 사문이다:
+> **"월 상한 $45"는 오류** — 실효 천장은 $29(Apify STARTER 실한도, 2026-08-04 정정).
+> 정본은 `skills/net-sourcing/SKILL.md` 와 `config/resources.yaml`.
+
 ---
 name: net-sourcing
 description: >-

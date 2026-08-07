@@ -36,7 +36,10 @@ def _utc_today() -> date:
 # ─────────────────────────── 워터마크 ───────────────────────────
 
 def _wm_path(task: Task) -> Path:
-    return paths.data(task.skill, "cadence") / f"{task.name}.json"
+    # create=False — 읽기 경로에 mkdir 부작용이 있으면 read-only 관측자(orrery)가 오염된다
+    # (중간점검 D1: paths.data 기본 create=True 가 관측 중 스킬 디렉토리를 만들었다).
+    # 쓰기는 atomic_write 가 parent.mkdir 를 하므로 문제없다.
+    return paths.data(task.skill, "cadence", create=False) / f"{task.name}.json"
 
 
 def read_watermark(task: Task) -> dict:
@@ -94,8 +97,9 @@ def due_tasks(tasks: list[Task], *, now: date | None = None) -> list[Due]:
     for t in tasks:
         if not t.scheduled:
             continue                               # 온디맨드·슬롯은 스케줄 대상 아님
-        if t.runner != "local":
-            continue                               # 외부 러너(GH Actions 등)가 돌린다 — 이중실행 금지(규칙 01)
+        if t.runner != "local" and not t.shadow:
+            continue                               # 외부 러너(GH Actions 등)가 돌린다 — 이중실행 금지(규칙 01).
+                                                   # shadow 는 예외: 검증용 병행 실행(저장소 분리 전제) [W6]
         last = _last_run(t, read_watermark(t))
         if cadence.interval_elapsed(t.cadence, last, today=now, where=t.name):
             out.append(Due(t, _missed_periods(t, last, now)))
@@ -125,22 +129,28 @@ def run_due(tasks: list[Task], runner: Runner, *, now: date | None = None) -> li
         report: list[dict] = []
         for due in due_tasks(tasks, now=now):
             t = due.task
-            for period in due.periods:
-                ok = False
-                try:
-                    ok = runner(t, period)
-                except Exception as e:             # noqa: BLE001  러너 실패 = 이 실행 실패(다음에 재시도)
-                    print(f"🔴 {t.name} {period} 실행 예외: {e!r}")
-                wm = read_watermark(t)
-                wm["last_attempt"] = period.isoformat()
-                if ok:
-                    wm["last_success"] = period.isoformat()
-                write_watermark(t, wm)
-                report.append({"task": t.name, "period": period.isoformat(), "ok": ok})
-                if not ok:
-                    # 순차 드레인: 실패 주기 이후는 다음 기동에서 여기부터 재시도된다.
-                    print(f"⚠️  {t.name}: {period} 실패 — 이후 주기 진행 중단(구멍 방지).")
-                    break
+            try:                                   # [중간점검 A7] 한 task 의 워터마크 I/O 오류가
+                for period in due.periods:         # 다음 task·다이제스트까지 죽이면 안 된다
+                    ok = False
+                    try:
+                        ok = runner(t, period)
+                    except Exception as e:         # noqa: BLE001  러너 실패 = 이 실행 실패(다음에 재시도)
+                        print(f"🔴 {t.name} {period} 실행 예외: {e!r}")
+                    wm = read_watermark(t)
+                    wm["last_attempt"] = period.isoformat()
+                    if ok:
+                        wm["last_success"] = period.isoformat()
+                    write_watermark(t, wm)
+                    report.append({"task": t.name, "period": period.isoformat(), "ok": ok})
+                    if not ok:
+                        # 순차 드레인: 실패 주기 이후는 다음 기동에서 여기부터 재시도된다.
+                        # (WIRED 전부 coalesce 인 현재는 미도달 경로 — backfill task 등록 시 활성.
+                        #  합성 backfill 테스트로 검증됨 [A8, 감수].)
+                        print(f"⚠️  {t.name}: {period} 실패 — 이후 주기 진행 중단(구멍 방지).")
+                        break
+            except Exception as e:                 # noqa: BLE001
+                print(f"🔴 {t.name}: 워터마크 처리 오류 — 이 task 만 건너뛰고 계속: {e!r}")
+                report.append({"task": t.name, "period": "?", "ok": False})
         return report
     finally:
         slot.__exit__(None, None, None)
@@ -149,7 +159,7 @@ def run_due(tasks: list[Task], runner: Runner, *, now: date | None = None) -> li
 # ─────────────────────────── 진입점 ───────────────────────────
 
 def _dry(tasks: list[Task], now: date) -> None:
-    ext = [t for t in tasks if t.scheduled and t.runner != "local"]
+    ext = [t for t in tasks if t.scheduled and t.runner != "local" and not t.shadow]
     if ext:
         print("· 외부 러너 스킵(이중실행 방지, 규칙 01): "
               + ", ".join(f"{t.name}→{t.runner}" for t in ext))
@@ -161,8 +171,9 @@ def _dry(tasks: list[Task], now: date) -> None:
     for d in dues:
         wm = read_watermark(d.task)
         ps = ", ".join(p.isoformat() for p in d.periods)
+        tag = " [shadow]" if d.task.shadow else ""
         print(f"  · {d.task.name:18} cadence={d.task.cadence:9} catch_up={d.task.catch_up:8} "
-              f"→ 실행 {len(d.periods)}회 [{ps}]  (last={_last_run(d.task, wm)})")
+              f"→ 실행 {len(d.periods)}회 [{ps}]{tag}  (last={_last_run(d.task, wm)})")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -172,13 +183,50 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     tasks = registry.load()
-    now = _utc_today()
+    now = _utc_today()   # [A10, 감수] 1회 캡처 — 장시간 런이 UTC 자정을 넘으면 다음 틱이
+                         # 같은 period 를 한 번 더 시도할 수 있으나 멱등 덮어쓰기라 무해.
     if not args.run:
         _dry(tasks, now)
         return 0
-    # 실제 실행: 스킬 래퍼가 러너를 제공해야 한다. 아직 배선 전이면 dry 로 안내.
-    print("⚠️  --run 은 스킬 래퍼 배선(각 task 의 run_pipeline 러너) 후 동작한다. 지금은 dry 출력만:")
-    _dry(tasks, now)
+
+    # [W6] 실행 — 배선(WIRED) task 만 run_due 로. 미배선 due 는 **loud 스킵**(워터마크 불변):
+    # "안 한 것·못 한 것·잊은 것"을 로그로 구분한다. run_due 앞에서 거르는 이유 = run_due 는
+    # 러너 반환 후 무조건 워터마크를 쓰므로, 스킵이 섞이면 last_attempt 가 오염된다.
+    from datetime import datetime as _dt, timezone as _tz
+    print(f"┌─ scheduler --run 시작 {_dt.now(_tz.utc).isoformat(timespec='seconds')}")  # [A4] 타임라인 재구성용
+    from . import workers
+    wired = [t for t in tasks if t.name in workers.WIRED]
+    unwired = [t for t in tasks if t.name not in workers.WIRED]
+    for d in due_tasks(unwired, now=now):
+        print(f"🔕 {d.task.name}: due 이나 러너 미배선 — 건너뜀(워터마크 불변). "
+              f"배선하려면 kv_core/workers.py WIRED 에 추가.")
+    report = run_due(wired, workers.dispatch, now=now)
+    n_ok = sum(1 for r in report if r["ok"])
+    for r in report:
+        print(f"  {'✅' if r['ok'] else '🔴'} {r['task']} {r['period']}")
+    if not report:
+        print(f"[{now}] 실행할 배선 task 없음(전부 최신).")
+
+    # [W7·중간점검 A3+D7] 다이제스트 발송 규칙: (성공 1건 이상) or (🔴 존재) 일 때만 —
+    # 실패만 반복되는 틱(judge 룰 대기 등)이 매 발화 발송하던 소음 제거 + 부재 경보(🔴)의
+    # 전달이 "로컬 실행 있음"과 분리됨(launchd-direct/외부 러너가 죽은 날도 발송된다).
+    try:
+        from . import orrery, secrets
+        secrets.load()                              # 웹훅 env
+        d = orrery.gather(with_network=False)       # 발화 컨텍스트에선 외부 조회 생략(빠르게)
+        has_red = any(r["status"] == "🔴" for r in d["tasks"]) or bool(d["failures"])
+        if n_ok > 0 or has_red:
+            sent = orrery.push_slack(d)
+            if not sent:                            # [A9] 발송 실패도 침묵하지 않는다
+                print("⚠️  다이제스트 발송 실패(웹훅 미설정/네트워크) — 아래 텍스트 폴백:")
+                print(orrery.render_slack(d))
+    except Exception as e:                          # noqa: BLE001
+        print(f"⚠️  orrery 다이제스트 실패(실행에는 무영향): {e!r}")
+
+    # [A9] 요약 + 항상 exit 0: launchd 는 비0 종료를 재시도하지 않으므로 종료코드에 의미를
+    # 싣지 않는다 — 실패의 전달 경로는 로그·다이제스트·워터마크(전진 안 함)다.
+    print(f"└─ scheduler --run 끝 {_dt.now(_tz.utc).isoformat(timespec='seconds')} · "
+          f"{n_ok} ok / {len(report) - n_ok} fail")
     return 0
 
 

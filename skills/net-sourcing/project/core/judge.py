@@ -73,7 +73,8 @@ def hardcut(cfg: dict, candidates: list[dict]) -> tuple[list[dict], list[dict]]:
 def _llm_pass(cfg: dict, cands: list[dict]) -> tuple[list[dict], list[dict]]:
     """규칙을 통과한 후보에 LLM 사실분류를 적용. 확신이 낮으면 자르지 않는다(recall 우선)."""
     from core import llm
-    if not cfg.get("judge", {}).get("llm", {}).get("enabled", True) or not llm.available():
+    # [중간점검 E2] 기본값 True→False — 선언(LLM 끔)과 코드 기본값이 반대면 키 오타 한 번에 조용히 부활한다.
+    if not cfg.get("judge", {}).get("llm", {}).get("enabled", False) or not llm.available():
         return cands, []
 
     kept, cut = [], []

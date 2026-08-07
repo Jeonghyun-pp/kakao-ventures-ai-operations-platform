@@ -43,7 +43,11 @@ scan:
   max_threads: 100
 
 llm:
-  enabled: true
+  # 🔴 [중간점검 T6, 2026-08-05] true→false 무장해제. ADR 0003이 이 API 경로를 "은퇴 대상"으로
+  # 선언했는데 enabled: true 로 남아 있었다 — 유일한 잠금이 "키 부재"였고, 그건 가드가 아니다
+  # (net-sourcing config 의 같은 교훈 참조). 누가 .env 에 ANTHROPIC_API_KEY 를 넣어도 이제 안 돈다.
+  # 완전 은퇴(파일 삭제·session.py 경유 재배선)는 mail-harness 컷오버 때.
+  enabled: false
   model: "claude-opus-4-8"
   # ANTHROPIC_API_KEY는 의도적으로 두지 않는다 — UNKNOWN 분류는 헤드리스 Claude 세션이
   # reclassify로 직접 한다(구독 비용). 키가 없어도 파이프라인은 죽지 않는다.
