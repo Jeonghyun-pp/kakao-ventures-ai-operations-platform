@@ -50,10 +50,15 @@ jobs:
         run: |
           set -e
           fail=0
-          for t in _synthetic_worker _synthetic_pipeline _review_regressions \
-                   _synthetic_claude_gate _synthetic_dispatch _synthetic_orrery \
-                   _synthetic_approval_decide _synthetic_approvals_tick \
-                   _synthetic_alerts _chaos_lab; do
+          # [W9 Phase0] 하드코딩 목록 → **자동 발견 + 명시 제외**.
+          # 새 테스트를 CI 에 넣는 걸 사람이 기억해야 했다(그래서 _p0_probes 가 누락됐다).
+          # 오늘의 실패는 전부 "사람이 기억해야 하는 것"에서 나왔다 — 기계가 세게 한다.
+          # 제외는 이유가 있는 것만: _synthetic_slice 는 실제 claude 를 부른다(CI 에 자격 없음,
+          # 대신 그 핵심인 AST 무발송 검사를 아래 단계가 따로 돌린다).
+          EXCLUDE="_synthetic_slice"
+          for f in kv-core/tests/_*.py; do
+            t=$(basename "$f" .py)
+            case " $EXCLUDE " in *" $t "*) echo "── $t (제외: 실 claude 호출)"; continue;; esac
             echo "── $t"
             if ! KV_DATA="$RUNNER_TEMP/kvdata-$t" python "kv-core/tests/$t.py"; then
               echo "::error::$t 실패"; fail=1
