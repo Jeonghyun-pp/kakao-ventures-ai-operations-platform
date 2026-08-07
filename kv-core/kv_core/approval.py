@@ -21,6 +21,18 @@ from . import job, notify, paths
 
 _KINDS = {"mail", "judgment", "summary"}
 _ORIGINS = {"system", "partner"}
+_KEY_OK = __import__("re").compile(r"^[A-Za-z0-9._-]{1,120}$")   # [W9 A-F9] 파일명 안전 문자만
+
+
+def _assert_key(key: str) -> str:
+    """dedup_key 위생 — 파일명으로 직결되므로 경로 문자를 거부한다.
+
+    [W9 A-F9] 검증이 없던 시절 `a/b` 는 하위 디렉토리에 기록돼 pending() 의 비재귀 glob 에
+    안 잡혔다(승인요청이 조용히 증발). `..` 은 큐 밖 쓰기까지 가능했다.
+    """
+    if not _KEY_OK.match(key or ""):
+        raise ValueError(f"dedup_key 는 [A-Za-z0-9._-] 1~120자 (got {key!r})")
+    return key
 
 
 def _queue_dir() -> Path:
@@ -63,7 +75,9 @@ def request(task: str, kind: str, payload: dict, *,
         raise ValueError("mail 초안은 수신 심사역(partner)이 필요하다")
 
     channel, target = _route(kind, origin, partner)
-    key = dedup_key or f"{task}-{kind}-{_now()}"
+    # [W9 A-F9] 기본 key 에서 타임스탬프 제거 — 초마다 다른 key 가 되면 dedup 이 무력해진다
+    # (같은 논리 요청이 매 틱 새 레코드로 증식). 호출부는 의미 있는 dedup_key 를 주는 것이 원칙.
+    key = _assert_key(dedup_key or f"{task}-{kind}")
     qpath = _queue_dir() / f"{key}.json"
     if qpath.exists():                                     # 멱등: 이미 만든 승인요청은 재생성 안 함
         return json.loads(qpath.read_text(encoding="utf-8"))
@@ -80,34 +94,50 @@ def request(task: str, kind: str, payload: dict, *,
         # slack_ts/slack_channel/draft_id/executed_at/execute_error 는 approvals_tick 이 나중에 써넣는다
     }
 
-    if live:                                               # 실제 초안/알림(발송 아님)
+    # [W9 A-F1] **mail 은 live 여도 초안을 만들지 않는다** — draft-after-approve 원칙.
+    # 예전엔 live=True 가 decision=None 상태에서 Gmail 초안을 만들었다: 거부해도 고아 초안이
+    # 남고, draft_id 가드 때문에 executor 가 그 레코드를 영영 못 봤다(좀비).
+    # 초안 생성 지점은 approvals_tick._execute **하나뿐**이어야 한다.
+    if live:
         if channel == "gmail":
-            from . import gmail
-            record["draft_id"] = gmail.create_draft(
-                partner, payload.get("subject", ""), payload.get("body", ""))
+            print(f"· [{key}] mail 은 승인 후 생성된다(draft-after-approve) — 큐만 적재")
         else:
             text = payload.get("text") or payload.get("summary") \
                 or json.dumps(payload, ensure_ascii=False)
             prefix = f"{target} " if target.startswith("@") else ""
             notify.slack(prefix + text)
-        record["delivered"] = True
+            record["delivered"] = True
 
     job.atomic_write(qpath, json.dumps(record, ensure_ascii=False, indent=2))
     return record
 
 
-def pending() -> list[dict]:
-    """아직 발송(사람)되지 않은 승인 대기 목록 — 큐를 읽는다."""
-    d = _queue_dir()
+def _iter_queue() -> list[dict]:
     out: list[dict] = []
-    for p in sorted(d.glob("*.json")):
+    for p in sorted(_queue_dir().glob("*.json")):
         try:
-            r = json.loads(p.read_text(encoding="utf-8"))
+            out.append(json.loads(p.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, OSError):
-            continue
-        if not r.get("sent"):
-            out.append(r)
+            print(f"⚠️  approval: 레코드 파손 {p.name} — 건너뜀")
     return out
+
+
+def _is_closed(r: dict) -> bool:
+    """더 이상 살아있지 않은 건 — 실행 완료(mail) 또는 거부.
+
+    [W9 A-F12] `sent` 는 True 로 만드는 코드가 리포에 없는 데드 필드였다. 그것만 보면
+    결정·실행이 끝난 건까지 영원히 '대기'로 누적돼 매 틱 전량 스캔되고 관측도 오염된다.
+    """
+    if r.get("sent"):
+        return True
+    if r.get("decision") == "rejected":
+        return True
+    return r.get("kind") == "mail" and bool(r.get("draft_id"))
+
+
+def pending() -> list[dict]:
+    """아직 살아있는 승인 건 — 미결 + 승인됐으나 미실행."""
+    return [r for r in _iter_queue() if not _is_closed(r)]
 
 
 # ─────────────────────────── [W8] 결정(라벨) API ───────────────────────────
@@ -134,20 +164,29 @@ def save(record: dict) -> None:
 def decide(key: str, decision: str, *, by: str = "cli") -> dict | None:
     """결정 기록 — **멱등(first-decision-wins)**: 이미 결정된 레코드는 그대로 반환.
 
-    CLI 와 슬랙 수거가 경합해도 먼저 기록된 결정이 이긴다(재결정 없음 — 감사 기록 불변).
+    [W9 A-F5] load→save 사이에 락이 없으면 실제로는 last-write-wins 가 된다(실증: CLI 가
+    먼저 승인했는데 슬랙 거부가 덮음, 반대로 거부가 승인으로 덮이면 초안이 생성된다).
+    쓰기 구간 전체를 배타 락으로 감싸 CLI·틱 경합에서도 첫 결정이 이기게 한다.
+    락을 못 잡으면(다른 쪽이 쓰는 중) 그 결정이 이긴 것이므로 **재조회 후 그대로 반환**.
     """
     if decision not in ("approved", "rejected"):
         raise ValueError(f"decision 은 approved|rejected (got '{decision}')")
-    r = load(key)
-    if r is None:
-        return None
-    if r.get("decision") is not None:              # first-decision-wins
-        return r
-    r["decision"] = decision
-    r["decided_at"] = _now()
-    r["decided_by"] = by
-    save(r)
-    return r
+    from .job import SlotBusy, heavy_slot
+    try:
+        with heavy_slot("approvals-write"):
+            r = load(key)
+            if r is None:
+                return None
+            if r.get("decision") is not None:      # first-decision-wins
+                return r
+            r["decision"] = decision
+            r["decided_at"] = _now()
+            r["decided_by"] = by
+            save(r)
+            return r
+    except SlotBusy:
+        print(f"⚠️  {key}: 다른 결정이 쓰는 중 — 그 결정이 이긴다(first-decision-wins)")
+        return load(key)
 
 
 def undecided() -> list[dict]:
@@ -161,16 +200,19 @@ def approved_unexecuted() -> list[dict]:
     kind!=mail 은 실행이 없다(decision=라벨일 뿐) — no-approval-no-execute 의 절반은
     이 필터의 kind 의미론이 담당한다.
     """
-    out = []
-    for p in sorted(_queue_dir().glob("*.json")):
-        try:
-            r = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        if (r.get("decision") == "approved" and r.get("kind") == "mail"
-                and not r.get("draft_id")):
-            out.append(r)
-    return out
+    return [r for r in _iter_queue()
+            if r.get("decision") == "approved" and r.get("kind") == "mail"
+            and not r.get("draft_id")]
+
+
+def recipient_of(r: dict) -> str:
+    """[W9 A-F2] 수신자 단일 진실 — payload.to 우선, 없으면 partner.
+
+    스키마가 갈라져 있었다: request(kind=mail) 은 `partner` 를 필수로 검증하는데
+    executor 는 `payload["to"]` 를 썼다 → payload 에 to 가 없으면 **수신자 빈 초안**이
+    만들어지고 read-back 도 통과해 executed 로 확정됐다(실증). 여기 한 곳으로 모은다.
+    """
+    return str((r.get("payload") or {}).get("to") or r.get("partner") or "").strip()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -197,10 +239,17 @@ def main(argv: list[str] | None = None) -> int:
         r = load(args.key)
         print(json.dumps(r, ensure_ascii=False, indent=2) if r else f"🔴 없음: {args.key}")
         return 0 if r else 1
-    r = decide(args.key, "approved" if args.cmd == "approve" else "rejected", by="cli")
-    if r is None:
+    want = "approved" if args.cmd == "approve" else "rejected"
+    before = load(args.key)
+    if before is None:
         print(f"🔴 없음: {args.key}")
         return 1
+    r = decide(args.key, want, by="cli")
+    if r and r.get("decision") != want:
+        # [W9 A-F13] "내가 결정했다"와 "이미 다른 결정이 있다"를 rc 로 구분 — 자동화가
+        # rc 0 을 승인 성공으로 오인하지 않게.
+        print(f"⚠️  {args.key}: 이미 {r['decision']}({r.get('decided_by')}) — 변경 없음")
+        return 2
     print(f"✅ {args.key} → {r['decision']} (by {r['decided_by']}, {r['decided_at']})")
     return 0
 

@@ -265,9 +265,11 @@ def notify_blocked(v: Verdict) -> bool:
     from . import alerts
     text = (f"🔴 *게이트 차단* — {v.resource}\n{v.reason}\n"
             f"```{v.summary()}```\n이번 실행은 중단됐습니다.")
-    pushed = alerts.push(f"gate-block-{v.resource}", text)
-    alerts.append_event("gate_block", resource=v.resource, reason=v.reason, pushed=pushed)
-    return pushed
+    # [W9 B-F6] push 는 "sent"|"deduped"|"failed" — 장부에 그대로 기록해 "이미 알림"과
+    # "발송 실패"를 구분한다(예전엔 둘 다 pushed:false 라 감사 장부가 거짓말을 했다).
+    result = alerts.push(f"gate-block-{v.resource}", text)
+    alerts.append_event("gate_block", resource=v.resource, reason=v.reason, pushed=result)
+    return result == "sent"
 
 
 # ───────────────────────── 실행 중 차단선 ─────────────────────────

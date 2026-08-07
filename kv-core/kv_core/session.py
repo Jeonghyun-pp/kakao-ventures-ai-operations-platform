@@ -107,12 +107,19 @@ def run_session(
         gate.record_call("claude", ok=False, err=type(e).__name__)
         raise SessionError(f"claude -p 예기치 못한 실패: {e!r}") from e
 
-    gate.record_call("claude", ok=(proc.returncode == 0))
+    # [W9 B-F1] **성공 판정은 rc 가 아니라 실제 결과다.** 예전엔 ok=(rc==0) 이었는데,
+    # 이 파일 스스로 "rc 0 + 빈 출력 = 인증 만료"라고 정의한다 — 즉 **인증 만료가 ok:true 로
+    # 기록돼** auth-suspect 알림이 자기 목적 시나리오에서 영원히 미발동했다(실증).
+    # exit0 ≠ 성공의 계측 버전. err 도 남겨 알림 본문이 "(?)"가 되지 않게 한다(B-F12).
+    out = (proc.stdout or "").strip()
     if proc.returncode != 0:
+        gate.record_call("claude", ok=False,
+                         err=f"rc{proc.returncode}:{(proc.stderr or '').strip()[:80]}")
         raise SessionError(
             f"claude -p 비정상 종료 rc={proc.returncode}: {(proc.stderr or '').strip()[:300]}"
         )
-    out = (proc.stdout or "").strip()
     if not out:
+        gate.record_call("claude", ok=False, err="empty_output")
         raise SessionError("claude -p 빈 출력 — 인증 만료 또는 프롬프트 문제")
+    gate.record_call("claude", ok=True)
     return out

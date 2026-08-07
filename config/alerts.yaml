@@ -9,5 +9,6 @@ auth_suspect:
 task_failure:
   consecutive_periods: 3          # last_attempt-last_success 격차 ≥ 주기×N → 구조적 실패
 
-dedup:
-  per_identity_per_day: 1         # 같은 identity 는 하루 1회만 푸시 ($KV_DATA/_alerts/sent/ 마커)
+# [W9 B-F13] `dedup.per_identity_per_day` 키는 **삭제**했다 — 코드가 읽지 않는 사문이었고,
+# 남겨두면 "값을 바꿨는데 왜 안 변하지" 사고가 예약된다. 현 규칙은 코드 상수:
+#   identity 당 하루 1회(마커 파일). 발송 실패 시 claim 을 반납해 다음 틱이 재시도한다.

@@ -79,6 +79,51 @@ approval.request("t1", "judgment", {"text": "c"}, dedup_key="k-cli-1")
 check("⑤ CLI approve rc=0", approval.main(["approve", "k-cli-1"]) == 0)
 check("⑤ CLI 결과 반영", approval.load("k-cli-1")["decision"] == "approved")
 
+# ── [W9 리뷰 회귀] A-F1·F2·F9·F12·F13 ──────────────────────────────────────
+print()
+print("[W9 리뷰 회귀]")
+
+# A-F1: live=True 여도 mail 은 승인 전 초안을 만들지 않는다(draft-after-approve 단일 경로)
+import kv_core.gmail as _gm
+_drafted: list = []
+_gm.create_draft = lambda *a, **k: (_drafted.append(a), "should-not-happen")[1]
+r_live = approval.request("t2", "mail", {"subject": "s", "body": "b"},
+                          partner="hello@x", dedup_key="k-live-1", live=True)
+check("A-F1 live=True 여도 초안 생성 0 (승인 전)",
+      not _drafted and not r_live.get("draft_id"), f"drafted={len(_drafted)}")
+
+# A-F2: 수신자 단일 진실 — payload.to 없으면 partner 로 폴백(빈 초안 방지)
+check("A-F2 recipient_of: payload.to 우선",
+      approval.recipient_of({"payload": {"to": "a@x"}, "partner": "b@x"}) == "a@x")
+check("A-F2 recipient_of: to 없으면 partner",
+      approval.recipient_of({"payload": {}, "partner": "b@x"}) == "b@x")
+check("A-F2 recipient_of: 둘 다 없으면 빈 문자열(호출부가 fail-loud)",
+      approval.recipient_of({"payload": {}}) == "")
+
+# A-F9: dedup_key 위생 — 경로 문자 거부 + 기본 key 에 타임스탬프 없음
+try:
+    approval.request("t", "judgment", {"text": "x"}, dedup_key="a/b")
+    check("A-F9 경로 문자 key 거부", False, "통과해버림")
+except ValueError:
+    check("A-F9 경로 문자 key 거부", True)
+d1 = approval.request("t-def", "judgment", {"text": "1"})
+d2 = approval.request("t-def", "judgment", {"text": "2"})
+check("A-F9 기본 key 가 안정적(타임스탬프 없음 → dedup 작동)", d1["key"] == d2["key"], d1["key"])
+
+# A-F12: 종결된 건은 pending 에서 빠진다(무한 누적 방지)
+approval.decide("k-live-1", "rejected")
+keys = {r["key"] for r in approval.pending()}
+check("A-F12 거부건은 pending 제외", "k-live-1" not in keys)
+r_done = approval.request("t3", "mail", {"to": "x@x", "subject": "s", "body": "b"},
+                          partner="x@x", dedup_key="k-done-1")
+approval.decide("k-done-1", "approved")
+r_done = approval.load("k-done-1"); r_done["draft_id"] = "d-1"; approval.save(r_done)
+check("A-F12 실행 완료건도 pending 제외",
+      "k-done-1" not in {r["key"] for r in approval.pending()})
+
+# A-F13: CLI 가 "이미 결정됨"을 rc 2 로 구분
+check("A-F13 이미 결정된 건 approve → rc 2", approval.main(["approve", "k-live-1"]) == 2)
+
 print()
 if FAIL:
     print(f"❌ 실패: {FAIL}")

@@ -46,12 +46,22 @@ def post(text: str) -> tuple[str, str] | None:
                           json={"channel": channel, "text": text}, timeout=15)
         d = r.json()
     except Exception as e:                        # noqa: BLE001
-        print(f"⚠️  slackbot.post 예외: {type(e).__name__}: {e}")
+        # [W9 B-F5] 일시(타임아웃·비JSON 429)와 영구를 구분해 로그에 남긴다 — 호출부가
+        # 재시도 가치를 판단할 수 있게. (반환 계약은 None 유지 — 호출부는 실패만 알면 된다)
+        print(f"⚠️  slackbot.post 예외(일시적일 수 있음): {type(e).__name__}: {e}")
         return None
     if not d.get("ok"):
-        print(f"⚠️  slackbot.post 실패: {d.get('error')}")
+        err = d.get("error")
+        permanent = err in ("invalid_auth", "account_inactive", "channel_not_found",
+                            "not_in_channel", "is_archived")
+        print(f"{'🔴' if permanent else '⚠️'}  slackbot.post 실패: {err}"
+              + (" (영구 — 토큰/채널 설정 확인 필요)" if permanent else " (일시적일 수 있음)"))
         return None
-    return d["ts"], d["channel"]
+    ts, ch = d.get("ts"), d.get("channel")        # [W9 B-F10] ok:true 인데 필드 결손 → raise 금지
+    if not ts or not ch:
+        print(f"⚠️  slackbot.post: ok 인데 ts/channel 결손 — {str(d)[:120]}")
+        return None
+    return ts, ch
 
 
 def message_reactions(channel: str, ts: str) -> list[dict] | None:
@@ -59,6 +69,9 @@ def message_reactions(channel: str, ts: str) -> list[dict] | None:
     import requests
     token = secrets.get("SLACK_BOT_TOKEN", required=False)
     if not token:
+        # [W9 B-F11] post 는 loud 인데 여기만 silent 였다 — 수거가 조용히 멈춘 상태가
+        # "반응 없음"과 같은 로그를 남겼다(불변규칙 06 비대칭).
+        print("⚠️  slackbot: SLACK_BOT_TOKEN 미설정 — 반응 수거 불가(CLI 승인은 가능)")
         return None
     try:
         r = requests.get(f"{_API}/conversations.history",

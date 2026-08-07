@@ -554,11 +554,16 @@ judge:
   # ── [W6] 무인 judge 러너 (jobs/judge_job.py) ──
   # 배치=세션 1콜. 불변식: judge 25 + meeting_mail 3 < 게이트 경고선 30 (테스트가 기계검증).
   batch_size: 20                         # 세션 1콜당 판정 행 수
-  max_batches_per_run: 25                # 런당 claude 호출 상한(초과분은 다음 회차가 소화)
+  max_batches_per_run: 20                # 런당 claude 호출 상한 [W9: 25→20, 최악치 20+9=29 < warn 30]
 
 # ── [W8] 미팅메일 초안 (jobs/meeting_mail_job.py) ──
+# 🔴 [W9 C-M8] 불변식의 모델이 틀렸었다: max_drafts_per_run 은 **attempt 당** 상한이고
+#    attempt-suffix 는 하루 3회까지라 최악 3×3=9콜이다(25+9=34 > 경고선 30).
+#    [C-H2] 후보 단위 커서를 넣어 재시도가 잔여분만 처리하게 고쳤으므로 실질은 3콜이지만,
+#    기계검증은 **최악치(cap × max_attempts)** 로 계산한다 — 모델이 낙관적이면 검증이 거짓말한다.
 meeting_mail:
-  max_drafts_per_run: 3                  # 후보당 세션 1콜 — 위 불변식의 나머지 항
+  max_drafts_per_run: 3                  # 후보당 세션 1콜
+  max_attempts_per_day: 3                # attempt-suffix 상한(judge_job·meeting_mail_job 공통 규율)
 
   # ── LLM 사실분류 (규칙 위에 얹는 2단) ──
   # "좋은 팀인가"는 판단하지 않는다. "홍보글인가"(스레드) · "대기업인가"(앱스토어)라는

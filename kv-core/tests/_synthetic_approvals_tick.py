@@ -121,6 +121,75 @@ approval.request("t", "judgment", {"text": "cli-only"}, dedup_key="j-cli")
 n2 = approvals_tick._announce()
 check("⑥ 토큰 미설정 → announce 스킵·크래시 0", n2 == 0)
 
+# ── [W9 리뷰 회귀] A-F2·F3·F4·F7 ───────────────────────────────────────────
+print()
+print("[W9 리뷰 회귀]")
+slackbot.post = _stub_post          # 스텁 복구
+
+# A-F3: 묵은 미결이 **사전순 앞자리**를 점유해도 신규 승인이 수거된다(굶주림 방지).
+# 예전 결함: 상한 슬라이스가 필터보다 앞에 있어 announce 안 된 레코드가 슬롯을 먹었다.
+for i in range(12):                 # 사전순으로 zzz-new 보다 앞 — 필터 순서가 틀리면 여기 막힌다
+    approval.request("t", "judgment", {"text": f"old{i}"}, dedup_key=f"aaa-old-{i:02d}")
+approval.request("t", "judgment", {"text": "신규"}, dedup_key="zzz-new")
+approvals_tick._announce()
+ts_z = approval.load("zzz-new").get("slack_ts")
+check("A-F3 사전순 뒷자리 신규도 announce 됨", ts_z is not None, f"ts={ts_z}")
+_reactions[("C-TEST", ts_z)] = [{"name": "white_check_mark", "users": ["U9"]}]
+approvals_tick._reconcile()
+check("A-F3 묵은 미결 뒤에서도 신규 승인 수거됨",
+      approval.load("zzz-new")["decision"] == "approved",
+      f"decision={approval.load('zzz-new')['decision']}")
+
+# A-F3b: 상한 초과는 조용히 자르지 않고 **정체 신호로 알린다**
+_alerted: list = []
+import kv_core.alerts as _alm
+_alm.push = lambda ident, text: (_alerted.append(ident), "sent")[1]
+for i in range(approvals_tick._ANNOUNCE_CAP + 3):
+    approval.request("t", "judgment", {"text": f"flood{i}"}, dedup_key=f"flood-{i:03d}")
+approvals_tick._announce()
+check("A-F3b 미발송 적체 → announce-backlog 알림",
+      "announce-backlog" in _alerted, f"{_alerted}")
+
+# A-F2: payload.to 없어도 partner 로 초안 생성(수신자 빈 초안 방지)
+_drafts_created.clear()
+approval.request("t", "mail", {"subject": "s", "body": "b"},   # payload 에 to 없음
+                 partner="person-016b3a1e6ca1@example.com", dedup_key="m-nofield")
+approval.decide("m-nofield", "approved")
+approvals_tick._execute()
+check("A-F2 payload.to 없어도 partner 로 실행(빈 수신자 0)",
+      _drafts_created and _drafts_created[-1]["to"] == "person-016b3a1e6ca1@example.com",
+      f"{_drafts_created[-1] if _drafts_created else None}")
+
+# A-F2b: 수신자가 아예 없으면 fail-loud (executed 확정 금지)
+approval.request("t", "judgment", {"text": "x"}, dedup_key="m-norecip")
+r_nr = approval.load("m-norecip"); r_nr["kind"] = "mail"; r_nr["partner"] = None
+r_nr["decision"] = "approved"; approval.save(r_nr)
+n_before = len(_drafts_created)
+approvals_tick._execute()
+check("A-F2b 수신자 없음 → 초안 0 + execute_error 기록",
+      len(_drafts_created) == n_before
+      and "수신자 없음" in (approval.load("m-norecip").get("execute_error") or ""))
+
+# A-F4: 한 단계가 죽어도 alerts.scan 은 돈다(관측 격리)
+_scanned = {"n": 0}
+import kv_core.alerts as _al
+_al.scan = lambda: (_scanned.__setitem__("n", _scanned["n"] + 1), [])[1]
+_orig_rec = approvals_tick._reconcile
+approvals_tick._reconcile = lambda: (_ for _ in ()).throw(RuntimeError("주입 장애"))
+approvals_tick.main([])
+approvals_tick._reconcile = _orig_rec
+check("A-F4 단계 실패해도 alerts.scan 실행됨", _scanned["n"] >= 1, f"scan 호출={_scanned['n']}")
+
+# A-F7: created 포맷이 달라도(isoformat) announce 대상이 된다
+approval.request("t", "judgment", {"text": "iso"}, dedup_key="m-iso")
+r_iso = approval.load("m-iso")
+r_iso["created"] = "2026-08-07T01:00:00+00:00"      # isoformat 변형
+r_iso.pop("slack_ts", None)
+approval.save(r_iso)
+approvals_tick._announce()
+check("A-F7 isoformat created 도 announce 됨(9999 뭉갬 제거)",
+      approval.load("m-iso").get("slack_ts") is not None)
+
 print()
 if FAIL:
     print(f"❌ 실패: {FAIL}")

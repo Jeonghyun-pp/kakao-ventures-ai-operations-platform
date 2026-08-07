@@ -39,10 +39,16 @@ judge-appstore:
     verdict: {type: str, required: true, enum: [Pass, Drop]}
     reason:  {type: str, required: false, nonempty: true}
 
-# ── 그물망 미팅요청 메일 초안 (발송 = 비가역) ──
+# ── 그물망 미팅요청 메일 초안 (승인 큐 적재 = 가역) ──
+# 🔴 [W9 C-H3 정정] halt → quarantine. 두 가지가 틀렸었다:
+#   ① 이 스테이지의 부작용은 **승인 큐 파일**(가역)이지 발송이 아니다 — 가역성 기준상 quarantine.
+#      비가역 관문은 승인 후 executor 이고, 거기엔 사람의 ✅ 가 이미 서 있다.
+#   ② `to` 는 **코드가 RECIPIENT 로 덮어쓰는 값**인데 required 라, LLM 이 그 필드를 빠뜨리면
+#      어차피 버릴 값 하나 때문에 다른 정상 후보의 초안까지 전량 죽었다(halt = 발행 0).
 meeting-mail:
-  on_invalid: halt                # 형식 깨진 초안은 절대 발행 안 함. 의심스러우면 멈춘다.
+  on_invalid: quarantine          # 어긋난 초안만 DLQ 격리, 나머지 후보는 진행
+  min_records: 0                  # "보낼 대상 없음"은 정당(진공 방지는 잡 레벨에서 — C-M4)
   schema:
-    to:      {type: str, required: true, nonempty: true}
+    to:      {type: str, required: false, nonempty: true}   # 코드가 공급(수신자는 LLM 소관 아님)
     subject: {type: str, required: true, nonempty: true}
     body:    {type: str, required: true, nonempty: true}

@@ -24,15 +24,28 @@ from datetime import datetime, timezone
 from . import approval, job, slackbot
 
 _ANNOUNCE_MAX_AGE_DAYS = 14   # 구 스키마·묵은 레코드가 설치 첫 틱에 슬랙으로 부활하는 것 방지
-_RECONCILE_CAP = 30           # 틱당 반응 조회 상한 (Slack Tier3 rate 방어)
+_ANNOUNCE_CAP = 30            # [W9 A-F8] announce 에도 상한(예전엔 reconcile 에만 있어 비대칭)
+_RECONCILE_CAP = 100          # 틱당 반응 조회 상한 — Slack Tier3 실한도(분당 50+)·10분 틱 기준 여유
 
 
 def _age_days(created: str) -> float:
-    try:
-        dt = datetime.strptime(created, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - dt).total_seconds() / 86400
-    except ValueError:
-        return 9999.0                             # 파손 created = 매우 오래된 것으로 취급(미발송)
+    """레코드 나이(일). [W9 A-F7] 파싱 실패 = **신규 취급(0)** + loud.
+
+    예전엔 9999 를 돌려 조용히 미발송했는데, 리포가 `%Y-%m-%dT%H:%M:%SZ` 와 `isoformat()`
+    두 포맷을 혼용해서 **정상 레코드가 영구히 슬랙에 안 뜨는** 사고가 됐다(실증).
+    모르면 새 것으로 보고 알리는 쪽이 안전하다 — 묵은 것 한 번 더 알리는 비용 < 승인 유실.
+    """
+    for parse in (lambda s: datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc),
+                  lambda s: datetime.fromisoformat(s.replace("Z", "+00:00"))):
+        try:
+            dt = parse(created)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return (datetime.now(timezone.utc) - dt).total_seconds() / 86400
+        except (ValueError, TypeError, AttributeError):
+            continue
+    print(f"⚠️  created 파싱 실패({created!r}) — 신규로 취급해 announce 한다")
+    return 0.0
 
 
 def _card(r: dict) -> str:
@@ -45,36 +58,63 @@ def _card(r: dict) -> str:
 
 
 def _announce() -> int:
-    n = 0
-    for r in approval.undecided():
-        if r.get("slack_ts"):
-            continue
-        if _age_days(str(r.get("created", ""))) > _ANNOUNCE_MAX_AGE_DAYS:
-            continue                              # 묵은 레코드 부활 방지
+    """미결 레코드를 슬랙 카드로. [W9 A-F8] 한 건 실패가 다른 건을 막지 않는다(continue).
+
+    [W9 B-F4] 연속 실패가 임계를 넘으면 **웹훅 경로로 에스컬레이션** — 봇 토큰이 죽으면
+    승인 카드가 무한 침묵하고 사람은 "요청이 없구나"로 읽는다(미도착 ≠ 요청 0건, 규칙 05).
+    """
+    n = fail = 0
+    # [W9 A-F3 동형] **필터 먼저, 상한은 그 뒤** — 상한을 앞에 두면 이미 announce 된
+    # 레코드가 슬롯을 먹어 신규가 영원히 안 뜬다(reconcile 에서 고친 바로 그 함정을
+    # announce 에 새로 만들었다가 테스트가 잡았다. 같은 실수는 같은 모양으로 반복된다).
+    # 정렬은 **최신 우선**(created 역순) — reconcile 과 같은 원칙이다. 사전순이면 새 요청이
+    # 뒤로 밀려 상한에 걸리고, 그게 정확히 A-F3 굶주림의 announce 판이다(테스트가 잡았다).
+    pending_new = sorted((r for r in approval.undecided()
+                          if not r.get("slack_ts")
+                          and _age_days(str(r.get("created", ""))) <= _ANNOUNCE_MAX_AGE_DAYS),
+                         key=lambda r: str(r.get("created", "")), reverse=True)
+    targets = pending_new[:_ANNOUNCE_CAP]
+    if len(pending_new) > _ANNOUNCE_CAP:
+        # 상한을 올려 전부 쏘는 건 스팸이고, 조용히 자르는 건 굶주림이다 —
+        # **초과 자체를 정체 신호로 알린다**(카드는 다음 틱에 이어서 나간다).
+        from . import alerts
+        alerts.push("announce-backlog",
+                    f"⚠️ 미발송 승인요청 {len(pending_new)}건 > 틱 상한 {_ANNOUNCE_CAP} — "
+                    f"승인 정체 의심. `python -m kv_core.approval list` 로 확인 요망.")
+    for r in targets:
         res = slackbot.post(_card(r))
         if res is None:
-            return n                              # 미설정/실패 — CLI-only, 이번 틱 전체 스킵
+            fail += 1
+            continue                              # [A-F8] head-of-line blocking 제거
         r["slack_ts"], r["slack_channel"] = res
         approval.save(r)
         n += 1
+    if fail:
+        from . import alerts
+        alerts.push("slackbot-down",
+                    f"🔴 승인 카드 발송 실패 {fail}건 — 봇 토큰/채널 확인 요망. "
+                    f"승인은 CLI 로 가능: python -m kv_core.approval list")
     return n
 
 
 def _decision_from_reactions(reactions: list[dict], only_user: str | None) -> tuple[str, str] | None:
     """reactions → (decision, by). ✅+❌ 동시면 **reject 우선**(fail-safe —
-    비가역 방향으로 안 기울인다. reactions 엔 선후 타임스탬프가 없다)."""
+    비가역 방향으로 안 기울인다. reactions 엔 선후 타임스탬프가 없다).
+
+    [W9 A-F10] 인가는 **비대칭**이다: 승인(비가역 방향)은 화이트리스트가 있으면 그 사람만,
+    거부(안전 방향)는 누구나 당길 수 있다. 안전 스위치를 잠그는 건 안전하지 않다.
+    """
     approvers: list[str] = []
     rejecters: list[str] = []
     for rx in reactions:
         users = rx.get("users", [])
-        if only_user:
-            users = [u for u in users if u == only_user]
         if not users:
             continue
         if rx.get("name") in slackbot.APPROVE_EMOJI:
-            approvers += users
+            allowed = [u for u in users if u == only_user] if only_user else users
+            approvers += allowed
         elif rx.get("name") in slackbot.REJECT_EMOJI:
-            rejecters += users
+            rejecters += users                    # 거부는 무필터(누구나)
     if rejecters:
         return "rejected", f"slack:{rejecters[0]}"
     if approvers:
@@ -84,13 +124,21 @@ def _decision_from_reactions(reactions: list[dict], only_user: str | None) -> tu
 
 def _reconcile() -> int:
     from . import secrets
-    only_user = secrets.get("SLACK_APPROVAL_USER", required=False)   # 선택: 이 유저 반응만 인정
+    only_user = secrets.get("SLACK_APPROVAL_USER", required=False)   # 선택: 승인 화이트리스트
     n = 0
-    for r in approval.undecided()[:_RECONCILE_CAP]:
-        ts, ch = r.get("slack_ts"), r.get("slack_channel")
-        if not ts or not ch:
-            continue
-        reactions = slackbot.message_reactions(ch, ts)
+    # [W9 A-F3] 굶주림 방지 — 두 가지를 고쳤다:
+    #   ① **필터 먼저, 상한은 그 뒤** (예전엔 슬라이스가 앞이라 announce 못 한 레코드가 슬롯 점유)
+    #   ② **최신 우선 정렬 + 넉넉한 상한** — 사람이 방금 누른 ✅ 가 가장 먼저 잡혀야 한다.
+    #      상한은 Slack Tier3 실한도(분당 50+)에 맞춘 값이라 사실상 전량 순회한다.
+    #      미결이 이 상한을 넘게 쌓이면 그건 승인 정체 자체가 이상 신호다(다이제스트가 표면화).
+    pollable = sorted((r for r in approval.undecided()
+                       if r.get("slack_ts") and r.get("slack_channel")),
+                      key=lambda r: str(r.get("slack_ts")), reverse=True)
+    targets = pollable[:_RECONCILE_CAP]
+    if len(pollable) > _RECONCILE_CAP:
+        print(f"⚠️  미결 {len(pollable)}건 > 틱 상한 {_RECONCILE_CAP} — 오래된 건은 다음 틱")
+    for r in targets:
+        reactions = slackbot.message_reactions(r["slack_channel"], r["slack_ts"])
         if reactions is None:
             continue                              # 조회 실패 ≠ 반응 0 — 다음 틱 재시도(규칙 05)
         got = _decision_from_reactions(reactions, only_user)
@@ -107,19 +155,39 @@ def _reconcile() -> int:
 
 def _execute() -> int:
     """approved mail 실행 — **이 함수의 입력은 approved_unexecuted() 뿐이다**
-    (no-approval-no-execute 를 호출 구조로 보장)."""
+    (no-approval-no-execute 를 호출 구조로 보장).
+
+    [W9] 네 가지 정정: ①수신자는 approval.recipient_of 단일 진실(빈 값이면 fail-loud —
+    예전엔 To 빈 초안이 executed 로 확정됐다) ②create_draft 전에 의도 마커(`executing_at`)를
+    먼저 저장해 크래시 창의 중복 초안을 탐지 가능하게 ③실패 시 부분 기록(draft_id 만 남는
+    좀비)을 만들지 않음 ④SlotBusy 는 여기서 잡아 틱 전체를 죽이지 않음.
+    """
     from . import alerts, gmail
     n = 0
     todo = approval.approved_unexecuted()
     if not todo:
         return 0
-    with job.resource_slots(["gmail"]):           # 메인 스케줄러와 gmail 자원 상호배제
+    try:
+        slots = job.resource_slots(["gmail-inbox"])   # [C-M9] tasks.yaml 과 같은 자원명
+        slots.__enter__()
+    except job.SlotBusy:
+        print("⚠️  gmail-inbox 자원 점유 중 — 실행은 다음 틱으로(틱은 계속).")
+        return 0
+    try:
         for r in todo:
             p = r.get("payload") or {}
+            to = approval.recipient_of(r)                     # [A-F2] 단일 진실
             try:
-                draft_id = gmail.create_draft(p.get("to", ""), p.get("subject", ""),
-                                              p.get("body", ""))
-                got = gmail.get_draft(draft_id)   # read-back — "보냈다 ≠ 반영됐다"
+                if not to:
+                    raise RuntimeError("수신자 없음 — payload.to/partner 둘 다 비어 있다")
+                if r.get("executing_at") and not r.get("draft_id"):
+                    # [A-F6] 이전 틱이 초안 생성 직후 죽었을 수 있다 — 중복 위험 경고
+                    print(f"⚠️  {r['key']}: 이전 실행 흔적 있음(중복 초안 가능) — Gmail 확인 요망")
+                    alerts.push("approval-exec", f"⚠️ 승인건 재실행: {r['key']} — 초안 중복 가능")
+                r["executing_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                approval.save(r)                             # 의도 마커 먼저
+                draft_id = gmail.create_draft(to, p.get("subject", ""), p.get("body", ""))
+                got = gmail.get_draft(draft_id)              # read-back — "만들었다 ≠ 반영됐다"
                 if not got or got.get("id") != draft_id:
                     raise RuntimeError(f"read-back 불일치: {draft_id}")
                 r["draft_id"] = draft_id
@@ -127,14 +195,18 @@ def _execute() -> int:
                 r["status"] = "executed"
                 r.pop("execute_error", None)
                 approval.save(r)
-                print(f"✅ 실행: {r['key']} → Gmail 초안 {draft_id} (발송 아님 — 사람이 Send)")
+                print(f"✅ 실행: {r['key']} → Gmail 초안 {draft_id} (To: {to} · 발송 아님)")
                 n += 1
             except Exception as e:                # noqa: BLE001  보상: 결정 유지 + 재시도
-                r["execute_error"] = f"{type(e).__name__}: {e}"
-                approval.save(r)
+                fresh = approval.load(r["key"]) or r         # [A-F14] 부분 기록 방지 — 재조회
+                fresh["execute_error"] = f"{type(e).__name__}: {e}"
+                fresh.pop("draft_id", None)                  # 좀비(가드에 걸려 재시도 불가) 방지
+                approval.save(fresh)
                 print(f"🔴 실행 실패(다음 틱 재시도): {r['key']} — {e!r}")
-                alerts.push(f"approval-exec-{r['key']}",
-                            f"🔴 승인건 실행 실패: {r['key']} — {e}")
+                # [B-F14] identity 는 집계형 — 승인 건마다 다른 identity 면 상한이 무의미
+                alerts.push("approval-exec", f"🔴 승인건 실행 실패: {r['key']} — {e}")
+    finally:
+        slots.__exit__(None, None, None)
     return n
 
 
@@ -150,15 +222,30 @@ def main(argv: list[str] | None = None) -> int:
         print("⚠️  다른 approvals 틱 실행 중 — 물러난다(규칙 08).")
         return 0
     try:
-        a = _announce()
-        d = _reconcile()
-        e = _execute()
-        alerted = alerts.scan()
-        print(f"└─ announce {a} · decide {d} · execute {e} · alerts {len(alerted)}")
+        # [W9 A-F4] 단계별 격리 — 한 단계의 예외가 나머지(특히 alerts.scan)를 삼키면
+        # "실패했는데 아무도 모르는" 상태가 된다. 그리고 틱 실패 자체를 에스컬레이션한다
+        # (예전엔 launchd.log 한 줄이 유일한 흔적이었고 exit 0 이라 겉으론 정상이었다).
+        counts: dict[str, int] = {}
+        errs: list[str] = []
+        for name, fn in (("announce", _announce), ("decide", _reconcile), ("execute", _execute)):
+            try:
+                counts[name] = fn()
+            except Exception as ex:               # noqa: BLE001
+                counts[name] = -1
+                errs.append(f"{name}: {ex!r}")
+                print(f"🔴 approvals tick [{name}] 오류(다음 틱 재시도): {ex!r}")
+        try:
+            alerted = alerts.scan()               # 관측은 앞 단계 실패와 무관하게 돈다
+        except Exception as ex:                   # noqa: BLE001
+            alerted = []
+            errs.append(f"alerts.scan: {ex!r}")
+            print(f"🔴 alerts.scan 오류: {ex!r}")
+        if errs:
+            alerts.push("approvals-tick-error",
+                        "🔴 승인 틱 단계 실패 — " + " · ".join(errs)[:400])
+        print(f"└─ announce {counts.get('announce')} · decide {counts.get('decide')} "
+              f"· execute {counts.get('execute')} · alerts {len(alerted)}")
         return 0                                  # launchd 는 비0을 재시도하지 않는다
-    except Exception as ex:                       # noqa: BLE001
-        print(f"🔴 approvals tick 오류(다음 틱 재시도): {ex!r}")
-        return 0
     finally:
         slot.__exit__(None, None, None)
 

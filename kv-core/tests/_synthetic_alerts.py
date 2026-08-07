@@ -33,10 +33,12 @@ def check(name, cond, detail=""):
 
 
 def _usage_write(day, entries):
+    """[W9] ts 를 함께 기록 — alerts 가 '오늘 발생한 실패인지'를 ts 로 판정한다(B-F7)."""
     d = paths.data_root() / "_usage" / "claude"
     d.mkdir(parents=True, exist_ok=True)
+    rows = [dict(e, ts=e.get("ts", f"{day.isoformat()}T00:00:00+00:00")) for e in entries]
     (d / f"{day.isoformat()}.jsonl").write_text(
-        "\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
 
 
 today = datetime.now(timezone.utc).date()
@@ -59,7 +61,7 @@ check("① ok 섞이면 미발동", "auth-suspect-claude" not in alerts.scan())
 
 # ② UTC 경계: 어제 꼬리 2 + 오늘 1 연속 실패 → 검출
 _usage_write(yday, [{"ok": True}, {"ok": False, "err": "timeout"}, {"ok": False, "err": "timeout"}])
-_usage_write(today, [{"ok": False, "err": "timeout"}])
+_usage_write(today, [{"ok": False, "err": "timeout"}])   # 오늘 발생분 포함 → 발동해야 함
 for m in (paths.data_root() / "_alerts" / "sent").glob("auth-suspect-*"):
     m.unlink()
 check("② UTC 자정 경계(어제2+오늘1) 검출", "auth-suspect-claude" in alerts.scan())
@@ -103,7 +105,70 @@ marker = d / f"pre-claimed-{today.isoformat()}"
 marker.touch()
 n_before = len(_sent)
 ok5 = alerts.push("pre-claimed", "should not send")
-check("⑤ 마커 선점 → 발송 0·False", ok5 is False and len(_sent) == n_before)
+check("⑤ 마커 선점 → 발송 0·deduped", ok5 == "deduped" and len(_sent) == n_before)
+
+# ── [W9 리뷰 회귀] B-F1·F2·F3·F7·F8 ─────────────────────────────────────────
+print()
+print("[W9 리뷰 회귀]")
+
+# B-F2: 발송 실패 시 claim 반납 → 복구 후 재푸시 가능 (예전엔 마커가 막아 영구 유실)
+_fail_mode = {"on": True}
+notify.slack = lambda text, **kw: (False if _fail_mode["on"]
+                                   else (_sent.append(text), True)[1])
+r1 = alerts.push("recover-test", "1차(실패)")
+check("B-F2 발송 실패 → 'failed' 반환", r1 == "failed", f"{r1}")
+_fail_mode["on"] = False
+r2 = alerts.push("recover-test", "2차(복구 후)")
+check("B-F2 복구 후 재푸시 성공(claim 반납됨)", r2 == "sent", f"{r2}")
+r3 = alerts.push("recover-test", "3차")
+check("B-F2 성공 후에는 dedup", r3 == "deduped", f"{r3}")
+
+# B-F1: 인증 만료(rc0 + 빈 출력)가 ok:false 로 기록되는가 — session 실경로 스텁
+import subprocess as _sp
+from kv_core import session as _sess
+
+
+class _EmptyProc:
+    returncode = 0
+    stdout = "   "          # 빈 출력 = 인증 만료 증상
+    stderr = ""
+
+
+_sess.subprocess.run = lambda *a, **k: _EmptyProc()
+gate._cfg = {"claude": {"daily_calls_warn": 99, "daily_calls_block": 99}}
+n_before = gate.calls_today("claude")
+try:
+    _sess.run_session("t")
+except _sess.SessionError:
+    pass
+tail = alerts._usage_tail(1)
+check("B-F1 빈 출력(인증 만료 증상) → ok:false 기록",
+      tail and tail[-1].get("ok") is False and tail[-1].get("err") == "empty_output", f"{tail}")
+
+# B-F3: never-succeeded — 시도는 있고 성공 이력이 없는 task 도 결국 알린다
+from kv_core.registry import Task as _T
+t_never = _T(name="syn-never", skill="_alerts-syn", cadence="daily",
+             catch_up="coalesce", watermark="last_success")
+scheduler.write_watermark(t_never, {"last_attempt": today.isoformat(),
+                                    "first_attempt": (today - timedelta(days=10)).isoformat()})
+_reg.load = lambda *a, **k: [t_never]
+got_nv = alerts.scan()
+check("B-F3 never-succeeded 도 알린다(10일 경과)",
+      any(i.startswith("never-succeeded") for i in got_nv), f"{got_nv}")
+scheduler.write_watermark(t_never, {"last_attempt": today.isoformat(),
+                                    "first_attempt": today.isoformat()})
+for m in (paths.data_root() / "_alerts" / "sent").glob("never-*"):
+    m.unlink()
+check("B-F3 유예 안에선 미발동(배선 당일)",
+      not any(i.startswith("never-succeeded") for i in alerts.scan()))
+_reg.load = _orig_load
+
+# B-F8: identity 위생 — 경로 문자가 있어도 raise 하지 않는다
+try:
+    rid = alerts.push("net-sourcing/threads:x", "identity 위생 테스트")
+    check("B-F8 경로 문자 identity 도 안전(raise 0)", rid in ("sent", "deduped", "failed"), rid)
+except Exception as e:  # noqa: BLE001
+    check("B-F8 경로 문자 identity 도 안전(raise 0)", False, repr(e))
 
 print()
 if FAIL:
