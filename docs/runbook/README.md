@@ -24,16 +24,19 @@ tail -20 ~/kv-data/_approvals/launchd.log  # 승인 리컨실러(10분) 틱 이�
 
 ## CI 가 지키는 것 (`.github/workflows/ci.yml`)
 
-커밋마다 자동으로 도는 합성 스위트 12본 + 구조 검사 2종. **테스트를 사람 기억에서 구조로**
-옮긴 것이고(2026-08-07 신설), 지키는 계약은 다음과 같다:
+커밋마다 자동으로 도는 합성 스위트 **14본** + 구조 검사 2종. **테스트를 사람 기억에서 구조로**
+옮긴 것이고(2026-08-07 신설 · 2026-08-11 재설계로 2본 추가), 지키는 계약은 다음과 같다:
 
 | 검사 | 지키는 계약 |
 |---|---|
 | worker·pipeline·chaos_lab | 상태 규약 — kill-9 재개·항목 멱등·events 무손상·장애 내성 7종 |
 | review_regressions | 과거 결함 재발 방지(H1·H2·T2·T4 등) + **실발송 킬 스위치 메타 검증** |
-| orrery | 관측자 read-only 계약(AST) · absence 감지 임계 |
+| health | **판정의 단일 정본** — resolved 시각/순번 · launchd-direct 선언 · first_attempt 자기치유 · `now` 주입 시간 시뮬 · 순수 읽기 |
+| orrery | 관측자 read-only 계약(AST, health 포함) · absence 감지 임계 · 승인 통계 표면 |
+| **concurrency_lab** | 검증 사각① — **진짜 프로세스 경합**. lost update · announce↔decide · 실행 중 거부 · first-decision-wins 수렴 |
+| **realdata_replay** | 검증 사각② — 결측 필드·구스키마 내성 + 실 `~/kv-data` 읽기전용 리플레이. **관측🔴↔알림 일치**(이중 진실원 회귀 잠금) |
 | approval_decide·approvals_tick | **무승인 무실행** · 결정 멱등 · 실행 보상 · 굶주림 방지 |
-| alerts·claude_gate | 알림 3클래스 발동 · dedup · 쿼터 게이트 |
+| alerts·claude_gate | 알림 발동 · dedup · **백오프 30일 시뮬**(끊기지 않는지) · 쿼터 게이트 |
 | AST 무발송 | gmail·approvals_tick·slackbot·approval 에 `.send()` 호출 0건 — **W10 이후 유일한 물리적 안전장치** |
 | 선언 정합 | registry·contracts 로드 + claude 호출 상한 불변식(최악치 < 경고선) |
 
