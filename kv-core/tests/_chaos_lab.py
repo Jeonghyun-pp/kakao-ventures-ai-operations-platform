@@ -189,16 +189,24 @@ def e5():
 @experiment("E6", "게이트 차단", "차단 · 1일 1회 알림 · 이벤트 장부 기록 · 복구 후 정상")
 def e6():
     gate._cfg = {"claude": {"daily_calls_warn": 1, "daily_calls_block": 1}}
-    for m in (paths.data_root() / "_alerts" / "sent").glob("gate-block-*"):
-        m.unlink()
+    for d, pat in ((paths.data_root() / "_alerts" / "sent", "gate-block-*"),
+                   (paths.data_root() / "_alerts" / "policy", "gate-block-*.json")):
+        for m in (d.glob(pat) if d.exists() else ()):
+            m.unlink()
+    sent: list = []
+    notify.slack = lambda text, **kw: (sent.append(text), True)[1]
     v = gate.check_calls("claude", quiet=True)      # 이미 카운터에 기록이 있어 초과
-    r1 = gate.notify_blocked(v)
-    r2 = gate.notify_blocked(v)                     # 같은 날 2회차
+    # [W9 Batch C] gate 는 **발송하지 않는다** — 차단 사실만 장부에 남긴다.
+    # dedup·백오프는 dispatch 한 곳에 있으므로, 두 번 차단돼도 발송은 1회다.
+    gate.notify_blocked(v)
+    gate.notify_blocked(v)                          # 같은 날 2회차
     ev = (paths.data_root() / "_alerts" / "events.jsonl").read_text(encoding="utf-8")
     n_ev = sum(1 for ln in ev.splitlines() if "gate_block" in ln)
+    alerts.dispatch(); alerts.dispatch()            # 두 틱이 돌아도
     gate._cfg = None
-    return (not v.allowed and r1 and not r2 and n_ev >= 2,
-            f"차단={not v.allowed} · 1회차 발송={r1} · 2회차 dedup={not r2} · 장부 {n_ev}줄")
+    n_gate = sum(1 for t in sent if "게이트 차단" in t)
+    return (not v.allowed and n_gate == 1 and n_ev >= 2,
+            f"차단={not v.allowed} · 장부 {n_ev}줄 · 실발송 {n_gate}회(1 기대)")
 
 
 # ── E7 · 승인 왕복 장애 ─────────────────────────────────────────────────────

@@ -112,6 +112,7 @@ class SystemState:
     dlq: list[dict] = field(default_factory=list)
     alerts_today: list[str] = field(default_factory=list)
     costs: dict = field(default_factory=dict)
+    auth: dict = field(default_factory=dict)
     log_last_touch: str | None = None
 
     # ── 파생 뷰 — 소비자(렌더러·발송기)가 각자 계산하지 않게 여기서 준다 ──
@@ -456,6 +457,58 @@ def _alerts_today(now: date) -> list[str]:
     return sorted(p.name[: -len(iso) - 1] for p in d.glob(f"*-{iso}"))
 
 
+def _claude_auth(now: date, *, lookback: int = 14) -> dict:
+    """claude 세션이 **살아있음을 마지막으로 확인한 시각**. [B-H4]
+
+    `_auth_suspect` 는 "최근 호출 N건이 전부 실패"로 인증 열화를 잡으려 했는데, 실환경에서
+    구조적으로 발동 불가였다 — `~/kv-data/_usage/claude/` 디렉토리 **자체가 없다**(호출 0).
+    그래서 **"인증이 만료됐다"와 "며칠째 안 불렀다"가 관측적으로 완전히 동일**했다.
+
+    구분하려면 "마지막 성공 호출이 언제였나"를 알아야 한다. 호출이 오래 없으면 그건
+    실패가 아니라 **미확인**이고, 미확인이 길어지는 것 자체가 알릴 가치가 있는 사실이다
+    (무인 실행이 인증에 의존하는데 그 인증 상태를 아무도 모르는 상태이므로).
+    """
+    d = paths.data_root() / "_usage" / "claude"
+    rows: list[dict] = []
+    if d.exists():
+        for i in range(lookback - 1, -1, -1):     # 오래된 날 → 최근 날 순으로 이어 읽는다
+            p = d / f"{(now - timedelta(days=i)).isoformat()}.jsonl"
+            if not p.exists():
+                continue
+            for ln in p.read_text(encoding="utf-8").splitlines():
+                ln = ln.strip()
+                if not ln:
+                    continue
+                try:
+                    rows.append(json.loads(ln))
+                except json.JSONDecodeError:
+                    continue                      # torn 줄 무시(카운터 규율이 복구)
+
+    last_ok = next((str(e.get("ts", "")) for e in reversed(rows) if e.get("ok")), None)
+    last_call = str(rows[-1].get("ts", "")) if rows else None
+    # 꼬리에서 연속 실패 개수 — **성공이 하나라도 섞이면 0으로 끊긴다**(기존 신호 보존)
+    streak = 0
+    for e in reversed(rows):
+        if e.get("ok"):
+            break
+        streak += 1
+    iso = now.isoformat()
+    fail_today = any(not e.get("ok") and str(e.get("ts", "")).startswith(iso) for e in rows)
+    ok_d = _as_date(last_ok) if last_ok else None
+    return {
+        # ① 열화 신호 — 최근 호출이 연속 실패하고 있다(그리고 오늘 것이 포함된다)
+        "consecutive_failures": streak,
+        "failure_today": fail_today,
+        # ② 미확인 신호 [B-H4] — 성공을 마지막으로 본 게 언제인가. 호출이 0이면 ①은
+        #    영원히 0이라 "인증 만료"와 "며칠째 안 부름"이 구분되지 않았다.
+        "last_ok": last_ok,
+        "last_call": last_call,
+        "unknown_days": (now - ok_d).days if ok_d else None,
+        "never_confirmed": last_ok is None,
+        "calls_seen": last_call is not None,
+    }
+
+
 def _costs(*, with_network: bool) -> dict:
     from . import gate
     rc = (gate.config().get("claude") or {})
@@ -500,5 +553,6 @@ def compute(now: date | None = None, *, with_network: bool = False,
         dlq=_dlq(now),
         alerts_today=_alerts_today(now),
         costs=_costs(with_network=with_network),
+        auth=_claude_auth(now),
         log_last_touch=touch,
     )

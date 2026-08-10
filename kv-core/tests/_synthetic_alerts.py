@@ -32,6 +32,19 @@ def check(name, cond, detail=""):
         FAIL.append(name)
 
 
+def _reset_alert(prefix: str) -> None:
+    """알림 상태 초기화 — **두 층**을 지운다.
+
+    [W9 재설계 Batch C] dedup 은 이제 두 겹이다: ①마커(하루 1회) ②정책(백오프 간격).
+    마커만 지우고 재발동을 기대하면 정책이 막는다 — 그건 결함이 아니라 설계다.
+    """
+    for d, pat in ((paths.data_root() / "_alerts" / "sent", f"{prefix}*"),
+                   (paths.data_root() / "_alerts" / "policy", f"{prefix}*.json")):
+        if d.exists():
+            for m in d.glob(pat):
+                m.unlink()
+
+
 def _usage_write(day, entries):
     """[W9] ts 를 함께 기록 — alerts 가 '오늘 발생한 실패인지'를 ts 로 판정한다(B-F7)."""
     d = paths.data_root() / "_usage" / "claude"
@@ -55,15 +68,13 @@ got2 = alerts.scan()
 check("① 재스캔 dedup(하루 1회)", "auth-suspect-claude" not in got2)
 _usage_write(today, [{"ok": False}, {"ok": True}, {"ok": False}])
 # dedup 마커 제거 후 재검(미발동이어야)
-for m in (paths.data_root() / "_alerts" / "sent").glob("auth-suspect-*"):
-    m.unlink()
+_reset_alert("auth-suspect")
 check("① ok 섞이면 미발동", "auth-suspect-claude" not in alerts.scan())
 
 # ② UTC 경계: 어제 꼬리 2 + 오늘 1 연속 실패 → 검출
 _usage_write(yday, [{"ok": True}, {"ok": False, "err": "timeout"}, {"ok": False, "err": "timeout"}])
 _usage_write(today, [{"ok": False, "err": "timeout"}])   # 오늘 발생분 포함 → 발동해야 함
-for m in (paths.data_root() / "_alerts" / "sent").glob("auth-suspect-*"):
-    m.unlink()
+_reset_alert("auth-suspect")
 check("② UTC 자정 경계(어제2+오늘1) 검출", "auth-suspect-claude" in alerts.scan())
 
 # ③ 게이트 차단 → 이벤트 1줄 + 같은 날 2번째 차단 발송 0
@@ -76,6 +87,10 @@ gate.notify_blocked(v)                                     # 같은 날 2번째
 ev = (paths.data_root() / "_alerts" / "events.jsonl").read_text(encoding="utf-8")
 n_events = sum(1 for ln in ev.splitlines() if '"gate_block"' in ln)
 check("③ 차단 이벤트 장부 기록", n_events == 2, f"events={n_events}")
+# [Batch C] gate 는 **발송하지 않는다** — 사실만 남긴다. 알릴지는 dispatch 가 정한다.
+# 그래서 두 번 차단돼도 장부는 2줄, 발송은 1회다(정책이 한 곳에 있으므로 특례가 없다).
+alerts.dispatch()
+alerts.dispatch()
 check("③ 발송은 하루 1회(dedup)", len(_sent) == n_before + 1, f"sent+{len(_sent)-n_before}")
 gate._cfg = None
 
@@ -103,8 +118,7 @@ check("④ 4일 밀림(한계 1일 초과) → task-fail 발동", "task-fail-syn
 scheduler.write_watermark(t, {"last_attempt": today.isoformat(),
                               "last_success": (today - timedelta(days=1)).isoformat(),
                               "first_attempt": (today - timedelta(days=9)).isoformat()})
-for m in (paths.data_root() / "_alerts" / "sent").glob("task-fail-*"):
-    m.unlink()
+_reset_alert("task-fail")
 check("④ 1일 경과(한계 안) → 미발동", "task-fail-syn-alert-task" not in alerts_reg.scan())
 _reg.load = _orig_load
 
@@ -166,9 +180,12 @@ try:
     _sess.run_session("t")
 except _sess.SessionError:
     pass
-tail = alerts._usage_tail(1)
+# [Batch B/C] 사용 로그 판독은 health 로 옮겼다 — 지키는 성질은 같다(빈 출력을 성공으로
+# 기록하지 않는가). 이게 무너지면 인증 만료가 ok:true 로 남아 가짜 침묵이 된다(B-F1).
+from kv_core import health as _hz
+_auth = _hz._claude_auth(today)
 check("B-F1 빈 출력(인증 만료 증상) → ok:false 기록",
-      tail and tail[-1].get("ok") is False and tail[-1].get("err") == "empty_output", f"{tail}")
+      _auth["consecutive_failures"] >= 1 and _auth["failure_today"], f"{_auth}")
 
 # B-F3: never-succeeded — 시도는 있고 성공 이력이 없는 task 도 결국 알린다
 from kv_core.registry import Task as _T
@@ -182,8 +199,7 @@ check("B-F3 never-succeeded 도 알린다(10일 경과)",
       any(i.startswith("never-succeeded") for i in got_nv), f"{got_nv}")
 scheduler.write_watermark(t_never, {"last_attempt": today.isoformat(),
                                     "first_attempt": today.isoformat()})
-for m in (paths.data_root() / "_alerts" / "sent").glob("never-*"):
-    m.unlink()
+_reset_alert("never-")
 check("B-F3 유예 안에선 미발동(배선 당일)",
       not any(i.startswith("never-succeeded") for i in alerts.scan()))
 _reg.load = _orig_load
@@ -215,8 +231,7 @@ t_old = _T(name="syn-oldwm", skill="_alerts-syn", cadence="daily",
            catch_up="coalesce", watermark="last_success")
 scheduler.write_watermark(t_old, {"last_attempt": today.isoformat()})   # first_attempt 없음
 _reg.load = lambda *a, **k: [t_old]
-for m in (paths.data_root() / "_alerts" / "sent").glob("never-*"):
-    m.unlink()
+_reset_alert("never-")
 check("구 스키마(first_attempt 없음)는 침묵하지 않고 알린다",
       any(i.startswith("never-succeeded") for i in alerts.scan()))
 
@@ -235,6 +250,44 @@ try:
     check("B-F8 경로 문자 identity 도 안전(raise 0)", rid in ("sent", "deduped", "failed"), rid)
 except Exception as e:  # noqa: BLE001
     check("B-F8 경로 문자 identity 도 안전(raise 0)", False, repr(e))
+
+# ══════════════════════════════════════════════════════════════════════
+# [W9 재설계 Batch C] **백오프 30일 시뮬** — B-M1 의 직접 실증 (검증 사각 ⑤)
+#
+# 리뷰 B-M1: "never-succeeded 에 백오프·상한·에스컬레이션이 전무 — 매일 같은 문장을 영원히.
+#            first_attempt=8/4 고정, 30일 시뮬 → **27일 연속 발동 · 마커 27개**.
+#            첫: '3일간 성공 0' → 끝: '29일간 성공 0'. 일수만 바뀐다."
+# 실환경에서도 never-succeeded-judge 가 8/7~8/10 **4일 연속** 나갔다.
+#
+# 여기서 지키는 성질은 두 가지고, 둘 다 필요하다:
+#   ① 30일 동안 발송이 **크게 줄어든다**            (alert fatigue 방지)
+#   ② 그렇다고 **끊기지는 않는다**                  (가짜 침묵 방지 — 더 큰 실패 모드)
+print()
+print("[Batch C] 백오프 30일 시뮬")
+from datetime import date as _date
+_reg.load = lambda *a, **k: [t_never]
+scheduler.write_watermark(t_never, {"last_attempt": today.isoformat(),
+                                    "first_attempt": (today - timedelta(days=10)).isoformat()})
+_reset_alert("never-")
+_sim_sent = []
+notify.slack = lambda text, **kw: (_sim_sent.append(text), True)[1]
+_days_fired = []
+for i in range(30):
+    day = today + timedelta(days=i)
+    scheduler.write_watermark(t_never, {"last_attempt": day.isoformat(),
+                                        "first_attempt": (today - timedelta(days=10)).isoformat()})
+    if alerts.dispatch(today=day):
+        _days_fired.append(i)
+_reg.load = _orig_load
+check("백오프: 30일 중 발송이 10회 이하로 줄어든다(구: 30회)",
+      len(_days_fired) <= 10, f"발송 {len(_days_fired)}회 · 발동일={_days_fired}")
+check("백오프: 그래도 끊기지 않는다(마지막 7일 안에 최소 1회)",
+      any(d >= 23 for d in _days_fired), f"발동일={_days_fired}")
+check("백오프: 간격이 점점 벌어진다",
+      len(_days_fired) > 2 and (_days_fired[-1] - _days_fired[-2]) > (_days_fired[1] - _days_fired[0]),
+      f"초기간격={_days_fired[1]-_days_fired[0]} 후기간격={_days_fired[-1]-_days_fired[-2]}")
+check("에스컬레이션: 반복분에 '일째 미해결' 이 실린다",
+      any("일째 미해결" in x for x in _sim_sent), f"{[x[:40] for x in _sim_sent[-2:]]}")
 
 print()
 if FAIL:

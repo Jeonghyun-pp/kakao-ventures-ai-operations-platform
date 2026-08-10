@@ -82,9 +82,10 @@ def _announce() -> int:
         # 상한을 올려 전부 쏘는 건 스팸이고, 조용히 자르는 건 굶주림이다 —
         # **초과 자체를 정체 신호로 알린다**(카드는 다음 틱에 이어서 나간다).
         from . import alerts
-        alerts.push("announce-backlog",
-                    f"⚠️ 미발송 승인요청 {len(pending_new)}건 > 틱 상한 {_ANNOUNCE_CAP} — "
-                    f"승인 정체 의심. `python -m kv_core.approval list` 로 확인 요망.")
+        alerts.observe("announce_backlog", "announce-backlog",
+                       f"⚠️ 미발송 승인요청 {len(pending_new)}건 > 틱 상한 {_ANNOUNCE_CAP} — "
+                       f"승인 정체 의심. `python -m kv_core.approval list` 로 확인 요망.",
+                       pending=len(pending_new))
     for r in targets:
         res = slackbot.post(_card(r))
         if res is slackbot.SUPPRESSED:
@@ -98,9 +99,9 @@ def _announce() -> int:
         n += 1
     if fail:
         from . import alerts
-        alerts.push("slackbot-down",
-                    f"🔴 승인 카드 발송 실패 {fail}건 — 봇 토큰/채널 확인 요망. "
-                    f"승인은 CLI 로 가능: python -m kv_core.approval list")
+        alerts.observe("slackbot_down", "slackbot-down",
+                       f"🔴 승인 카드 발송 실패 {fail}건 — 봇 토큰/채널 확인 요망. "
+                       f"승인은 CLI 로 가능: python -m kv_core.approval list", failed=fail)
     return n
 
 
@@ -207,7 +208,8 @@ def _execute() -> int:
                             draft_id=approval.DELETE,
                             **({"executing_at": approval.DELETE} if pre_draft else {}))
             print(f"🔴 실행 실패(다음 틱 재시도): {key} — {e!r}")
-            alerts.push("approval-exec", f"🔴 승인건 실행 실패: {key} — {e}")
+            alerts.observe("approval_exec_failed", f"approval-exec-{key}",
+                           f"🔴 승인건 실행 실패: {key} — {e}", key=key)
     return n
 
 
@@ -236,14 +238,16 @@ def main(argv: list[str] | None = None) -> int:
                 errs.append(f"{name}: {ex!r}")
                 print(f"🔴 approvals tick [{name}] 오류(다음 틱 재시도): {ex!r}")
         try:
-            alerted = alerts.scan()               # 관측은 앞 단계 실패와 무관하게 돈다
+            # [Batch C] 알릴지 말지를 정하는 **유일한 지점**. 앞 단계 실패와 무관하게 돈다 —
+            # 그리고 이 틱에서 observe 된 사실도 여기서 함께 집어간다(kind 특례 없음).
+            alerted = alerts.dispatch()
         except Exception as ex:                   # noqa: BLE001
             alerted = []
             errs.append(f"alerts.scan: {ex!r}")
             print(f"🔴 alerts.scan 오류: {ex!r}")
         if errs:
-            alerts.push("approvals-tick-error",
-                        "🔴 승인 틱 단계 실패 — " + " · ".join(errs)[:400])
+            alerts.observe("tick_error", "approvals-tick-error",
+                           "🔴 승인 틱 단계 실패 — " + " · ".join(errs)[:400], errors=errs)
         print(f"└─ announce {counts.get('announce')} · decide {counts.get('decide')} "
               f"· execute {counts.get('execute')} · alerts {len(alerted)}")
         return 0                                  # launchd 는 비0을 재시도하지 않는다

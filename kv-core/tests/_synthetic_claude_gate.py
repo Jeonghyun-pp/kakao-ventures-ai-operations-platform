@@ -118,7 +118,10 @@ try:
 except TypeError as e:
     check("⑥ ceiling None summary 무크래시", False, repr(e))
 
-# ⑦ [B1] 차단·경고가 실 슬랙이 아니라 스텁에 캡처됐는지
+# ⑦ [B1 · W9 Batch C] 차단·경고가 실 슬랙이 아니라 **사실 장부**를 거쳐 스텁에 닿는지.
+# gate 는 이제 notify 를 직접 부르지 않는다(정책이 흩어지던 지점) — observe 후 dispatch.
+from kv_core import alerts as _al
+_al.dispatch()
 check("⑦ notify 전부 스텁 캡처(실발송 0)", len(_slack_captured) >= 1,
       f"captured={len(_slack_captured)}건")
 

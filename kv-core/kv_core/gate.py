@@ -155,9 +155,13 @@ def check_calls(resource: str, estimate_calls: int = 1, *, quiet: bool = False) 
                     warnings=[f"[{resource}] daily_calls_block 미설정 — 호출 게이트 미작동"])
         if not quiet:
             print(f"⚠️  {v.warnings[0]}")
-        if resource not in _warned_no_block:     # [B4] 무인에서도 보이게 — 1회 notify
+        if resource not in _warned_no_block:     # [B4] 무인에서도 보이게
             _warned_no_block.add(resource)
-            notify.slack(f"⚠️ {v.warnings[0]} (config/resources.yaml 확인)")
+            # [Batch C] notify 직접 호출 → observe. 프로세스 수명 집합(_warned_no_block)은
+            # 단명 프로세스에서 매번 리셋돼 사실상 dedup 이 없었다 — 정책은 한 곳에서만.
+            from . import alerts as _al
+            _al.observe("gate_unset", f"gate-unset-{resource}",
+                        f"⚠️ {v.warnings[0]} (config/resources.yaml 확인)", resource=resource)
         return v
 
     v = Verdict(resource, allowed=True, unit="calls",
@@ -167,8 +171,10 @@ def check_calls(resource: str, estimate_calls: int = 1, *, quiet: bool = False) 
         v.reason = f"일일 호출 차단선 초과: 오늘 {used} + {estimate_calls} > {block}"
     elif warn is not None and used >= int(warn):
         v.warnings.append(f"[{resource}] 경고선 도달: 오늘 {used}콜 ≥ {warn} (차단 {block})")
-        if used == int(warn):                    # [B4] 교차 시점 정확히 1회만 notify(스팸 방지)
-            notify.slack(f"⚠️ {v.warnings[-1]}")
+        if used == int(warn):                    # [B4] 교차 시점에 사실 기록(발송은 dispatch)
+            from . import alerts as _al
+            _al.observe("gate_warn", f"gate-warn-{resource}",
+                        f"⚠️ {v.warnings[-1]}", resource=resource)
     if not quiet:
         for w in v.warnings:
             print(f"⚠️  {w}")
@@ -265,11 +271,12 @@ def notify_blocked(v: Verdict) -> bool:
     from . import alerts
     text = (f"🔴 *게이트 차단* — {v.resource}\n{v.reason}\n"
             f"```{v.summary()}```\n이번 실행은 중단됐습니다.")
-    # [W9 B-F6] push 는 "sent"|"deduped"|"failed" — 장부에 그대로 기록해 "이미 알림"과
-    # "발송 실패"를 구분한다(예전엔 둘 다 pushed:false 라 감사 장부가 거짓말을 했다).
-    result = alerts.push(f"gate-block-{v.resource}", text)
-    alerts.append_event("gate_block", resource=v.resource, reason=v.reason, pushed=result)
-    return result == "sent"
+    # [W9 재설계 Batch C] **사실만 남기고 발송 판단은 dispatch 에 맡긴다.**
+    # 예전엔 여기서 직접 push 하고 결과를 장부에 적었다 — 그러면 이 호출부가 dedup·백오프·
+    # 슬랙 상태를 알아야 하고, 발송 실패 시의 보상도 gate 전용 특례가 된다(B-H3 의 뿌리).
+    alerts.observe("gate_block", f"gate-block-{v.resource}", text,
+                   resource=v.resource, reason=v.reason)
+    return True
 
 
 # ───────────────────────── 실행 중 차단선 ─────────────────────────

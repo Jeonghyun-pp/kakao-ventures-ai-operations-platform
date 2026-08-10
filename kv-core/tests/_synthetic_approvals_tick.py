@@ -145,10 +145,14 @@ check("A-F3 묵은 미결 뒤에서도 신규 승인 수거됨",
 # `alerts.push` 가 복구되지 않아, 이후 시나리오에서 실제로 발화한 알림(A-M9 의 executing_at
 # 오탐 등)이 전부 보이지 않았다 — "테스트가 만든 전제가 결함을 가린" 정확한 사례다.
 # 이제 ①원본을 보관하고 ②관찰이 끝나면 되돌리며 ③"울려선 안 되는 알림"을 음성 단언한다.
+# [W9 Batch C] 개별 모듈은 이제 push 가 아니라 observe 를 부른다 — 발송 판단이 없다.
+# 그래서 관찰 지점도 observe 로 옮긴다(무엇을 '사실로 남겼나'가 이 층의 계약이다).
 _alerted: list = []
 import kv_core.alerts as _alm
 _ORIG_PUSH = _alm.push
+_ORIG_OBSERVE = _alm.observe
 _alm.push = lambda ident, text: (_alerted.append(ident), "sent")[1]
+_alm.observe = lambda kind, ident, text, **m: _alerted.append(ident)
 for i in range(approvals_tick._ANNOUNCE_CAP + 3):
     approval.request("t", "judgment", {"text": f"flood{i}"}, dedup_key=f"flood-{i:03d}")
 approvals_tick._announce()
@@ -206,16 +210,16 @@ check("A-F2b 수신자 없음 → 초안 0 + execute_error 기록",
 # A-F4: 한 단계가 죽어도 alerts.scan 은 돈다(관측 격리)
 _scanned = {"n": 0}
 import kv_core.alerts as _al
-_ORIG_SCAN = _al.scan
-_al.scan = lambda: (_scanned.__setitem__("n", _scanned["n"] + 1), [])[1]
+_ORIG_SCAN = _al.dispatch
+_al.dispatch = lambda *a, **k: (_scanned.__setitem__("n", _scanned["n"] + 1), [])[1]
 _orig_rec = approvals_tick._reconcile
 approvals_tick._reconcile = lambda: (_ for _ in ()).throw(RuntimeError("주입 장애"))
 try:
     approvals_tick.main([])
 finally:
     approvals_tick._reconcile = _orig_rec
-    _al.scan = _ORIG_SCAN                    # [Batch A] 스텁은 반드시 되돌린다(사각 ④)
-check("A-F4 단계 실패해도 alerts.scan 실행됨", _scanned["n"] >= 1, f"scan 호출={_scanned['n']}")
+    _al.dispatch = _ORIG_SCAN                # [Batch A] 스텁은 반드시 되돌린다(사각 ④)
+check("A-F4 단계 실패해도 alerts.dispatch 실행됨", _scanned["n"] >= 1, f"scan 호출={_scanned['n']}")
 
 # A-F7: created 포맷이 달라도(isoformat) announce 대상이 된다
 approval.request("t", "judgment", {"text": "iso"}, dedup_key="m-iso")
@@ -228,6 +232,7 @@ check("A-F7 isoformat created 도 announce 됨(9999 뭉갬 제거)",
       approval.load("m-iso").get("slack_ts") is not None)
 
 _alm.push = _ORIG_PUSH                       # [Batch A] 스텁 원복 — 다음 시나리오를 가리지 않는다
+_alm.observe = _ORIG_OBSERVE
 
 print()
 if FAIL:

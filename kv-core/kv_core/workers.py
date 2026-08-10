@@ -71,10 +71,13 @@ def run_appstore_snapshot(task: Task, period: date) -> bool:
     if n < 84:
         msg = f"⚠️ {tag}appstore-snapshot: 오늘자 유효 파일 {n}/84 — 부분 결손(해당 차트는 영구 손실 가능)"
         print(msg)
-        # [중간점검 A5 + W9] 영구 결손은 stdout 침묵으로 두지 않는다. alerts 경유로 **하루 1회**
-        # dedup — notify 직접 호출은 dedup 이 없어 반복 발화 시 소음이 된다(규율 통일).
+        # [중간점검 A5 + W9 Batch C] 영구 결손은 stdout 침묵으로 두지 않는다.
+        # **사실만 기록**하고 발송은 dispatch 가 정한다 — 예전엔 여기서 직접 push 했고,
+        # 슬랙이 그 순간 5xx 면 claim 이 반납되며 흔적 없이 사라졌다(B-H3). 그런데 이 잡은
+        # return True 라 워터마크가 전진해 **재시도 경로 자체가 없었다**.
         from . import alerts
-        alerts.push(f"partial-{task.name}", msg)
+        alerts.observe("partial_output", f"partial-{task.name}", msg,
+                       task=task.name, valid=n, expected=84)
     else:
         print(f"✅ {tag}appstore-snapshot: 오늘자 유효 파일 {n}/84")
     return True

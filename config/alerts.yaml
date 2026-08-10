@@ -1,13 +1,43 @@
-# 실패 푸시 정책 — kv_core.alerts 가 읽는다. 코드 하드코딩 0. [W8]
+# 알림 정책 — kv_core.alerts 가 읽는다. 코드 하드코딩 0. [W8 · W9 재설계 Batch C]
 #
-# 철학: 알림의 가치는 희소성에서 나온다(alert fatigue). "즉시"는 사람이 하루를 못 기다리는
-# 3클래스뿐이고, 나머지는 orrery 다이제스트에 실린다. 임계는 실관찰하며 여기서만 조정한다.
+# 철학: 알림의 가치는 희소성에서 나온다(alert fatigue). 하지만 희소하게 만들려고 **끊으면**
+# 그건 가짜 침묵이다 — W8·W9 에서 지배적이었던 실패 모드가 정확히 그것이었다.
+# 그래서 규칙은 "덜 보낸다"가 아니라 **"간격을 벌리되 끊지 않는다"** 이다.
+#
+# 판정(무엇이 문제인가)은 여기 없다 — `kv_core/health.py` 가 한다.
+# 이 파일은 **그것을 언제 사람에게 알릴 것인가**만 정한다.
 
+# ── 상태 기반 알림의 유예 ──
+# never-succeeded(배선 후 한 번도 성공 못 함)의 유예 = freshness_limit × 이 배수.
+# [B-M4] 예전엔 이 값이 `task_failure.consecutive_periods` 하나로 **두 클래스를 동시에**
+# 움직였는데 그 사실이 어디에도 안 적혀 있었다. 이름을 나눠 각각 무엇을 지배하는지 밝힌다.
+never_succeeded:
+  grace_periods: 3          # judge 처럼 전제 조건(룰 기입) 대기 중인 잡에 주는 시간
+
+# regression(성공 이력이 있는데 지금 밀림)의 임계는 **task 의 freshness_days 선언**이다.
+# config/tasks.yaml 에 선언이 없으면 주기 기반 기본값(cadence.freshness_limit).
+# → 임계를 바꾸려면 그 task 의 freshness_days 를 바꾼다. 여기엔 손잡이가 없다(이중 진실원 방지).
+
+# ── 백오프: 같은 알림이 반복될 때 간격을 벌린다 ──
+# [B-M1] 실측: never-succeeded-judge 가 2026-08-07~08-10 **4일 연속** 발송됐고,
+# 30일 시뮬에서는 27일 연속이었다. 문장은 일수만 바뀐다. 아래 값이 그것을 끊는다.
+backoff:
+  daily_until_days: 2       # 처음 이틀은 매일 (급한 건 급하게)
+  sparse_after_days: 7      # 그 뒤 7일까지는
+  sparse_every_days: 2      #   2일마다
+  rare_every_days: 7        # 7일 넘게 미해결이면 주 1회 — 끊지는 않는다
+  escalate_after_sends: 4   # 4회째부터 문구에 "N일째 미해결"을 실어 배경 소음화를 막는다
+
+# ── 인증 열화 (기존 신호 — 유지) ──
 auth_suspect:
-  consecutive_session_errors: 3   # _usage/claude jsonl 꼬리 연속 ok:false → 인증 열화 의심
+  consecutive_session_errors: 3   # 꼬리 연속 실패 N회 + **오늘 발생분 포함** → 만료 의심
 
-task_failure:
-  consecutive_periods: 3          # last_attempt-last_success 격차 ≥ 주기×N → 구조적 실패
+# ── 인증 카나리아 (신설) ──
+# [B-H4] 예전 규칙은 "최근 호출 N건이 전부 실패"였는데, 실환경은 호출이 **0건**이라
+# 구조적으로 발동 불가였다 — "인증 만료"와 "며칠째 안 부름"이 관측적으로 동일했다.
+# 이제 "마지막 성공 호출 이후 경과일"을 본다. 미확인이 길어지는 것 자체가 신호다.
+auth_canary:
+  unknown_days: 3           # 성공 확인 없이 이만큼 지나면 알린다
 
 # [W9 B-F13] `dedup.per_identity_per_day` 키는 **삭제**했다 — 코드가 읽지 않는 사문이었고,
 # 남겨두면 "값을 바꿨는데 왜 안 변하지" 사고가 예약된다. 현 규칙은 코드 상수:
