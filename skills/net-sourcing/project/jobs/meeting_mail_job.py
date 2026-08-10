@@ -117,6 +117,24 @@ def s_collect_catch(skill: str, job_id: str) -> None:
                      json.dumps(rows, ensure_ascii=False, indent=1))
     print(f"· Catch 후보 {len(rows)}건 (기큐 제외 후)")
 
+    # [W9 재설계 Batch E · R5] **진공을 성공으로 조용히 넘기지 않는다.**
+    #
+    # 실환경 증상: candidates.json 이 8/8·8/9·8/10 내내 `[]`(2바이트)인데 워터마크는 매일
+    # last_success 를 전진시켰고 관측은 `✅ 0일 전 성공` 이었다. `s_draft` 가
+    # `if not todo: return` 으로 조기 반환해 진공 가드에 **도달하지 못한** 탓이다.
+    # 그래서 "Catch 행이 진짜 0" 과 "Tier 필터·property 명·토큰이 깨져서 0" 이 구분 불가였다.
+    #
+    # 지금은 0건 자체를 **사실로 남긴다**. 이게 소음이 되지 않는 이유는 발송 정책에
+    # 백오프가 생겼기 때문이다(첫 이틀 매일 → 2일마다 → 주 1회). 즉 "며칠째 아무것도
+    # 만들지 못했다"는 정보는 전달되되 매일 같은 문장으로 도배하지는 않는다.
+    if not rows:
+        from kv_core import alerts
+        alerts.observe("empty_harvest", "meeting-mail-vacuum",
+                       "⚠️ meeting-mail: Catch 후보 0건 — 판정(judge)이 막혀 있거나 "
+                       "Tier 필터·property 명·토큰이 어긋났을 수 있다. "
+                       "`python -m kv_core.orrery` 로 judge 상태 확인 요망.",
+                       task="meeting-mail", candidates=0)
+
 
 def _drafts_path(job_id: str) -> Path:
     return _work(job_id) / "drafts.jsonl"
