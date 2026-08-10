@@ -115,10 +115,18 @@ slackbot.message_reactions = lambda ch, ts: None
 
 print("=== C1: lost update — 서로 다른 필드를 동시에 써도 둘 다 남는가 ===\n")
 # 수정 전(`save(record)` 전체 덮어쓰기): 나중 쓰기가 앞의 필드를 통째로 지웠다.
+# 반복 횟수는 **CI 러너에서 실제로 깨진 값(40회)보다 크게** 잡는다. 40회일 때 로컬(맥)은
+# 통과하고 GH 러너만 `fieldA=False` 로 실패했다 — 창이 작아진 것이지 없어진 게 아니었고,
+# 느린 환경에서만 드러나는 결함을 빠른 환경에서 초록으로 확인하는 것이 바로 W9 의 사고다.
 approval.request("cc-1", "judgment", {"text": "t"}, dedup_key="cc-1")
-p1 = spawn("hammer-update", "cc-1", "fieldA", "40")
-p2 = spawn("hammer-update", "cc-1", "fieldB", "40")
+p1 = spawn("hammer-update", "cc-1", "fieldA", "150")
+p2 = spawn("hammer-update", "cc-1", "fieldB", "150")
 p1.wait(); p2.wait()
+# 자식이 죽지 않았는지도 본다 — `atomic_write` 의 tmp 이름이 고정이던 시절 동시 writer 가
+# 서로의 tmp 를 rename 해가서 `FileNotFoundError` 로 **크래시**했다(프로브로 재현).
+check("C1 동시 writer 가 서로를 크래시시키지 않음",
+      p1.returncode == 0 and p2.returncode == 0,
+      f"rc={p1.returncode}/{p2.returncode}")
 r = approval.load("cc-1")
 check("C1 두 필드가 모두 살아남음", r is not None and "fieldA" in r and "fieldB" in r,
       f"fieldA={'fieldA' in (r or {})} fieldB={'fieldB' in (r or {})}")

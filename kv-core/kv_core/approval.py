@@ -13,6 +13,7 @@ Slack 인터랙티브 버튼(제품 매개 발송)은 상시 수신 엔드포인
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from datetime import datetime, timezone
@@ -211,23 +212,38 @@ def save(record: dict) -> None:
 
 
 def update(key: str, **fields) -> dict | None:
-    """부분 갱신 — **재읽기 후 필드 병합** 저장. 락 없이 lost-update 를 막는다.
+    """부분 갱신 — **읽기·병합·쓰기를 파일 락 안에서** 한 덩어리로 수행한다.
 
-    [W9 Phase0 0-2/0-3] 락(heavy_slot)을 쓰면 유령 락 하나로 승인 전체가 영구 no-op 이
-    될 수 있었다(A-H3, pid 재사용 시). 락 대신 **쓰기 창을 최소화**하는 쪽이 옳다:
-    읽기→병합→원자 쓰기가 μs 단위라 실질 경합이 사라지고, 무엇보다 **다른 필드를
-    덮어쓰지 않는다**(경합해도 서로의 갱신을 지우지 않는다).
+    [W9 Phase0 0-2] 처음엔 락 없이 "읽기→병합→원자 쓰기 창이 μs 라 실질 경합이 없다"고
+    적었다. **틀렸다.** CI 러너(로컬보다 느리고 경합이 심한 환경)에서 동시성 랩 C1 이
+    `fieldA=False fieldB=True` 로 lost update 를 잡아냈다 — 창이 작아진 것이지 없어진 게
+    아니고, 느린 환경에서는 그 창이 그대로 벌어진다. "실질 0"은 측정한 적 없는 주장이었다.
+
+    ## 왜 `heavy_slot` 이 아니라 `flock` 인가
+
+    A-H3 에서 pid 파일 락이 **유령 락**(맥 슬립·SIGKILL 후 pid 재사용)으로 승인 전체를
+    영구 no-op 으로 만들었다. 그래서 락을 뺐고, 그러자 lost update 가 돌아왔다.
+    `fcntl.flock` 은 그 둘 다를 피한다 — **커널이 소유권을 관리**하므로 프로세스가 죽으면
+    fd 가 닫히며 자동 해제된다. 회수(stale reaping)라는 개념 자체가 필요 없다.
     """
-    r = load(key)
-    if r is None:
-        return None
-    for k, v in fields.items():
-        if v is _DELETE:
-            r.pop(k, None)
-        else:
-            r[k] = v
-    save(r)
-    return r
+    p = _queue_dir() / f"{key}.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lock = p.with_suffix(".lock")
+    with open(lock, "a+") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)      # 프로세스 사망 시 커널이 푼다
+        try:
+            r = load(key)
+            if r is None:
+                return None
+            for k, v in fields.items():
+                if v is _DELETE:
+                    r.pop(k, None)
+                else:
+                    r[k] = v
+            save(r)
+            return r
+        finally:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 
 class _Delete:

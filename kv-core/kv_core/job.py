@@ -118,12 +118,20 @@ def atomic_write(path: Path, text: str) -> None:
     같은 파일시스템에서 원자적이라, 읽는 쪽은 옛 파일 아니면 새 파일만 보고 반쪽을 못 본다.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())          # 디스크까지 내려가야 크래시에 안전하다
-    os.replace(tmp, path)             # 원자적 교체
+    # [W9 자기리뷰] tmp 이름이 **고정**이면 동시 writer 두 개가 같은 파일에 쓰고, 먼저
+    # rename 한 쪽 때문에 나머지가 `FileNotFoundError` 로 **크래시**한다(프로브로 재현).
+    # 이 함수는 워터마크·잡 상태·승인 레코드·알림 정책이 전부 쓰는 공용 경로다 —
+    # "원자적 쓰기"라는 이름이 무색하게 동시성에서 깨지고 있었다. pid 로 분리한다.
+    tmp = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())      # 디스크까지 내려가야 크래시에 안전하다
+        os.replace(tmp, path)         # 원자적 교체
+    except BaseException:
+        tmp.unlink(missing_ok=True)   # 실패해도 tmp 잔재를 남기지 않는다
+        raise
 
 
 # ─────────────────────────── 이벤트(진실) ───────────────────────────
