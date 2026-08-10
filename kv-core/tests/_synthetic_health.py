@@ -193,8 +193,9 @@ from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 
 
 def _sched(hours_ago: float) -> dict:
-    touch = (_dt.now(_tz.utc) - _td(hours=hours_ago)).isoformat(timespec="minutes")
-    return health._scheduler_health(TODAY, touch)
+    ref = _dt.now(_tz.utc)
+    touch = (ref - _td(hours=hours_ago)).isoformat(timespec="minutes")
+    return health._scheduler_health(ref, touch)      # [F3] 기준 시각을 주입한다
 
 
 check("H10 맥 슬립 구간(18.4h 관측 최대)은 침묵으로 보지 않는다",
@@ -205,7 +206,58 @@ check("H10 침묵은 reds() 에 실린다",
       any("scheduler" in r for r in
           health.SystemState(now=TODAY, scheduler=_sched(40)).reds()))
 check("H10 로그가 아예 없으면 침묵 아님(최초 기동 전)",
-      health._scheduler_health(TODAY, None)["silent"] is False)
+      health._scheduler_health(_dt.now(_tz.utc), None)["silent"] is False)
+
+print("\n=== H11 · 자기리뷰 F1: launchd-direct 의 '매일 실패'가 침묵하지 않는다 ===\n")
+# 헬스 파일 ts 는 **실패해도 매일 갱신**된다. 그래서 `late`(마지막 실행 경과)로 등급을
+# 매기면 30일을 내리 실패해도 late=0~1 이라 영원히 ⚠️·alertable=False 였다.
+# 실측 시나리오: appstore-sourcing(노션 138행/일)이 한 달 실패해도 슬랙 푸시 0건.
+reset()
+(_SCRATCH / SK).mkdir(parents=True, exist_ok=True)
+seq = []
+for off in (0, 15, 30):
+    d = TODAY + timedelta(days=off)
+    (_SCRATCH / SK / "last_run_health.json").write_text(
+        json.dumps({"ok": False, "ts": f"{d.isoformat()}T09:00:00"}), encoding="utf-8")
+    st = health.compute(now=d, tasks=[T("t11", runner="launchd-direct")])
+    seq.append((off, st.tasks[0].status, st.tasks[0].alertable))
+check("H11 매일 실패는 첫날부터 알림 대상", seq[0][2] is True, str(seq))
+check("H11 30일 뒤에도 여전히 알림 대상(침묵으로 굳지 않음)", seq[-1][2] is True, str(seq))
+check("H11 성공 시각을 모르므로 last_success 는 None",
+      health.compute(now=TODAY, tasks=[T("t11", runner="launchd-direct")]).tasks[0].last_success is None)
+# 반대 방향 — ok=true 는 여전히 신선도 규칙을 탄다(과잉 경보 아님)
+(_SCRATCH / SK / "last_run_health.json").write_text(
+    json.dumps({"ok": True, "ts": f"{TODAY.isoformat()}T09:00:00"}), encoding="utf-8")
+check("H11 ok=true 최신은 알림 대상 아님",
+      health.compute(now=TODAY, tasks=[T("t11", runner="launchd-direct")]).tasks[0].alertable is False)
+
+print("\n=== H12 · 자기리뷰 F2: 형제 task 의 잡을 자기 것으로 삼키지 않는다 ===\n")
+# `startswith(name + "-")` 는 `sourcing` 이 `sourcing-followup-*` 를 먹는다. 그리고
+# `_first_seen` 의 min() 이 그 값을 채택해 **올바른 first_attempt 를 덮는다**(역방향 자기치유).
+reset()
+wm("sib", last_attempt=TODAY.isoformat(), first_attempt=TODAY.isoformat())
+jobstate("sib-2026-08-09", "failed", "2026-08-09T00:00:00Z")
+jobstate("sib-followup-2026-01-02", "failed", "2026-01-02T00:00:00Z")   # 형제 task 의 잡
+st = health.compute(now=TODAY, tasks=[T("sib")])
+check("H12 형제 잡(sib-followup)을 자기 최초 시도로 세지 않는다",
+      st.tasks[0].first_seen == "2026-08-09", f"first_seen={st.tasks[0].first_seen}")
+check("H12 형제 오염이 없으면 never(⚠️) 유지 — 거짓 🔴 없음",
+      st.tasks[0].status == "never", f"{st.tasks[0].status} · {st.tasks[0].note}")
+# 자기 잡은 여전히 인식한다(자기치유가 죽지 않았는지)
+check("H12 자기 잡은 그대로 복원", health._earliest_attempt_from_jobs(SK, "sib") == "2026-08-09")
+check("H12 형제 task 도 자기 잡만 본다",
+      health._earliest_attempt_from_jobs(SK, "sib-followup") == "2026-01-02")
+
+print("\n=== H13 · 자기리뷰 F3: 스케줄러 침묵도 now 주입을 따른다 ===\n")
+# 알림 원천 4개 중 이것만 벽시계를 읽어, 검증 사각 ⑤가 이 갈래에만 남아 있었다.
+reset()
+(_SCRATCH / "_scheduler").mkdir(parents=True, exist_ok=True)
+(_SCRATCH / "_scheduler" / "launchd.log").write_text("x", encoding="utf-8")
+base = health.compute(now=TODAY, tasks=[]).scheduler
+far = health.compute(now=TODAY + timedelta(days=30), tasks=[]).scheduler
+check("H13 now 를 밀면 스케줄러 침묵 판정도 함께 움직인다",
+      base.get("silent") is False and far.get("silent") is True,
+      f"기준={base.get('hours')}h · +30일={far.get('hours')}h")
 
 print("\n=== H9: 순수 읽기 계약 ===\n")
 reset()

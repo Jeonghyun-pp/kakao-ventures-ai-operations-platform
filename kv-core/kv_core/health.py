@@ -54,15 +54,28 @@ except Exception as _e:                      # noqa: BLE001
 #   never     시도는 있으나 성공 0, 유예 안 (관측만)
 #   never_bad 시도는 있으나 성공 0, 유예 초과 (알림)
 #   idle      배선됐는데 시도 이력이 아예 없음 (관측만)
+#   degraded  외부 러너의 마지막 실행이 실패 (알림) — 성공 시각을 모르므로 지속일은 셀 수 없다
 #   unwired   러너 미배선 — 워터마크 없음이 정상 (침묵)
 #   unknown   워터마크·헬스 파손 등 판정 불가 (관측만, loud)
 _ICON = {"ok": "✅", "late": "⚠️", "stale": "🔴", "never": "⚠️", "never_bad": "🔴",
-         "idle": "⚠️", "unwired": "🔕", "unknown": "⚠️"}
-_ALERTABLE = {"stale", "never_bad"}
+         "degraded": "🔴", "idle": "⚠️", "unwired": "🔕", "unknown": "⚠️"}
+_ALERTABLE = {"stale", "never_bad", "degraded"}
 
 _NEVER_GRACE_MULT = 3        # never-succeeded 유예 = freshness_limit × N (alerts.yaml 과 공유)
 _ATTEMPT_RE = re.compile(r"-r\d+$")
 _JOBDATE_RE = re.compile(r"-(\d{4}-\d{2}-\d{2})(?:-r\d+)?$")
+
+
+def _job_id_re(task_name: str) -> "re.Pattern[str]":
+    """`<task>-YYYY-MM-DD[-rN]` 정확 매칭.
+
+    [자기리뷰 F2] 접두어(`startswith(name + "-")`)로 보면 **형제 task 를 삼킨다** —
+    `sourcing` 이 `sourcing-followup-2026-05-02` 를 자기 잡으로 세고, `_first_seen` 의
+    `min()` 이 그 값을 채택해 워터마크의 올바른 `first_attempt` 를 덮는다(자기치유가
+    역방향으로 작동). 실측: sourcing 이 배선 이틀째에 "배선 후 100일간 성공 0" 🔴.
+    충돌쌍(sourcing/sourcing-followup)은 지금 tasks.yaml 에 이미 있고 배선 전이라 잠복 중이다.
+    """
+    return re.compile(rf"{re.escape(task_name)}-(\d{{4}}-\d{{2}}-\d{{2}})(?:-r\d+)?$")
 
 
 # ─────────────────────────── 자료형 ───────────────────────────
@@ -202,10 +215,11 @@ def _earliest_attempt_from_jobs(skill: str, task_name: str) -> str | None:
     if not d.exists():
         return None
     best: str | None = None
+    rx = _job_id_re(task_name)
     for p in d.iterdir():
-        if not p.is_dir() or not p.name.startswith(task_name + "-"):
+        if not p.is_dir():
             continue
-        m = _JOBDATE_RE.search(p.name)
+        m = rx.fullmatch(p.name)             # 접두어가 아니라 **정확 매칭**(형제 task 배제)
         if not m:
             continue
         if best is None or m.group(1) < best:
@@ -260,9 +274,19 @@ def _task_state(t, now: date) -> TaskState:
         ok = bool(h.get("ok"))
         ls = d_utc.isoformat() if ok else None
         if not ok:
-            status = "late" if late <= limit else "stale"
-            return mk(status, f"{late}일 전 저하(degraded) · plist 직접 실행", late=late, ls=ls,
-                      la=d_utc.isoformat())
+            # [자기리뷰 F1] 예전엔 `late`(마지막 **실행** 경과)로 등급을 매겼다. 그런데 헬스
+            # 파일 ts 는 **실패해도 매일 갱신**되므로 late 가 영원히 0~1 이고, 그래서
+            # "매일 돌고 매일 실패" 하는 잡이 30일이 지나도 ⚠️·alertable=False 였다.
+            # 실측: appstore-sourcing(노션 138행/일)이 한 달 내리 실패해도 슬랙 푸시 0건.
+            # 알림이 뜨는 유일한 조건이 "plist 가 아예 안 도는 것"이었다 — 가짜 침묵이다.
+            #
+            # 헬스 파일에는 마지막 **성공** 시각이 없으므로 실패 지속일을 셀 수 없다.
+            # 셀 수 없으면 보수적으로 간다: 마지막 실행이 실패했다는 것 자체를 알린다.
+            # 반복 소음은 dispatch 의 백오프(1→2→7일)와 에스컬레이션이 흡수한다.
+            return mk("degraded",
+                      f"마지막 실행이 실패했다({late}일 전) · plist 직접 실행 — "
+                      f"헬스 파일에 성공 시각이 없어 실패 지속일은 셀 수 없다",
+                      late=late, ls=None, la=d_utc.isoformat())
         if late > limit:
             return mk("stale", f"{late}일 밀림 (신선도 한계 {limit}일 초과) · plist 직접 실행",
                       late=late, ls=ls, la=d_utc.isoformat())
@@ -525,7 +549,8 @@ def _silent_limit_hours() -> int:
         return 36
 
 
-def _scheduler_health(now: date, touch: str | None, *, silent_hours: int | None = None) -> dict:
+def _scheduler_health(now_dt: datetime, touch: str | None, *,
+                      silent_hours: int | None = None) -> dict:
     """스케줄러 자체가 살아 있나. [C-H6]
 
     **부재 감지기가 부재의 원인 안에 살면 안 된다.** 예전엔 🔴 stale 판정이 orrery 에만
@@ -559,7 +584,11 @@ def _scheduler_health(now: date, touch: str | None, *, silent_hours: int | None 
         # (검사의 목적은 관측자가 아무것도 못 쓰게 하는 것이고, 그 보호가 더 중요하다).
         last = datetime(last.year, last.month, last.day, last.hour, last.minute,
                         last.second, tzinfo=timezone.utc)
-    hours = (datetime.now(timezone.utc) - last).total_seconds() / 3600
+    # [자기리뷰 F3] 벽시계(`datetime.now`)가 아니라 **주입된 기준 시각**으로 뺀다.
+    # 이 모듈 헤더가 "`now` 를 인자로 받는다 — 30일 뒤에도 이 알림이 옳은가를 물을 수
+    # 있어야 한다"고 써놓고, 알림 원천 4개 중 이 하나만 그걸 안 지키고 있었다
+    # (검증 사각 ⑤가 스케줄러 정지 감지에만 그대로 남아 있었다).
+    hours = (now_dt - last).total_seconds() / 3600
     if hours >= silent_hours:
         return {"silent": True, "hours": round(hours, 1),
                 "note": f"스케줄러가 {hours:.0f}시간째 무소식 "
@@ -587,13 +616,18 @@ def _costs(*, with_network: bool) -> dict:
 # ─────────────────────────── 진입점 ───────────────────────────
 
 def compute(now: date | None = None, *, with_network: bool = False,
-            tasks=None) -> SystemState:
+            tasks=None, now_dt: datetime | None = None) -> SystemState:
     """지금(또는 지정한 `now`) 시스템 상태. **순수 읽기 · 판정의 유일한 지점.**
 
     `now` 를 인자로 받는 것이 핵심이다 — "30일 뒤에도 이 알림이 옳은가"를 물을 수 있어야
     백오프·유예 같은 시간 정책을 검증할 수 있다(검증 사각 ⑤).
     """
-    now = now or _utc_today()
+    wall = datetime.now(timezone.utc)
+    if now_dt is None:
+        # `now`(날짜)만 주입되면 **같은 벽시계 시각의 그 날짜**로 본다 — 그래야 30일 시뮬이
+        # 스케줄러 침묵까지 함께 움직인다(하나만 시간이 멈춰 있으면 그 갈래는 검증 불가).
+        now_dt = wall if now is None else datetime.combine(now, wall.timetz())
+    now = now or wall.date()
     tasks = tasks if tasks is not None else registry.load()
     sched = [t for t in tasks if t.scheduled]
 
@@ -613,6 +647,6 @@ def compute(now: date | None = None, *, with_network: bool = False,
         alerts_today=_alerts_today(now),
         costs=_costs(with_network=with_network),
         auth=_claude_auth(now),
-        scheduler=_scheduler_health(now, touch),
+        scheduler=_scheduler_health(now_dt, touch),
         log_last_touch=touch,
     )

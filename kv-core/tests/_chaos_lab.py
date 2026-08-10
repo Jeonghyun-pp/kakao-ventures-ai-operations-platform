@@ -200,8 +200,7 @@ def e6():
     # dedup·백오프는 dispatch 한 곳에 있으므로, 두 번 차단돼도 발송은 1회다.
     gate.notify_blocked(v)
     gate.notify_blocked(v)                          # 같은 날 2회차
-    ev = (paths.data_root() / "_alerts" / "events.jsonl").read_text(encoding="utf-8")
-    n_ev = sum(1 for ln in ev.splitlines() if "gate_block" in ln)
+    n_ev = sum(1 for e in alerts.read_events() if e.get("kind") == "gate_block")
     alerts.dispatch(); alerts.dispatch()            # 두 틱이 돌아도
     gate._cfg = None
     n_gate = sum(1 for t in sent if "게이트 차단" in t)

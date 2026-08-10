@@ -84,8 +84,8 @@ v = gate.check_calls("claude", quiet=True)
 n_before = len(_sent)
 gate.notify_blocked(v)
 gate.notify_blocked(v)                                     # 같은 날 2번째
-ev = (paths.data_root() / "_alerts" / "events.jsonl").read_text(encoding="utf-8")
-n_events = sum(1 for ln in ev.splitlines() if '"gate_block"' in ln)
+# [자기리뷰 F4] 이벤트는 일자별 파일로 나뉜다 — 판독은 alerts.read_events 로.
+n_events = sum(1 for e in alerts.read_events() if e.get("kind") == "gate_block")
 check("③ 차단 이벤트 장부 기록", n_events == 2, f"events={n_events}")
 # [Batch C] gate 는 **발송하지 않는다** — 사실만 남긴다. 알릴지는 dispatch 가 정한다.
 # 그래서 두 번 차단돼도 장부는 2줄, 발송은 1회다(정책이 한 곳에 있으므로 특례가 없다).
@@ -292,6 +292,102 @@ check("백오프: 간격이 점점 벌어진다",
 check("에스컬레이션: 반복분에 반복 횟수·기간이 실린다",
       any("같은 알림" in x and "일간 반복" in x for x in _sim_sent),
       f"{[x[:44] for x in _sim_sent[-2:]]}")
+
+# ══════════════════════════════════════════════════════════════════════
+# [자기 적대 리뷰 회귀] 재설계가 만든 결함 5건 — 전부 프로브로 실증된 것들이다
+print()
+print("[자기리뷰] 알림 발송 정책 5건")
+from datetime import date as _d
+from kv_core.health import SystemState as _SS, TaskState as _TS
+
+_D = _d(2026, 8, 10)
+
+
+def _fresh(sub: str):
+    """이 블록 전용 스크래치 — 앞 시나리오의 마커·정책이 섞이지 않게."""
+    import shutil
+    for name in ("sent", "policy"):
+        d = paths.data_root() / "_alerts" / name
+        if d.exists():
+            shutil.rmtree(d)
+
+
+# F1: 관측과 dispatch 사이에 UTC 자정이 끼면 사실이 영구 유실됐다.
+# 실측: 승인 틱 390회 중 1시간 초과 공백 21건, 그중 UTC 자정을 넘긴 것이 6일간 3건(최대 19.5h).
+# 재관측이 없는 사실(고아 초안·게이트 경고 교차·틱 오류)은 그러면 아무도 다시 못 본다.
+_fresh("f1")
+alerts.append_event("orphan_draft", identity="orphan-midnight", text="🔴 고아 초안",
+                    ts="2026-08-09T23:50:00+00:00")
+_after = [i for i, _ in alerts._from_events(_D)]
+check("F1 UTC 자정을 넘겨도 사실이 살아남는다", "orphan-midnight" in _after, str(_after))
+
+# F2-a: alerts.yaml 값 오타 하나로 dispatch 가 통째로 죽어 그 틱 전 알림이 미발송됐다.
+# 알림은 안전망이므로 설정 사고에 죽지 않고 기본값으로 계속 돌아야 한다 — 대신 조용히는 아니다.
+_fresh("f2a")
+_saved_cfg = alerts._cfg
+alerts._cfg = {"backoff": {"escalate_after_sends": "4회", "rare_every_days": "7일"}}
+alerts._cfg_warned.clear()
+_r = alerts.dispatch(state=None, today=_D)
+check("F2a 설정 값 오타에도 dispatch 가 살아남는다", isinstance(_r, list))
+check("F2a 설정이 깨졌다는 사실 자체를 알린다",
+      any("config-broken" in x for x in _r), str(_r))
+alerts._cfg = _saved_cfg
+
+# F2-b: `_try` 가 순회 중인 후보 리스트에 append 해서, _should_send 가 전역 실패하면
+# 후보가 무한 증식했다. 그 프로세스는 heavy_slot("approvals")을 쥔 채 살아 있어 stale
+# 회수 대상이 아니므로, 이후 모든 틱이 SlotBusy 로 물러나 **승인 리컨실러가 영구 정지**한다.
+_fresh("f2b")
+import signal as _sig
+_orig_ss = alerts._should_send
+alerts._should_send = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("주입"))
+_sig.signal(_sig.SIGALRM, lambda *a: (_ for _ in ()).throw(TimeoutError("무한 루프")))
+_sig.alarm(10)
+try:
+    alerts.dispatch(state=None, today=_D)
+    check("F2b 발송 경로 전역 실패에도 dispatch 가 끝난다(무한 증식 없음)", True)
+except TimeoutError:
+    check("F2b 발송 경로 전역 실패에도 dispatch 가 끝난다(무한 증식 없음)", False, "10초 초과")
+finally:
+    _sig.alarm(0)
+    alerts._should_send = _orig_ss
+
+# F3: `_forget` 이 "이틀 조용하면 해결"을 last_sent 로 판정해 위상에 의존했다.
+# 간헐 장애(맥 슬립으로 하루 걸러 도는 이 환경의 정상)에는 정책이 매번 지워져
+# 간격이 2일에서 멈추고 count 가 리셋돼 에스컬레이션이 한 번도 안 나갔다(30일 15회).
+_fresh("f3")
+
+
+def _st_problem():
+    t = _TS(name="judge", skill="s", cadence="daily", runner="local", shadow=False,
+            status="never_bad", late_days=9, limit_days=1, last_success=None,
+            last_attempt="x", first_seen="2026-08-01", note="배선 후 9일간 성공 0")
+    return _SS(now=_D, tasks=[t])
+
+
+# 이 블록만의 캡처 — 앞 시나리오가 notify.slack 을 갈아끼운 채 두면 여기서 발화한 문구가
+# 엉뚱한 리스트로 가서 "미도달"로 보인다(검증 사각 ④가 이 파일 안에서 재현됐다).
+_f3_sent: list = []
+_saved_slack = notify.slack
+notify.slack = lambda text, **kw: (_f3_sent.append(text), True)[1]
+try:
+    _fired = [i for i in range(30)
+              if alerts.dispatch(_st_problem() if i % 3 != 2 else _SS(now=_D, tasks=[]),
+                                 today=_D + timedelta(days=i))]
+finally:
+    notify.slack = _saved_slack                  # 반드시 원복
+check("F3 간헐 장애에서도 백오프가 쌓인다(30일 10회 이하)", len(_fired) <= 10,
+      f"발동 {len(_fired)}회 · {_fired}")
+check("F3 에스컬레이션 문구까지 도달한다",
+      any("같은 알림" in x for x in _f3_sent),
+      f"{[x[:36] for x in _f3_sent[-2:]]}")
+
+# F5: last_sent 가 미래면 gap 이 음수라 영원히 백오프에 걸리고 _forget 도 못 지운다
+# = 아무 로그 없는 영구 침묵. `dispatch(today=)` 가 공개 인자라 시뮬 1회면 도달한다.
+_fresh("f5")
+alerts._policy_write("future-test", {"first": "2026-08-10", "last_sent": "2026-09-19", "count": 1})
+_ok, _st = alerts._should_send("future-test", _D)
+check("F5 미래 last_sent 는 폐기하고 재시작한다(영구 침묵 방지)",
+      _ok is True and _st["last_sent"] == _D.isoformat(), f"{_ok} · {_st}")
 
 print()
 if FAIL:

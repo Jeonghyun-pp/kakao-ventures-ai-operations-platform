@@ -59,6 +59,54 @@ def _utc_today() -> date:
     return datetime.now(timezone.utc).date()
 
 
+_cfg_warned: set[str] = set()
+
+
+def cfg_int(section: str, key: str, default: int) -> int:
+    """설정 정수 읽기 — **잘못된 값이 알림 체계를 죽이지 않게 한다.**
+
+    [자기리뷰 F2] `escalate_after_sends: '4회'` 같은 값 하나면 YAML 은 통과하고
+    `int()` 가 dispatch 안에서 터져 **그 틱의 전 알림이 미발송**된다. 흔적은 print 한 줄뿐
+    이라 겉으론 정상 — W9 가 없애려던 바로 그 실패 모드(가짜 침묵)다.
+    알림은 안전망이므로 **설정 사고에 죽지 않고 기본값으로 계속 돌아야** 한다. 대신 조용히
+    넘기지 않는다: 한 번 loud 로 남기고, 아래 `config_problems()` 가 그 사실 자체를 알린다.
+    """
+    raw = (config().get(section) or {}).get(key, default)
+    try:
+        v = int(raw)
+        if v < 0:
+            raise ValueError("음수")
+        return v
+    except (TypeError, ValueError):
+        k = f"{section}.{key}"
+        if k not in _cfg_warned:
+            _cfg_warned.add(k)
+            print(f"🔴 alerts.yaml {k} 값이 잘못됐다({raw!r}) — 기본값 {default} 으로 계속한다")
+        return default
+
+
+def config_problems() -> list[str]:
+    """설정값 검증 — 잘못된 키 목록. CI 선언 정합 검사와 dispatch 가 함께 쓴다."""
+    bad: list[str] = []
+    spec = (("backoff", "daily_until_days", 2), ("backoff", "sparse_after_days", 7),
+            ("backoff", "sparse_every_days", 2), ("backoff", "rare_every_days", 7),
+            ("backoff", "escalate_after_sends", 4),
+            ("never_succeeded", "grace_periods", 3),
+            ("auth_suspect", "consecutive_session_errors", 3),
+            ("auth_canary", "unknown_days", 3),
+            ("scheduler_silence", "hours", 36))
+    for sec, key, _d in spec:
+        raw = (config().get(sec) or {}).get(key)
+        if raw is None:
+            continue                              # 미선언은 기본값 — 정상
+        try:
+            if int(raw) < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            bad.append(f"{sec}.{key}={raw!r}")
+    return bad
+
+
 def _sent_dir() -> Path:
     return paths.data_root() / "_alerts" / "sent"
 
@@ -127,12 +175,34 @@ def append_event(kind: str, **meta) -> None:
     from .job import _repair_torn_tail
     d = paths.data_root() / "_alerts"
     d.mkdir(parents=True, exist_ok=True)
-    p = d / "events.jsonl"
+    # [자기리뷰 F4] 일자별 파일 — 단일 파일은 회전이 없어 무한히 자라고, 읽는 쪽이 매 틱
+    # 전량 read_text 를 한다. 날짜로 나누면 tail 도 전량 읽기도 필요 없어진다.
+    p = d / f"events-{datetime.now(timezone.utc).date().isoformat()}.jsonl"
     _repair_torn_tail(p)
     line = json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                        "kind": kind, **meta}, ensure_ascii=False)
     with open(p, "a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+def read_events(day: date | None = None, *, lookback_days: int = 2) -> list[dict]:
+    """관측 사실 판독 — 파일이 어떻게 나뉘어 있는지 호출부가 몰라도 되게 한다.
+
+    일자별 파일로 바꾸면서(자기리뷰 F4) 경로를 직접 읽던 곳들이 깨졌다. 배치는 언제든
+    또 바뀔 수 있으므로 판독 지점을 하나로 둔다.
+    """
+    out: list[dict] = []
+    for f in _event_files(day or _utc_today(), lookback_days):
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for ln in lines:
+            try:
+                out.append(json.loads(ln))
+            except json.JSONDecodeError:
+                continue
+    return out
 
 
 def observe(kind: str, identity: str, text: str, **meta) -> None:
@@ -170,12 +240,11 @@ def _interval_days(age_days: int) -> int:
     alert fatigue 의 교과서 정의다. 그렇다고 아예 멈추면 그건 다시 가짜 침묵이다.
     **간격을 벌리되 끊지는 않는다.**
     """
-    b = config().get("backoff") or {}
-    if age_days < int(b.get("daily_until_days", 2)):
+    if age_days < cfg_int("backoff", "daily_until_days", 2):
         return 1
-    if age_days < int(b.get("sparse_after_days", 7)):
-        return int(b.get("sparse_every_days", 2))
-    return int(b.get("rare_every_days", 7))
+    if age_days < cfg_int("backoff", "sparse_after_days", 7):
+        return cfg_int("backoff", "sparse_every_days", 2)
+    return cfg_int("backoff", "rare_every_days", 7)
 
 
 def _should_send(ident: str, today: date) -> tuple[bool, dict]:
@@ -196,10 +265,37 @@ def _should_send(ident: str, today: date) -> tuple[bool, dict]:
             gap = (today - date.fromisoformat(last)).days
         except ValueError:
             gap = 99
+        if gap < 0:
+            # [자기리뷰 F5] `last_sent` 가 미래면 gap 이 음수라 **영원히** 백오프에 걸리고
+            # `_forget` 의 `>= 2` 도 불성립해 지울 수도 없다 = 아무 로그 없는 영구 침묵.
+            # `dispatch(today=)` 는 공개 인자라 시뮬 1회·시계 어긋남·백업 복원이면 도달한다.
+            print(f"🔴 alerts: {ident} 정책의 last_sent({last})가 미래다 — 폐기하고 재시작한다")
+            new = {"first": today.isoformat(), "last_sent": today.isoformat(), "count": 1}
+            return True, new
         if gap < _interval_days(age):
             return False, new                      # 백오프 구간
     new.update({"last_sent": today.isoformat(), "count": count + 1})
     return True, new
+
+
+def _touch_seen(ident: str, today: date) -> None:
+    """이 identity 가 **오늘 후보로 등장했다**는 사실만 기록한다(발송 여부와 무관).
+
+    [자기리뷰 F3] `_forget` 이 "이틀 조용하면 해결"을 `last_sent` 로 판정했는데, 백오프
+    구간(2~7일 간격)의 침묵과 실제 해결이 구분되지 않았다. 그래서 위상에 따라
+      · 재발이 최대 5~6일 늦게 알려지거나
+      · 간헐 실패(맥 슬립으로 하루 걸러 도는 이 환경의 정상)에는 정책이 매번 지워져
+        **간격이 2일에서 멈추고 count 가 리셋돼 에스컬레이션이 한 번도 안 나갔다**
+        (30일 시뮬 15회 발송 — 설계 목표 10회 이하를 넘긴다)
+    "문제가 아직 있는가"는 발송이 아니라 **후보로 등장했는가**로 봐야 한다.
+    """
+    st = _policy(ident)
+    if st.get("last_seen") == today.isoformat():
+        return
+    st["last_seen"] = today.isoformat()
+    st.setdefault("first", today.isoformat())
+    st.setdefault("count", 0)
+    _policy_write(ident, st)
 
 
 def _escalate(text: str, st: dict, today: date) -> str:
@@ -212,7 +308,7 @@ def _escalate(text: str, st: dict, today: date) -> str:
         age = (today - date.fromisoformat(st.get("first", today.isoformat()))).days
     except ValueError:
         age = 0
-    if n < int((config().get("backoff") or {}).get("escalate_after_sends", 4)):
+    if n < cfg_int("backoff", "escalate_after_sends", 4):
         return text
     # 기준을 섞지 않는다 — 여기서 아는 것은 "이 알림을 며칠째 반복했나"이고,
     # "그 문제가 며칠째인가"는 본문(health 의 note)이 이미 말한다. 둘을 한 문장에 뭉치면
@@ -236,11 +332,15 @@ def _forget(active: set[str], today: date) -> None:
             continue
         try:
             st = json.loads(p.read_text(encoding="utf-8"))
-            last = date.fromisoformat(str(st.get("last_sent") or "1970-01-01"))
+            seen = date.fromisoformat(
+                str(st.get("last_seen") or st.get("last_sent") or "1970-01-01"))
         except (json.JSONDecodeError, OSError, ValueError):
             p.unlink(missing_ok=True)
             continue
-        if (today - last).days >= 2:               # 이틀 조용하면 해결로 본다
+        gone = (today - seen).days
+        if gone < 0:                               # [F5] 미래값 — 이상이므로 즉시 폐기
+            p.unlink(missing_ok=True)
+        elif gone >= 2:                            # 이틀 연속 후보에 없으면 해결로 본다
             p.unlink(missing_ok=True)
 
 
@@ -263,8 +363,8 @@ def _from_auth(state) -> list[tuple[str, str]]:
     알릴 값어치가 있다. "실패했다"와 "모른다"를 **다른 문장으로** 낸다.
     """
     a = state.auth or {}
-    n = int((config().get("auth_suspect") or {}).get("consecutive_session_errors", 3))
-    limit = int((config().get("auth_canary") or {}).get("unknown_days", 3))
+    n = cfg_int("auth_suspect", "consecutive_session_errors", 3)
+    limit = cfg_int("auth_canary", "unknown_days", 3)
 
     # ① 열화 — 연속 실패. [W9 B-F7] **오늘 발생분이 포함될 때만** 발동한다(어제 실패로
     #    오늘 또 울리면 identity 가 날짜별이라 dedup 이 못 막는다 = alert fatigue 의 재생산).
@@ -297,54 +397,98 @@ def _from_scheduler(state) -> list[tuple[str, str]]:
     return [("scheduler-silent", f"🔴 {sc.get('note')}")]
 
 
-def _from_events(today: date) -> list[tuple[str, str]]:
-    """오늘 관측된 사실 → 알림 후보. **kind 를 가리지 않는다.**
+def _event_files(today: date, lookback_days: int) -> list[Path]:
+    """읽을 이벤트 파일들 — 일자별 파일 + 구 단일 파일(호환)."""
+    d = paths.data_root() / "_alerts"
+    out = [d / f"events-{(today - timedelta(days=i)).isoformat()}.jsonl"
+           for i in range(lookback_days + 1)]
+    out.append(d / "events.jsonl")               # 구 스키마(단일 파일) — 남아 있으면 함께 읽는다
+    return [p for p in out if p.exists()]
 
-    [B-H3] 예전엔 보상 재푸시가 `gate_block` 전용이었다. 그래서 appstore 부분결손이나
-    승인 실행 실패는 슬랙이 한 번 5xx 를 주면 **재시도 경로 자체가 없었다**.
-    dedup 마커가 이미 "오늘 보냈나"를 알고 있으므로, 여기서는 걸러내지 않고 전부 넘긴다.
+
+def _from_events(today: date, *, lookback_days: int = 2,
+                 cap: int = 200) -> list[tuple[str, str]]:
+    """최근 관측된 사실 → 알림 후보. **kind 를 가리지 않는다.**
+
+    [B-H3] 예전엔 보상 재푸시가 `gate_block` 전용이었다. dedup 마커가 이미 "오늘 보냈나"를
+    알고 있으므로 여기서는 걸러내지 않고 넘긴다.
+
+    [자기리뷰 F1] 창을 **달력일에서 룩백으로** 바꿨다. `startswith(오늘)` 이면 관측과
+    dispatch 사이에 UTC 자정이 끼는 순간 그 사실이 **영구 유실**된다 — 다음 dispatch 는
+    어제 것을 안 보고, 재관측이 없는 사실(고아 초안·게이트 경고 교차·틱 오류)은 다시
+    생기지 않기 때문이다. 실측: 승인 틱 390회 중 1시간 초과 공백 21건, 그중 UTC 자정을
+    넘긴 것이 6일간 3건(최대 19.5시간 — 맥 슬립).
+    중복 발송은 `push` 의 일자별 마커가 이미 막으므로 룩백은 안전하다.
+
+    [자기리뷰 F4] **필터를 먼저 걸고 상한은 그 뒤에** 씌운다(예전엔 tail 500 이 앞이라
+    오래된 것부터 버려졌다). 잘렸으면 **잘렸다는 사실 자체를 후보로 만든다** — 조용한
+    절단은 W9 가 없애려던 실패 모드다.
     """
-    ev = paths.data_root() / "_alerts" / "events.jsonl"
-    if not ev.exists():
-        return []
-    out: dict[str, str] = {}
-    iso = today.isoformat()
-    for ln in ev.read_text(encoding="utf-8").splitlines()[-500:]:   # [B-F16] tail 만
+    cutoff = (today - timedelta(days=lookback_days)).isoformat()
+    rows: list[tuple[str, str, str]] = []        # (ts, identity, text)
+    for f in _event_files(today, lookback_days):
         try:
-            e = json.loads(ln)
-        except json.JSONDecodeError:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except OSError:
             continue
-        if not str(e.get("ts", "")).startswith(iso):
-            continue
-        ident, text = e.get("identity"), e.get("text")
-        if ident and text:
-            out[str(ident)] = str(text)            # 같은 identity 는 마지막 문구로
-        elif e.get("kind") == "gate_block":        # 구 스키마(identity/text 없음) 호환
-            out[f"gate-block-{e.get('resource', '?')}"] = \
-                f"🔴 게이트 차단: {e.get('resource')} — {e.get('reason')}"
-    return sorted(out.items())
+        for ln in lines:
+            try:
+                e = json.loads(ln)
+            except json.JSONDecodeError:
+                continue
+            ts = str(e.get("ts", ""))
+            if ts[:10] < cutoff:                 # 필터 먼저
+                continue
+            ident, text = e.get("identity"), e.get("text")
+            if ident and text:
+                rows.append((ts, str(ident), str(text)))
+            elif e.get("kind") == "gate_block":  # 구 스키마(identity/text 없음) 호환
+                rows.append((ts, f"gate-block-{e.get('resource', '?')}",
+                             f"🔴 게이트 차단: {e.get('resource')} — {e.get('reason')}"))
+
+    rows.sort(key=lambda r: r[0], reverse=True)  # 최신 우선 — 잘려도 신선한 것이 남는다
+    out: dict[str, str] = {}
+    for _ts, ident, text in rows:
+        if ident not in out:
+            out[ident] = text                    # 같은 identity 는 **가장 최신** 문구로
+        if len(out) >= cap:
+            break
+    dropped = len({r[1] for r in rows}) - len(out)
+    items = sorted(out.items())
+    if dropped > 0:
+        items.append(("alerts-events-truncated",
+                      f"⚠️ 관측 사실이 많아 {dropped}건을 이번 틱에서 생략했다(상한 {cap}) — "
+                      f"$KV_DATA/_alerts/events-*.jsonl 확인 요망."))
+    return items
 
 
 # ─────────────────────────── dispatch (유일한 결정 지점) ───────────────────────────
 
-def dispatch(state=None, *, today: date | None = None) -> list[str]:
+def dispatch(state=None, *, today: date | None = None, send_cap: int = 20) -> list[str]:
     """무엇을 알릴지 결정하고 보낸다. 반환: **실제 발송된** identity 목록.
 
     [W9 B-F9] 각 원천을 격리한다 — `registry.load()` 는 fail-loud 라 tasks.yaml 오타 하나가
     알림 체계 전체를 정지시켰다(그리고 상위 broad except 가 삼켜 겉으론 정상이었다).
-    [B-M2] 격리는 **보상 루프에도** 적용한다 — 예전엔 그 루프가 `_try` 밖이라 디스크 오류
-    하나로 scan() 전체가 죽었다.
+    [B-M2] 격리는 보상 루프에도 적용한다.
+
+    [자기리뷰 F2] **발송 루프 자체도 격리한다.** 예전엔 `_escalate`/`push` 가 `_try` 밖이라
+    `alerts.yaml` 값 오타 하나로 dispatch 가 통째로 죽어 **그 틱의 전 알림이 미발송**됐다.
+    더 나쁜 것은 `_try` 가 **순회 중인 리스트에 append** 했다는 점이다 — `_should_send` 가
+    전역적으로 실패하면 후보가 무한 증식해 루프가 끝나지 않고, 그러면 `heavy_slot("approvals")`
+    을 쥔 채 프로세스가 살아 있어(= stale 회수 대상이 아니어서) **이후 모든 틱이 SlotBusy 로
+    물러나 승인 리컨실러가 영구 정지**한다. 지금은 새 후보를 `extra` 에 모아 루프 밖에서 처리한다.
     """
     today = today or _utc_today()
     sent: list[str] = []
     candidates: list[tuple[str, str]] = []
+    extra: list[tuple[str, str]] = []             # _try 가 만드는 후보 — 순회 중 리스트를 안 건드린다
 
     def _try(name, fn, *a):
         try:
             return fn(*a)
         except Exception as e:                    # noqa: BLE001
             print(f"🔴 alerts.{name} 실패: {e!r}")
-            candidates.append((f"alerts-{name}-broken", f"🔴 알림 원천 {name} 실패: {e!r}"))
+            extra.append((f"alerts-{name}-broken", f"🔴 알림 원천 {name} 실패: {e!r}"))
             return None
 
     if state is None:
@@ -356,14 +500,44 @@ def dispatch(state=None, *, today: date | None = None) -> list[str]:
         candidates += _try("from_scheduler", _from_scheduler, state) or []
     candidates += _try("from_events", _from_events, today) or []
 
+    # 설정 자체가 깨졌다는 사실도 알린다 — 기본값으로 도느라 조용해지면 그게 가짜 침묵이다.
+    bad = _try("config_check", config_problems) or []
+    if bad:
+        extra.append(("alerts-config-broken",
+                      f"🔴 alerts.yaml 값 오류 {len(bad)}건 — 기본값으로 동작 중: {', '.join(bad)[:200]}"))
+
+    candidates += extra
+    extra = []
     active = {ident for ident, _ in candidates}
+    for ident, _text in candidates:
+        _try("touch_seen", _touch_seen, ident, today)   # [F3] 후보 등장 자체를 기록
+
     for ident, text in candidates:
-        ok, st = _try("policy", _should_send, ident, today) or (False, {})
-        if not ok:
-            continue
-        if push(ident, _escalate(text, st, today), day=today) == "sent":
-            sent.append(ident)
-            _try("policy_write", _policy_write, ident, st)
+        if len(sent) >= send_cap:
+            # 한 틱에 수백 발을 쏘지 않는다. 남은 건 다음 틱이 집는다(마커가 중복을 막는다).
+            print(f"⚠️  alerts: 발송 상한 {send_cap} 도달 — 나머지는 다음 틱")
+            extra.append(("alerts-send-capped",
+                          f"⚠️ 한 틱 발송 상한({send_cap})에 걸렸다 — 알림이 몰리고 있다. "
+                          f"후보 {len(candidates)}건. 원인 확인 요망."))
+            break
+        try:
+            ok, st = _should_send(ident, today)
+            if not ok:
+                continue
+            if push(ident, _escalate(text, st, today), day=today) == "sent":
+                sent.append(ident)
+                _policy_write(ident, st)
+        except Exception as e:                    # noqa: BLE001  한 건이 나머지를 죽이지 않는다
+            print(f"🔴 alerts: {ident} 발송 실패 — {e!r}")
+            extra.append((f"alerts-send-broken-{_safe_id(ident)[:40]}",
+                          f"🔴 알림 발송 경로 실패({ident}): {e!r}"))
+
+    for ident, text in extra:                     # 루프 밖에서 한 번만 — 재귀 증식 없음
+        try:
+            if push(ident, text, day=today) == "sent":
+                sent.append(ident)
+        except Exception as e:                    # noqa: BLE001
+            print(f"🔴 alerts: 브로큰 통지 발송 실패({ident}) — {e!r}")
     _try("forget", _forget, active, today)
     return sent
 
