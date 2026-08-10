@@ -54,12 +54,11 @@ except Exception as _e:                      # noqa: BLE001
 #   never     시도는 있으나 성공 0, 유예 안 (관측만)
 #   never_bad 시도는 있으나 성공 0, 유예 초과 (알림)
 #   idle      배선됐는데 시도 이력이 아예 없음 (관측만)
-#   degraded  외부 러너의 마지막 실행이 실패 (알림) — 성공 시각을 모르므로 지속일은 셀 수 없다
 #   unwired   러너 미배선 — 워터마크 없음이 정상 (침묵)
 #   unknown   워터마크·헬스 파손 등 판정 불가 (관측만, loud)
 _ICON = {"ok": "✅", "late": "⚠️", "stale": "🔴", "never": "⚠️", "never_bad": "🔴",
-         "degraded": "🔴", "idle": "⚠️", "unwired": "🔕", "unknown": "⚠️"}
-_ALERTABLE = {"stale", "never_bad", "degraded"}
+         "idle": "⚠️", "unwired": "🔕", "unknown": "⚠️"}
+_ALERTABLE = {"stale", "never_bad"}
 
 _NEVER_GRACE_MULT = 3        # never-succeeded 유예 = freshness_limit × N (alerts.yaml 과 공유)
 _ATTEMPT_RE = re.compile(r"-r\d+$")
@@ -270,23 +269,23 @@ def _task_state(t, now: date) -> TaskState:
         d_utc = _ts_to_utc_date(str(h.get("ts", "")))
         if d_utc is None:
             return mk("unknown", "헬스 ts 없음/파손(관측 불가)")
-        late = (now - d_utc).days
         ok = bool(h.get("ok"))
-        ls = d_utc.isoformat() if ok else None
-        if not ok:
-            # [자기리뷰 F1] 예전엔 `late`(마지막 **실행** 경과)로 등급을 매겼다. 그런데 헬스
-            # 파일 ts 는 **실패해도 매일 갱신**되므로 late 가 영원히 0~1 이고, 그래서
-            # "매일 돌고 매일 실패" 하는 잡이 30일이 지나도 ⚠️·alertable=False 였다.
-            # 실측: appstore-sourcing(노션 138행/일)이 한 달 내리 실패해도 슬랙 푸시 0건.
-            # 알림이 뜨는 유일한 조건이 "plist 가 아예 안 도는 것"이었다 — 가짜 침묵이다.
-            #
-            # 헬스 파일에는 마지막 **성공** 시각이 없으므로 실패 지속일을 셀 수 없다.
-            # 셀 수 없으면 보수적으로 간다: 마지막 실행이 실패했다는 것 자체를 알린다.
-            # 반복 소음은 dispatch 의 백오프(1→2→7일)와 에스컬레이션이 흡수한다.
-            return mk("degraded",
-                      f"마지막 실행이 실패했다({late}일 전) · plist 직접 실행 — "
-                      f"헬스 파일에 성공 시각이 없어 실패 지속일은 셀 수 없다",
-                      late=late, ls=None, la=d_utc.isoformat())
+        # [적대 리뷰 H-F1 · 정공법] `ts` 는 **실패해도 매 실행 갱신**되므로 그것으로 등급을
+        # 매기면 "매일 돌며 매일 실패"가 영원히 ⚠️ 로 남는다. writer 가 `last_ok_ts` 를
+        # 보존하게 고쳤으므로(pipeline.py), 여기서는 **local task 와 같은 사다리**를 탄다.
+        # 러너가 달라도 판정 규칙이 같아야 한다는 것이 이 모듈의 존재 이유다.
+        ok_d = _ts_to_utc_date(str(h.get("last_ok_ts") or "")) or (d_utc if ok else None)
+        if ok_d is None:
+            # 성공 기록이 없다 — local 의 never/never_bad 사다리와 같은 기준을 쓴다.
+            first_d = _ts_to_utc_date(str(h.get("first_ts") or "")) or d_utc
+            age = (now - first_d).days
+            grace = limit * _NEVER_GRACE_MULT
+            status = "never_bad" if age >= grace else "never"
+            return mk(status,
+                      f"성공 기록 0 ({age}일째) · plist 직접 실행 — 마지막 실행 {d_utc}",
+                      late=age, ls=None, la=d_utc.isoformat(), fs=first_d.isoformat())
+        late = (now - ok_d).days
+        ls = ok_d.isoformat()
         if late > limit:
             return mk("stale", f"{late}일 밀림 (신선도 한계 {limit}일 초과) · plist 직접 실행",
                       late=late, ls=ls, la=d_utc.isoformat())

@@ -218,19 +218,54 @@ def observe(kind: str, identity: str, text: str, **meta) -> None:
 # ─────────────────────────── 발송 정책 (백오프·에스컬레이션) ───────────────────────────
 
 def _policy(ident: str) -> dict:
+    """정책 상태 — **저장하는 것은 `last_seen` 하나뿐이다.**
+
+    [W9 자기감사] 처음엔 `first`·`last_sent`·`count` 도 여기 저장했다. 그런데 그 셋은
+    **발송 마커(`_alerts/sent/<ident>-<날짜>`)에서 그대로 유도된다** — 마커는 발송에
+    성공했을 때만 생기므로 그 자체가 발송 이력의 정본이다.
+
+    파생을 저장하면 진실이 둘이 되고 반드시 어긋난다는 것이 이번 재설계의 진단(R1)인데,
+    그 처방을 쓰면서 같은 걸 만들었고 **실데이터에서 실제로 어긋났다**:
+
+        마커에서 유도: first=2026-08-07 · last_sent=2026-08-10 · count=4
+        정책 파일 저장: first=2026-08-10 · last_sent=None     · count=0
+
+    그 상태로는 `count=0` 이라 에스컬레이션이 영영 안 뜬다. F5(미래 `last_sent` 가 영구
+    침묵을 만든다)도 같은 뿌리였다 — 저장된 사본이 틀려도 아무도 대조하지 않았다.
+    이제 유도 불가능한 것(`last_seen`: 후보로 등장했으나 발송하지 않은 날)만 저장한다.
+    """
     p = _policy_dir() / f"{_safe_id(ident)}.json"
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        st = json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
+    return {"last_seen": st.get("last_seen")}
 
 
 def _policy_write(ident: str, st: dict) -> None:
     from .job import atomic_write
     atomic_write(_policy_dir() / f"{_safe_id(ident)}.json",
-                 json.dumps(st, ensure_ascii=False))
+                 json.dumps({"last_seen": st.get("last_seen")}, ensure_ascii=False))
+
+
+def sent_days(ident: str) -> list[str]:
+    """이 identity 의 **실제 발송일 목록** — 마커가 정본이다(오름차순).
+
+    마커는 `push` 가 발송에 성공했을 때만 남긴다(실패하면 claim 을 반납한다). 그래서
+    "언제 몇 번 보냈나"는 계산하면 되는 것이지 따로 적어둘 것이 아니다.
+    """
+    d = _sent_dir()
+    if not d.exists():
+        return []
+    ident = _safe_id(ident)
+    out: list[str] = []
+    for p in d.glob(f"{ident}-*"):
+        tail = p.name[len(ident) + 1:]
+        if len(tail) == 10 and tail[4] == "-" and tail[7] == "-":
+            out.append(tail)
+    return sorted(out)
 
 
 def _interval_days(age_days: int) -> int:
@@ -248,34 +283,38 @@ def _interval_days(age_days: int) -> int:
 
 
 def _should_send(ident: str, today: date) -> tuple[bool, dict]:
-    """백오프 판정. 반환: (보낼까, 갱신될 정책 상태)."""
-    st = _policy(ident)
-    first = st.get("first") or today.isoformat()
-    last = st.get("last_sent")
-    count = int(st.get("count", 0))
-    new = {"first": first, "last_sent": last, "count": count}
-    try:
-        age = (today - date.fromisoformat(first)).days
-    except ValueError:
-        age = 0
+    """백오프 판정. 반환: (보낼까, 저장할 정책 상태).
+
+    발송 이력은 **마커에서 유도**한다(`sent_days`) — 저장된 사본과 대조할 필요가 없다.
+    """
+    days = [d for d in sent_days(ident) if d <= today.isoformat()]   # 미래 마커는 무시(F5)
+    first, last, count = (days[0] if days else None), (days[-1] if days else None), len(days)
+    new = {"last_seen": today.isoformat()}
     if last == today.isoformat():
         return False, new                          # 하루 1회
+    try:
+        age = (today - date.fromisoformat(first)).days if first else 0
+    except ValueError:
+        age = 0
     if last:
         try:
             gap = (today - date.fromisoformat(last)).days
         except ValueError:
             gap = 99
-        if gap < 0:
-            # [자기리뷰 F5] `last_sent` 가 미래면 gap 이 음수라 **영원히** 백오프에 걸리고
-            # `_forget` 의 `>= 2` 도 불성립해 지울 수도 없다 = 아무 로그 없는 영구 침묵.
-            # `dispatch(today=)` 는 공개 인자라 시뮬 1회·시계 어긋남·백업 복원이면 도달한다.
-            print(f"🔴 alerts: {ident} 정책의 last_sent({last})가 미래다 — 폐기하고 재시작한다")
-            new = {"first": today.isoformat(), "last_sent": today.isoformat(), "count": 1}
-            return True, new
-        if gap < _interval_days(age):
+        if 0 <= gap < _interval_days(age):
             return False, new                      # 백오프 구간
-    new.update({"last_sent": today.isoformat(), "count": count + 1})
     return True, new
+
+
+def _history(ident: str, today: date) -> tuple[int, int]:
+    """(발송 횟수, 최초 발송 이후 경과일) — 에스컬레이션 문구가 쓰는 값. 전부 유도."""
+    days = [d for d in sent_days(ident) if d <= today.isoformat()]
+    if not days:
+        return 0, 0
+    try:
+        return len(days), (today - date.fromisoformat(days[0])).days
+    except ValueError:
+        return len(days), 0
 
 
 def _touch_seen(ident: str, today: date) -> None:
@@ -298,21 +337,18 @@ def _touch_seen(ident: str, today: date) -> None:
     _policy_write(ident, st)
 
 
-def _escalate(text: str, st: dict, today: date) -> str:
-    """반복되는 알림에는 **얼마나 오래 방치됐는지**를 실어 보낸다.
+def _escalate(text: str, ident: str, today: date) -> str:
+    """반복되는 알림에는 **얼마나 오래 반복했는지**를 실어 배경 소음화를 막는다.
 
-    같은 문장을 N번 받으면 사람은 그것을 배경 소음으로 처리한다. 문장이 자라야 눈에 띈다.
+    횟수·기간은 마커에서 유도한다(저장된 카운터를 믿지 않는다 — 그게 어긋나서
+    에스컬레이션이 영영 안 뜨던 상태였다). 이번 발송분까지 포함해 센다.
     """
-    n = int(st.get("count", 1))
-    try:
-        age = (today - date.fromisoformat(st.get("first", today.isoformat()))).days
-    except ValueError:
-        age = 0
+    n, age = _history(ident, today)
+    n += 1                                         # 지금 보내는 것까지
     if n < cfg_int("backoff", "escalate_after_sends", 4):
         return text
     # 기준을 섞지 않는다 — 여기서 아는 것은 "이 알림을 며칠째 반복했나"이고,
-    # "그 문제가 며칠째인가"는 본문(health 의 note)이 이미 말한다. 둘을 한 문장에 뭉치면
-    # 숫자 두 개가 어긋나 보여 사람이 어느 쪽을 믿을지 고민하게 된다.
+    # "그 문제가 며칠째인가"는 본문(health 의 note)이 이미 말한다.
     return (f"🔁 *같은 알림 {n}회째 · {age}일간 반복* (이후 간격 {_interval_days(age)}일)\n"
             f"{text}")
 
@@ -524,9 +560,8 @@ def dispatch(state=None, *, today: date | None = None, send_cap: int = 20) -> li
             ok, st = _should_send(ident, today)
             if not ok:
                 continue
-            if push(ident, _escalate(text, st, today), day=today) == "sent":
-                sent.append(ident)
-                _policy_write(ident, st)
+            if push(ident, _escalate(text, ident, today), day=today) == "sent":
+                sent.append(ident)   # 발송 이력은 마커가 남긴다 — 따로 적지 않는다
         except Exception as e:                    # noqa: BLE001  한 건이 나머지를 죽이지 않는다
             print(f"🔴 alerts: {ident} 발송 실패 — {e!r}")
             extra.append((f"alerts-send-broken-{_safe_id(ident)[:40]}",

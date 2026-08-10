@@ -208,26 +208,42 @@ check("H10 침묵은 reds() 에 실린다",
 check("H10 로그가 아예 없으면 침묵 아님(최초 기동 전)",
       health._scheduler_health(_dt.now(_tz.utc), None)["silent"] is False)
 
-print("\n=== H11 · 자기리뷰 F1: launchd-direct 의 '매일 실패'가 침묵하지 않는다 ===\n")
-# 헬스 파일 ts 는 **실패해도 매일 갱신**된다. 그래서 `late`(마지막 실행 경과)로 등급을
-# 매기면 30일을 내리 실패해도 late=0~1 이라 영원히 ⚠️·alertable=False 였다.
-# 실측 시나리오: appstore-sourcing(노션 138행/일)이 한 달 실패해도 슬랙 푸시 0건.
+print("\n=== H11 · H-F1: launchd-direct 도 local 과 **같은 사다리**를 탄다 ===\n")
+# writer 가 `ts` 만 남기던 시절엔 그 값이 실패해도 매 실행 갱신돼, 매일 돌며 매일 실패해도
+# 관측이 늘 "1일 전"이라 영원히 ⚠️ 였다. 판정 쪽 우회(degraded 상태 신설) 대신
+# **writer 가 `last_ok_ts`·`first_ts` 를 보존하게** 고쳤다 — 근본은 사실을 안 남긴 쪽이다.
 reset()
 (_SCRATCH / SK).mkdir(parents=True, exist_ok=True)
 seq = []
 for off in (0, 15, 30):
     d = TODAY + timedelta(days=off)
+    # 실패가 계속돼도 last_ok_ts 는 8/1 에 멈춰 있다(= writer 규율)
     (_SCRATCH / SK / "last_run_health.json").write_text(
-        json.dumps({"ok": False, "ts": f"{d.isoformat()}T09:00:00"}), encoding="utf-8")
+        json.dumps({"ok": False, "ts": f"{d.isoformat()}T09:00:00",
+                    "last_ok_ts": "2026-08-01T09:00:00",
+                    "first_ts": "2026-07-20T09:00:00"}), encoding="utf-8")
     st = health.compute(now=d, tasks=[T("t11", runner="launchd-direct")])
-    seq.append((off, st.tasks[0].status, st.tasks[0].alertable))
-check("H11 매일 실패는 첫날부터 알림 대상", seq[0][2] is True, str(seq))
-check("H11 30일 뒤에도 여전히 알림 대상(침묵으로 굳지 않음)", seq[-1][2] is True, str(seq))
-check("H11 성공 시각을 모르므로 last_success 는 None",
-      health.compute(now=TODAY, tasks=[T("t11", runner="launchd-direct")]).tasks[0].last_success is None)
-# 반대 방향 — ok=true 는 여전히 신선도 규칙을 탄다(과잉 경보 아님)
+    seq.append((off, st.tasks[0].status, st.tasks[0].alertable, st.tasks[0].late_days))
+check("H11 실패가 지속되면 경과일이 실제로 자란다(늘 '1일 전' 아님)",
+      seq[0][3] == 9 and seq[-1][3] == 39, str(seq))
+check("H11 첫날부터 알림 대상(stale — local 과 같은 어휘)",
+      seq[0][1] == "stale" and seq[0][2] is True, str(seq))
+check("H11 30일 뒤에도 알림 대상", seq[-1][2] is True, str(seq))
+
+# 성공 기록이 아예 없으면 local 의 never/never_bad 사다리를 그대로 탄다
 (_SCRATCH / SK / "last_run_health.json").write_text(
-    json.dumps({"ok": True, "ts": f"{TODAY.isoformat()}T09:00:00"}), encoding="utf-8")
+    json.dumps({"ok": False, "ts": f"{TODAY.isoformat()}T09:00:00",
+                "first_ts": f"{(TODAY - timedelta(days=20)).isoformat()}T09:00:00"}),
+    encoding="utf-8")
+s_never = health.compute(now=TODAY, tasks=[T("t11", runner="launchd-direct")]).tasks[0]
+check("H11 성공 기록 0 이면 never_bad(local 과 같은 사다리)",
+      s_never.status == "never_bad" and s_never.alertable, f"{s_never.status} · {s_never.note}")
+
+# 정상 경로는 과잉 경보를 만들지 않는다
+(_SCRATCH / SK / "last_run_health.json").write_text(
+    json.dumps({"ok": True, "ts": f"{TODAY.isoformat()}T09:00:00",
+                "last_ok_ts": f"{TODAY.isoformat()}T09:00:00",
+                "first_ts": "2026-07-20T09:00:00"}), encoding="utf-8")
 check("H11 ok=true 최신은 알림 대상 아님",
       health.compute(now=TODAY, tasks=[T("t11", runner="launchd-direct")]).tasks[0].alertable is False)
 

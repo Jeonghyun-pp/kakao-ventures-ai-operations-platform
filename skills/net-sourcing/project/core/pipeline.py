@@ -141,12 +141,29 @@ def _write_health(channel: str, degraded: list[str], counts: dict) -> None:
     """
     try:
         (PROJ / "data").mkdir(parents=True, exist_ok=True)
-        (PROJ / "data" / "last_run_health.json").write_text(json.dumps({
-            "ts": datetime.now().isoformat(timespec="seconds"),
+        hp = PROJ / "data" / "last_run_health.json"
+        # [W9 재설계] **마지막 성공 시각을 보존한다.**
+        # 예전엔 `ts` 만 남겼는데 그 값은 **실패해도 매 실행 갱신**된다. 그래서 읽는 쪽이
+        # "며칠째 성공이 없나"를 셀 방법이 없었고, 매일 돌며 매일 실패해도 관측은 늘
+        # "1일 전"이라 영원히 경보가 안 떴다(적대 리뷰 H-F1). 판정 쪽에서 우회할 수도
+        # 있지만, 근본은 **writer 가 필요한 사실을 안 남긴 것**이다.
+        prev = {}
+        try:
+            prev = json.loads(hp.read_text(encoding="utf-8"))
+        except Exception:                         # noqa: BLE001  구 스키마·파손은 빈 값
+            prev = {}
+        now_ts = datetime.now().isoformat(timespec="seconds")
+        ok = not degraded
+        hp.write_text(json.dumps({
+            "ts": now_ts,
             "channel": channel,
-            "ok": not degraded,
+            "ok": ok,
             "degraded": degraded,
             "counts": counts,
+            # 성공했을 때만 전진 — 실패는 이 값을 건드리지 않는다(워터마크와 같은 규율)
+            "last_ok_ts": now_ts if ok else prev.get("last_ok_ts"),
+            # 최초 기록 시각 — "한 번도 성공한 적 없다"의 경과일 기준선
+            "first_ts": prev.get("first_ts") or now_ts,
         }, ensure_ascii=False, indent=1), encoding="utf-8")
     except Exception as e:                        # 상태 기록 실패가 수집을 죽이면 안 된다
         print(f"⚠️  건강 상태 기록 실패(무해): {e}")

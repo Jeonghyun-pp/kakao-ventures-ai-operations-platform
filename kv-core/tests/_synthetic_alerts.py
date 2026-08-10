@@ -381,13 +381,31 @@ check("F3 에스컬레이션 문구까지 도달한다",
       any("같은 알림" in x for x in _f3_sent),
       f"{[x[:36] for x in _f3_sent[-2:]]}")
 
-# F5: last_sent 가 미래면 gap 이 음수라 영원히 백오프에 걸리고 _forget 도 못 지운다
-# = 아무 로그 없는 영구 침묵. `dispatch(today=)` 가 공개 인자라 시뮬 1회면 도달한다.
+# F5: 발송 이력이 미래를 가리키면 영원히 백오프에 걸려 아무 로그 없이 침묵했다.
+# `dispatch(today=)` 는 공개 인자라 시뮬 1회·시계 어긋남·백업 복원이면 도달한다.
+# **정책 파일에 last_sent 를 저장하던 시절의 문제**이고, 지금은 마커가 정본이라
+# "미래 마커는 세지 않는다"로 같은 성질을 지킨다(저장된 사본이 없으니 어긋날 것도 없다).
 _fresh("f5")
-alerts._policy_write("future-test", {"first": "2026-08-10", "last_sent": "2026-09-19", "count": 1})
+_sent_dir = paths.data_root() / "_alerts" / "sent"
+_sent_dir.mkdir(parents=True, exist_ok=True)
+(_sent_dir / "future-test-2026-09-19").touch()          # 미래 발송 마커
 _ok, _st = alerts._should_send("future-test", _D)
-check("F5 미래 last_sent 는 폐기하고 재시작한다(영구 침묵 방지)",
-      _ok is True and _st["last_sent"] == _D.isoformat(), f"{_ok} · {_st}")
+check("F5 미래 발송 이력은 무시하고 지금 보낸다(영구 침묵 방지)",
+      _ok is True, f"{_ok} · {_st}")
+check("F5 정책 파일은 유도 불가능한 것만 저장한다(last_seen 하나)",
+      set(_st) == {"last_seen"}, f"{sorted(_st)}")
+
+# [자기감사] 발송 이력은 **마커에서 유도**한다 — 저장된 사본과 어긋날 수 없다.
+# 실데이터에서 실제로 어긋나 있었다(마커 4건인데 정책 count=0 → 에스컬레이션 영구 미발동).
+_fresh("f6")
+_sent_dir.mkdir(parents=True, exist_ok=True)     # _fresh 가 지웠으므로 다시 만든다
+for d in ("2026-08-07", "2026-08-08", "2026-08-10"):
+    (_sent_dir / f"derive-test-{d}").touch()
+check("유도: 발송일 목록이 마커와 일치",
+      alerts.sent_days("derive-test") == ["2026-08-07", "2026-08-08", "2026-08-10"],
+      str(alerts.sent_days("derive-test")))
+_n, _age = alerts._history("derive-test", _D)
+check("유도: 횟수·경과일이 마커에서 계산된다", (_n, _age) == (3, 3), f"n={_n} age={_age}")
 
 print()
 if FAIL:
