@@ -516,7 +516,16 @@ def _claude_auth(now: date, *, lookback: int = 14) -> dict:
     }
 
 
-def _scheduler_health(now: date, touch: str | None, *, silent_hours: int = 8) -> dict:
+def _silent_limit_hours() -> int:
+    """스케줄러 침묵 임계 — 선언(config/alerts.yaml)에서 읽는다."""
+    try:
+        from . import alerts
+        return int((alerts.config().get("scheduler_silence") or {}).get("hours", 36))
+    except Exception:                            # noqa: BLE001  설정 사고가 관측을 죽이지 않는다
+        return 36
+
+
+def _scheduler_health(now: date, touch: str | None, *, silent_hours: int | None = None) -> dict:
     """스케줄러 자체가 살아 있나. [C-H6]
 
     **부재 감지기가 부재의 원인 안에 살면 안 된다.** 예전엔 🔴 stale 판정이 orrery 에만
@@ -526,8 +535,18 @@ def _scheduler_health(now: date, touch: str | None, *, silent_hours: int = 8) ->
 
     지금은 10분마다 도는 approvals_tick 이 `dispatch()` → `compute()` 를 부르므로 이
     판정이 **스케줄러 밖에서** 돈다. 그게 이 함수가 여기 있는 이유다.
-    스케줄러 주기가 4시간이므로 8시간(2주기) 무소식이면 정지로 본다.
+    ## 임계를 실측으로 정한다 (추측하면 오탐 제조기가 된다)
+
+    처음엔 "주기 4시간이니 8시간(2주기)"으로 잡았다. **실측하니 틀렸다** — 최근 로그의
+    발화 간격은 최대 **18.4시간**이었고 17개 구간 중 4개가 8시간을 넘었다. 맥이 자면
+    launchd 가 돌지 않기 때문이고, 이건 고장이 아니라 **이 환경의 정상**이다
+    (W1 레슨: "상시 머신이 없으면 헬스는 '지금 살아 있나'가 아니라 '며칠 밀렸나'다").
+
+    그래서 36시간으로 둔다 — 관측된 최대 간격보다 넉넉히 위이고, 그래도 daily task 가
+    stale 로 잡히는 것(1~2일)과 비슷하거나 이른 시점이다. 이 신호의 값어치는 속도가
+    아니라 **구분**에 있다: "task 가 실패했다"와 "스케줄러가 죽었다"는 런북이 다르다.
     """
+    silent_hours = silent_hours if silent_hours is not None else _silent_limit_hours()
     if not touch:
         return {"silent": False, "note": "스케줄러 로그 없음(최초 기동 전)", "hours": None}
     try:
@@ -544,7 +563,7 @@ def _scheduler_health(now: date, touch: str | None, *, silent_hours: int = 8) ->
     if hours >= silent_hours:
         return {"silent": True, "hours": round(hours, 1),
                 "note": f"스케줄러가 {hours:.0f}시간째 무소식 "
-                        f"(주기 4시간 · 한계 {silent_hours}시간) — launchctl 확인 요망"}
+                        f"(한계 {silent_hours}시간 · 맥 슬립 감안) — launchctl 확인 요망"}
     return {"silent": False, "hours": round(hours, 1),
             "note": f"{hours:.1f}시간 전 기동"}
 

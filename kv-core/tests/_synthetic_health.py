@@ -186,6 +186,27 @@ check("H8 전이가 단조적(되돌아가지 않음)",
       [s for _, s in seq] == sorted([s for _, s in seq], key=lambda x: {"ok": 0, "late": 1, "stale": 2}[x]),
       str(seq))
 
+print("\n=== H10 · C-H6: 스케줄러 침묵 임계는 실측 기반이어야 한다 ===\n")
+# 처음엔 "주기 4시간이니 8시간"으로 잡았는데, 실 launchd.log 를 세어보니 발화 간격이
+# 최대 18.4시간이었다(맥 슬립). 추측한 임계는 오탐 제조기가 된다 — 그 회귀를 잠근다.
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+
+def _sched(hours_ago: float) -> dict:
+    touch = (_dt.now(_tz.utc) - _td(hours=hours_ago)).isoformat(timespec="minutes")
+    return health._scheduler_health(TODAY, touch)
+
+
+check("H10 맥 슬립 구간(18.4h 관측 최대)은 침묵으로 보지 않는다",
+      _sched(18.4)["silent"] is False, str(_sched(18.4)))
+check("H10 24시간도 아직 아니다(주말 슬립 여유)", _sched(24)["silent"] is False)
+check("H10 36시간 넘으면 침묵", _sched(40)["silent"] is True, str(_sched(40)))
+check("H10 침묵은 reds() 에 실린다",
+      any("scheduler" in r for r in
+          health.SystemState(now=TODAY, scheduler=_sched(40)).reds()))
+check("H10 로그가 아예 없으면 침묵 아님(최초 기동 전)",
+      health._scheduler_health(TODAY, None)["silent"] is False)
+
 print("\n=== H9: 순수 읽기 계약 ===\n")
 reset()
 wm("t9", last_attempt=TODAY.isoformat(), last_success=TODAY.isoformat(), first_attempt="2026-08-01")

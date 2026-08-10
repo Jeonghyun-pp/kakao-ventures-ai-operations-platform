@@ -244,6 +244,24 @@ def _decision_claim_dir() -> Path:
     return paths.data("_approvals", "decisions")
 
 
+_TS_BAD = __import__("re").compile(r"[^0-9]")
+
+
+def _claim_name(key: str, r: dict) -> str:
+    """결정 마커 파일명 — **key 가 아니라 이 레코드의 화신(incarnation)에 묶는다.**
+
+    key 만 쓰면 레코드가 지워졌다 같은 key 로 재생성될 때 **옛 결정이 되살아난다**:
+    새 건이 아무도 결정하지 않았는데 자동 거부(또는 자동 승인)된다.
+    `meeting-mail` 의 dedup_key 는 page_id 라, 같은 창업자가 다시 Catch 되거나 스모크
+    뒤처리로 큐 파일을 지운 뒤면 실제로 도달하는 경로다(프로브로 재현했다).
+
+    `created` 를 붙이면 화신마다 다른 파일이 되어 충돌 자체가 없어진다. 마커는 남지만
+    큐 파일과 같은 성격의 감사 기록이고(수십 바이트), 결정이 있었다는 사실은 지우지 않는다.
+    """
+    stamp = _TS_BAD.sub("", str(r.get("created") or ""))[:14] or "nocreated"
+    return f"{key}.{stamp}.decision"
+
+
 def decide(key: str, decision: str, *, by: str = "cli") -> dict | None:
     """결정 기록 — **멱등(first-decision-wins)**, 경합에서도.
 
@@ -277,7 +295,7 @@ def decide(key: str, decision: str, *, by: str = "cli") -> dict | None:
 
     d = _decision_claim_dir()
     d.mkdir(parents=True, exist_ok=True)
-    claim = d / f"{key}.decision"
+    claim = d / _claim_name(key, r)
     try:
         fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.write(fd, f"{decision}|{by}".encode())

@@ -141,6 +141,27 @@ r_done = approval.load("k-done-1"); r_done["draft_id"] = "d-1"; approval.save(r_
 check("A-F12 실행 완료건도 pending 제외",
       "k-done-1" not in {r["key"] for r in approval.pending()})
 
+# [W9 재설계 회귀] 결정 마커가 **화신(incarnation)** 에 묶이는가
+#
+# 재설계에서 first-decision-wins 를 O_EXCL 마커로 되살렸는데, 마커 이름을 key 만으로
+# 지었더니 새 결함이 생겼다: 레코드가 지워졌다 같은 key 로 재생성되면 **옛 결정이
+# 되살아난다**(새 건이 아무도 결정하지 않았는데 자동 거부/자동 승인).
+# meeting-mail 의 dedup_key 는 page_id 라, 같은 창업자가 다시 Catch 되거나 스모크
+# 뒤처리로 큐 파일을 지운 뒤면 실제로 도달하는 경로다. 프로브로 재현하고 고쳤다.
+import time as _time
+_K = "reincarnation"
+approval.request("t", "judgment", {"text": "1차"}, dedup_key=_K)
+approval.decide(_K, "rejected", by="사람1")
+check("화신: 1차 결정 기록", approval.load(_K)["decision"] == "rejected")
+(approval._queue_dir() / f"{_K}.json").unlink()
+_time.sleep(1.1)                                  # created 는 초 단위 — 다음 초로 넘긴다
+approval.request("t", "judgment", {"text": "2차(새 건)"}, dedup_key=_K)
+check("화신: 재생성 직후는 미결", approval.load(_K)["decision"] is None)
+_r = approval.decide(_K, "approved", by="사람2")
+check("화신: 옛 결정이 되살아나지 않는다",
+      _r["decision"] == "approved" and _r["decided_by"] == "사람2",
+      f"{_r['decision']} by {_r.get('decided_by')}")
+
 # A-F13: CLI 가 "이미 결정됨"을 rc 2 로 구분
 check("A-F13 이미 결정된 건 approve → rc 2", approval.main(["approve", "k-live-1"]) == 2)
 
