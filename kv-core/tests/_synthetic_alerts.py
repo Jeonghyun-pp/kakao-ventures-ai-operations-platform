@@ -286,8 +286,12 @@ check("백오프: 그래도 끊기지 않는다(마지막 7일 안에 최소 1�
 check("백오프: 간격이 점점 벌어진다",
       len(_days_fired) > 2 and (_days_fired[-1] - _days_fired[-2]) > (_days_fired[1] - _days_fired[0]),
       f"초기간격={_days_fired[1]-_days_fired[0]} 후기간격={_days_fired[-1]-_days_fired[-2]}")
-check("에스컬레이션: 반복분에 '일째 미해결' 이 실린다",
-      any("일째 미해결" in x for x in _sim_sent), f"{[x[:40] for x in _sim_sent[-2:]]}")
+# 지키는 성질: 반복분에 **얼마나 오래 반복했는지**가 실려 배경 소음화를 막는다.
+# 문구는 "며칠째 반복" 기준 하나만 쓴다 — 본문(health note)이 이미 "문제가 며칠째"를
+# 말하므로, 한 메시지에 서로 다른 기준의 숫자 두 개가 나오면 사람이 어느 쪽을 믿을지 헷갈린다.
+check("에스컬레이션: 반복분에 반복 횟수·기간이 실린다",
+      any("같은 알림" in x and "일간 반복" in x for x in _sim_sent),
+      f"{[x[:44] for x in _sim_sent[-2:]]}")
 
 print()
 if FAIL:

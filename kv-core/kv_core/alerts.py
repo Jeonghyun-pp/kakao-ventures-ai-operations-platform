@@ -214,8 +214,11 @@ def _escalate(text: str, st: dict, today: date) -> str:
         age = 0
     if n < int((config().get("backoff") or {}).get("escalate_after_sends", 4)):
         return text
-    return (f"🔁 *{age}일째 미해결* (같은 알림 {n}회째 · 이후 간격 "
-            f"{_interval_days(age)}일)\n{text}")
+    # 기준을 섞지 않는다 — 여기서 아는 것은 "이 알림을 며칠째 반복했나"이고,
+    # "그 문제가 며칠째인가"는 본문(health 의 note)이 이미 말한다. 둘을 한 문장에 뭉치면
+    # 숫자 두 개가 어긋나 보여 사람이 어느 쪽을 믿을지 고민하게 된다.
+    return (f"🔁 *같은 알림 {n}회째 · {age}일간 반복* (이후 간격 {_interval_days(age)}일)\n"
+            f"{text}")
 
 
 def _forget(active: set[str], today: date) -> None:
