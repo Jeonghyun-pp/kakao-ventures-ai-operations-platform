@@ -141,8 +141,13 @@ check("A-F3 묵은 미결 뒤에서도 신규 승인 수거됨",
       f"decision={approval.load('zzz-new')['decision']}")
 
 # A-F3b: 상한 초과는 조용히 자르지 않고 **정체 신호로 알린다**
+# [W9 재설계 Batch A] 스텁을 **끝까지 남기지 않는다**(검증 사각 ④). 예전엔 여기서 갈아끼운
+# `alerts.push` 가 복구되지 않아, 이후 시나리오에서 실제로 발화한 알림(A-M9 의 executing_at
+# 오탐 등)이 전부 보이지 않았다 — "테스트가 만든 전제가 결함을 가린" 정확한 사례다.
+# 이제 ①원본을 보관하고 ②관찰이 끝나면 되돌리며 ③"울려선 안 되는 알림"을 음성 단언한다.
 _alerted: list = []
 import kv_core.alerts as _alm
+_ORIG_PUSH = _alm.push
 _alm.push = lambda ident, text: (_alerted.append(ident), "sent")[1]
 for i in range(approvals_tick._ANNOUNCE_CAP + 3):
     approval.request("t", "judgment", {"text": f"flood{i}"}, dedup_key=f"flood-{i:03d}")
@@ -160,6 +165,34 @@ check("A-F2 payload.to 없어도 partner 로 실행(빈 수신자 0)",
       _drafts_created and _drafts_created[-1]["to"] == "person-016b3a1e6ca1@example.com",
       f"{_drafts_created[-1] if _drafts_created else None}")
 
+# [W9 재설계 Batch A] **음성 단언** — 정상 경로가 알림을 만들어선 안 된다 (검증 사각 ④)
+# A-M9 의 교훈: 실패 보상 경로는 **정상 설계 경로**인데 그때마다 "초안 중복 가능" 경보가
+# 울렸다. 그런데 테스트는 스텁으로 알림을 삼켜 그 오탐을 한 번도 못 봤다.
+# 이제 "이 시나리오에서 발생해선 안 되는 알림"을 명시적으로 단언한다.
+_alerted.clear()
+approval.request("t", "mail", {"to": "quiet@x", "subject": "s", "body": "b"},
+                 partner="quiet@x", dedup_key="m-quiet")
+approval.decide("m-quiet", "approved")
+approvals_tick._execute()                    # 깨끗한 성공 1건
+check("음성단언: 정상 성공 경로는 알림 0건", _alerted == [], f"발화={_alerted}")
+check("음성단언: 성공 후 executing_at 마커 미잔존",
+      approval.load("m-quiet").get("executing_at") is None,
+      str(approval.load("m-quiet").get("executing_at")))
+
+# 실패→복구 왕복도 그 자체로는 '중복 초안' 오탐을 만들지 않아야 한다
+_alerted.clear()
+approval.request("t", "mail", {"to": "retry@x", "subject": "s", "body": "b"},
+                 partner="retry@x", dedup_key="m-retry")
+approval.decide("m-retry", "approved")
+_orig2 = gmail.create_draft
+gmail.create_draft = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("일시 장애"))
+approvals_tick._execute()                    # 1차 실패(보상 경로)
+gmail.create_draft = _orig2
+approvals_tick._execute()                    # 2차 성공
+check("음성단언: 정상 재시도가 '중복 초안 가능' 오탐을 만들지 않음",
+      not any("중복" in a for a in _alerted), f"발화={_alerted}")
+check("음성단언: 재시도 성공 후 draft_id 확정", approval.load("m-retry").get("draft_id") is not None)
+
 # A-F2b: 수신자가 아예 없으면 fail-loud (executed 확정 금지)
 approval.request("t", "judgment", {"text": "x"}, dedup_key="m-norecip")
 r_nr = approval.load("m-norecip"); r_nr["kind"] = "mail"; r_nr["partner"] = None
@@ -173,11 +206,15 @@ check("A-F2b 수신자 없음 → 초안 0 + execute_error 기록",
 # A-F4: 한 단계가 죽어도 alerts.scan 은 돈다(관측 격리)
 _scanned = {"n": 0}
 import kv_core.alerts as _al
+_ORIG_SCAN = _al.scan
 _al.scan = lambda: (_scanned.__setitem__("n", _scanned["n"] + 1), [])[1]
 _orig_rec = approvals_tick._reconcile
 approvals_tick._reconcile = lambda: (_ for _ in ()).throw(RuntimeError("주입 장애"))
-approvals_tick.main([])
-approvals_tick._reconcile = _orig_rec
+try:
+    approvals_tick.main([])
+finally:
+    approvals_tick._reconcile = _orig_rec
+    _al.scan = _ORIG_SCAN                    # [Batch A] 스텁은 반드시 되돌린다(사각 ④)
 check("A-F4 단계 실패해도 alerts.scan 실행됨", _scanned["n"] >= 1, f"scan 호출={_scanned['n']}")
 
 # A-F7: created 포맷이 달라도(isoformat) announce 대상이 된다
@@ -189,6 +226,8 @@ approval.save(r_iso)
 approvals_tick._announce()
 check("A-F7 isoformat created 도 announce 됨(9999 뭉갬 제거)",
       approval.load("m-iso").get("slack_ts") is not None)
+
+_alm.push = _ORIG_PUSH                       # [Batch A] 스텁 원복 — 다음 시나리오를 가리지 않는다
 
 print()
 if FAIL:

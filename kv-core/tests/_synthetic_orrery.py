@@ -138,6 +138,35 @@ check("⑧ 텍스트 렌더: 미해결 1 · 해결됨 1 표기",
 check("⑧ 슬랙 렌더: 미해결만 카운트",
       "미해결 실패 잡 1건" in sl8 and "solo" in sl8, sl8.split("\n")[1] if "\n" in sl8 else sl8)
 
+# ── ⑧b [W9 재설계 Batch A] **규모 경계** — cap 을 실제로 넘겨본다 (검증 사각 ③) ──
+# 왜: 기존 ⑧ 은 실패를 2건만 만들어 cap(10)을 **한 번도 건드리지 않았다**. 그래서 C-H1
+# (해결된 최신 실패가 상위 10칸을 채워 미해결이 잘림)을 원리적으로 못 봤다.
+# 실환경에서는 meeting-mail 이 실패→r2 성공 패턴을 하루 2건씩 만들어 5일이면 도달한다.
+print()
+SKC = "_orrery-cap"
+# 해결된 실패 12건 — 전부 **미해결보다 최신**이라 정렬 상위를 점유한다
+for i in range(12):
+    jid = f"noise-2026-08-0{6 if i < 4 else 7}-{i:02d}"
+    job.create(SKC, {"t": 1}, jid)
+    job.transition(SKC, jid, "queued"); job.transition(SKC, jid, "running")
+    job.transition(SKC, jid, "failed")
+    job.create(SKC, {"t": 1}, jid + "-r2")
+    job.transition(SKC, jid + "-r2", "queued"); job.transition(SKC, jid + "-r2", "running")
+    job.transition(SKC, jid + "-r2", "validating"); job.transition(SKC, jid + "-r2", "completed")
+# 진짜 미해결 2건
+for jid in ("real-2026-08-04", "real-2026-08-05"):
+    job.create(SKC, {"t": 1}, jid)
+    job.transition(SKC, jid, "queued"); job.transition(SKC, jid, "running")
+    job.transition(SKC, jid, "failed")
+
+fc = orrery._recent_failures()
+unresolved_c = [f["job"] for f in fc if f["skill"] == SKC and not f.get("resolved")]
+check("⑧b cap 을 넘겨도 미해결이 잘리지 않는다 (해결 12 + 미해결 2)",
+      set(unresolved_c) == {"real-2026-08-04", "real-2026-08-05"},
+      f"미해결={sorted(unresolved_c)}")
+sl_c = orrery.render_slack(dict(d2, failures=fc))
+check("⑧b 슬랙이 미해결 2건을 침묵시키지 않는다", "미해결 실패 잡" in sl_c, sl_c.split("\n")[1] if "\n" in sl_c else sl_c)
+
 # ── ⑨ [W9] freshness 선언 우선 (orrery·alerts 공용 헬퍼) ────────────────────
 from kv_core import cadence as _cad
 t_decl = Task(name="f-decl", skill="s", cadence="daily", catch_up="coalesce",
