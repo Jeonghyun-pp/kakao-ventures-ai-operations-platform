@@ -14,6 +14,7 @@ Slack 인터랙티브 버튼(제품 매개 발송)은 상시 수신 엔드포인
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -75,22 +76,40 @@ def request(task: str, kind: str, payload: dict, *,
         raise ValueError("mail 초안은 수신 심사역(partner)이 필요하다")
 
     channel, target = _route(kind, origin, partner)
-    # [W9 A-F9] 기본 key 에서 타임스탬프 제거 — 초마다 다른 key 가 되면 dedup 이 무력해진다
-    # (같은 논리 요청이 매 틱 새 레코드로 증식). 호출부는 의미 있는 dedup_key 를 주는 것이 원칙.
-    key = _assert_key(dedup_key or f"{task}-{kind}")
+    # [W9 A-M8] **dedup_key 는 필수다.** 기본값 `f"{task}-{kind}"` 가 있던 시절, 같은 task 의
+    # 서로 다른 요청(A社·B社)이 같은 key 로 뭉쳐 **큐 파일 1개**만 남았다. 게다가 반환값에
+    # "신규/기존" 표시가 없어 호출부는 병합 사실조차 몰랐다 — mail 이면 수신자까지 첫 요청
+    # 것으로 고정된 채 나머지가 성공처럼 보이며 증발한다. 기본값은 편의가 아니라 함정이었다.
+    if not dedup_key:
+        raise ValueError(
+            f"dedup_key 는 필수다(task={task!r}, kind={kind!r}) — 요청을 유일하게 식별하는 "
+            f"값을 주어야 한다(예: page_id). 기본값은 서로 다른 요청을 조용히 병합한다.")
+    key = _assert_key(dedup_key)
     qpath = _queue_dir() / f"{key}.json"
     if qpath.exists():                                     # 멱등: 이미 만든 승인요청은 재생성 안 함
-        return json.loads(qpath.read_text(encoding="utf-8"))
+        # [W9 A-M11] 파손 레코드에 raise 하지 않는다 — `_iter_queue`/`load` 는 관용하는데
+        # 여기만 맨몸 json.loads 라, 틱이 save 중 SIGKILL 된 파일 하나가 이후 매 회차의
+        # request-approval 스테이지를 통째로 죽였다. 파손이면 새로 만든다(loud).
+        try:
+            return json.loads(qpath.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"⚠️  approval: 기존 레코드 파손 {key}.json — 재생성한다 ({e!r})")
 
+    # [W9 재설계 Batch D] **파생·죽은 필드를 저장하지 않는다.**
+    # 뺀 것과 이유:
+    #   channel/target  `_route(kind, origin, partner)` 로 언제든 계산된다 → route_of()
+    #   status          decision·draft_id 에서 계산된다 → status_of()
+    #   sent            True 로 만드는 코드가 리포에 없는 죽은 필드였다(A-F12)
+    #   delivered       읽는 곳이 없었다
+    #   modified        W8 내내 항상 None — 무수정 측정은 W10 에서 sent-mail 대조로 한다
+    # 저장된 값과 계산된 값이 공존하면 언젠가 어긋나고, 그때 사람은 저장된 쪽을 믿는다.
     record = {
         "key": key, "task": task, "kind": kind, "origin": origin, "partner": partner,
-        "channel": channel, "target": target, "created": _now(),
-        "status": "drafted", "sent": False, "delivered": False, "payload": payload,
+        "created": _now(), "payload": payload,
         # [W8] 결정 라벨 — 큐 파일이 곧 라벨 저장소(label-as-byproduct).
         "decision": None,      # None(미결) | "approved" | "rejected"
         "decided_at": None,
         "decided_by": None,    # "cli" | "slack:<user_id>"
-        "modified": None,      # W8 은 항상 None — 무수정 여부 측정은 W10(sent-mail 대조)
         # slack_ts/slack_channel/draft_id/executed_at/execute_error 는 approvals_tick 이 나중에 써넣는다
     }
 
@@ -105,11 +124,28 @@ def request(task: str, kind: str, payload: dict, *,
             text = payload.get("text") or payload.get("summary") \
                 or json.dumps(payload, ensure_ascii=False)
             prefix = f"{target} " if target.startswith("@") else ""
-            notify.slack(prefix + text)
-            record["delivered"] = True
+            notify.slack(prefix + text)   # [Batch D] `delivered` 저장 제거 — 읽는 곳이 없었다
 
     job.atomic_write(qpath, json.dumps(record, ensure_ascii=False, indent=2))
     return record
+
+
+def route_of(r: dict) -> tuple[str, str]:
+    """(channel, target) — **저장하지 않고 계산한다.**"""
+    return _route(r.get("kind", ""), r.get("origin", "system"), r.get("partner"))
+
+
+def status_of(r: dict) -> str:
+    """레코드 상태 — 파생값. 저장된 `status` 필드를 없앤 자리."""
+    if r.get("decision") == "rejected":
+        return "rejected"
+    if r.get("draft_id"):
+        return "executed"
+    if r.get("execute_error"):
+        return "execute_failed"
+    if r.get("decision") == "approved":
+        return "approved"
+    return "drafted"
 
 
 def _iter_queue() -> list[dict]:
@@ -123,16 +159,23 @@ def _iter_queue() -> list[dict]:
 
 
 def _is_closed(r: dict) -> bool:
-    """더 이상 살아있지 않은 건 — 실행 완료(mail) 또는 거부.
+    """더 이상 살아있지 않은 건 — 거부됐거나, 할 일이 끝났거나.
 
-    [W9 A-F12] `sent` 는 True 로 만드는 코드가 리포에 없는 데드 필드였다. 그것만 보면
-    결정·실행이 끝난 건까지 영원히 '대기'로 누적돼 매 틱 전량 스캔되고 관측도 오염된다.
+    [W9 A-F12] 예전엔 `sent` 를 먼저 봤는데 그건 **True 로 만드는 코드가 리포에 없는 죽은
+    필드**였다(= 항상 False, 즉 아무 역할도 안 하면서 스키마만 차지).
+    [W9 A-M7] 그리고 세 조건 어디에도 **승인된 judgment/summary** 가 걸리지 않았다.
+    judgment 는 실행이 없으므로 `draft_id` 가 영원히 안 생기고, 그래서 승인해도 pending 에
+    무한 누적됐다 — A-F12 가 고치려던 "거짓 백로그"가 kind 만 바꿔 재발한 것이다.
+
+    지금 규칙은 kind 의 의미론 그대로다:
+      mail       초안이 만들어지면 끝(사람이 보내는 건 이 시스템 밖의 일)
+      그 외      결정되면 끝(라벨이 목적이고 실행이 없다)
     """
-    if r.get("sent"):
-        return True
     if r.get("decision") == "rejected":
         return True
-    return r.get("kind") == "mail" and bool(r.get("draft_id"))
+    if r.get("kind") == "mail":
+        return bool(r.get("draft_id"))
+    return r.get("decision") is not None
 
 
 def pending() -> list[dict]:
@@ -197,25 +240,76 @@ _DELETE = _Delete()
 DELETE = _DELETE
 
 
-def decide(key: str, decision: str, *, by: str = "cli") -> dict | None:
-    """결정 기록 — **멱등(first-decision-wins)**: 이미 결정된 레코드는 그대로 반환.
+def _decision_claim_dir() -> Path:
+    return paths.data("_approvals", "decisions")
 
-    [W9 A-F5] load→save 사이에 락이 없으면 실제로는 last-write-wins 가 된다(실증: CLI 가
-    먼저 승인했는데 슬랙 거부가 덮음, 반대로 거부가 승인으로 덮이면 초안이 생성된다).
-    쓰기 구간 전체를 배타 락으로 감싸 CLI·틱 경합에서도 첫 결정이 이기게 한다.
-    락을 못 잡으면(다른 쪽이 쓰는 중) 그 결정이 이긴 것이므로 **재조회 후 그대로 반환**.
+
+def decide(key: str, decision: str, *, by: str = "cli") -> dict | None:
+    """결정 기록 — **멱등(first-decision-wins)**, 경합에서도.
+
+    ## 왜 이 모양인가 (두 번 틀렸던 자리다)
+
+    ① 처음엔 `load → 검사 → save` 였다. 락이 없으니 실제로는 **last-write-wins** 였다
+       (A-F5 실증: CLI 가 먼저 승인했는데 슬랙 거부가 덮었고, 반대 방향이면 거부가
+       승인으로 덮여 초안이 생성됐다).
+    ② W9 Phase0 에서 `heavy_slot` 을 붙였다가 뺐다. 붙이면 **유령 락(pid 재사용) 하나로
+       모든 decide 가 영구 no-op** 이 되는 새 단일 장애점이 생겼기 때문이다(A-H3).
+       그런데 빼고 나니 ①이 조용히 되살아났다 — `_synthetic_approval_decide` 는 단일
+       프로세스라 통과시켰고, **동시성 랩이 8/8 전부 불일치**로 잡았다.
+
+    ## 지금: 락이 아니라 **원자 선점(O_EXCL)**
+
+    락은 "잡았다가 놓는 것"이라 놓지 못하면(크래시·슬립) 시스템이 멈춘다. 결정 마커는
+    **한 번 생기면 영원히 남는 것**이 정상이다 — 그게 곧 "이 건은 결정됐다"는 사실이라
+    회수(stale) 개념 자체가 없다. `alerts` 의 dedup 마커와 같은 관용구다.
+
+    진 쪽은 마커 내용을 읽어 **이긴 결정을 그대로 돌려준다**. 승자가 레코드에 쓰기 전
+    찰나에는 파일이 아직 미결일 수 있으므로 짧게 기다린다(수렴 대기, 최대 1초).
     """
     if decision not in ("approved", "rejected"):
         raise ValueError(f"decision 은 approved|rejected (got '{decision}')")
-    # [W9 Phase0 0-2] heavy_slot 제거 — 유령 락(pid 재사용) 하나로 **모든 decide 가 영구
-    # no-op** 이 되는 새 단일 장애점이었다(A-H3 실증: CLI 는 "이미 결정됨" 거짓보고, 알림 0).
-    # 대신 읽기→검사→병합쓰기 창을 μs 로 줄이고, update 가 다른 필드를 안 덮게 한다.
+    _assert_key(key)
     r = load(key)
     if r is None:
         return None
-    if r.get("decision") is not None:              # first-decision-wins
+    if r.get("decision") is not None:              # 빠른 경로 — 이미 결정됨
         return r
+
+    d = _decision_claim_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    claim = d / f"{key}.decision"
+    try:
+        fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, f"{decision}|{by}".encode())
+        os.close(fd)
+    except FileExistsError:
+        return _await_decision(key, claim) or r    # 졌다 — 이긴 결정을 돌려준다
     return update(key, decision=decision, decided_at=_now(), decided_by=by)
+
+
+def _await_decision(key: str, claim: Path, *, tries: int = 20, wait: float = 0.05) -> dict | None:
+    """이긴 쪽이 레코드에 결정을 반영할 때까지 짧게 기다린다.
+
+    마커가 진실이고 레코드는 그 반영이다. 반영 전 찰나에 `decision=None` 을 돌려주면
+    호출부가 "아직 미결"로 오해한다 — 그게 경합에서 first-decision-wins 가 깨져 보이는
+    이유였다. 끝내 반영이 안 되면(승자 크래시) **마커 내용으로 답한다**.
+    """
+    import time
+    for _ in range(tries):
+        r = load(key)
+        if r and r.get("decision") is not None:
+            return r
+        time.sleep(wait)
+    try:
+        won, _, who = claim.read_text(encoding="utf-8").partition("|")
+    except OSError:
+        return None
+    r = load(key)
+    if r is None:
+        return None
+    # 승자가 쓰지 못하고 죽었다 — 마커를 근거로 우리가 반영한다(결정 자체는 승자의 것).
+    print(f"⚠️  {key}: 결정 마커({won})가 레코드에 반영되지 않았다 — 마커 기준으로 복구한다")
+    return update(key, decision=won, decided_at=_now(), decided_by=who or "unknown")
 
 
 def undecided() -> list[dict]:
@@ -274,7 +368,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"🔴 없음: {args.key}")
         return 1
     r = decide(args.key, want, by="cli")
-    if r and r.get("decision") != want:
+    if r is None:
+        # [W9 A-M5] 가드가 절반만 있었다 — rc 2 분기는 `r and` 로 막았는데 그 아래
+        # `r['decision']` 는 무방비라 TypeError 로 크래시했다(레코드가 그 사이 삭제된 경우).
+        print(f"🔴 {args.key}: 결정 기록 실패(레코드가 사라졌거나 읽을 수 없다)")
+        return 1
+    if r.get("decision") != want:
         # [W9 A-F13] "내가 결정했다"와 "이미 다른 결정이 있다"를 rc 로 구분 — 자동화가
         # rc 0 을 승인 성공으로 오인하지 않게.
         print(f"⚠️  {args.key}: 이미 {r['decision']}({r.get('decided_by')}) — 변경 없음")

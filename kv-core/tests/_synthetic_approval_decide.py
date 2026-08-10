@@ -34,8 +34,17 @@ print("=== 승인 코어 합성 검증 ===\n")
 # ① request 가 신필드를 넣는다 + dedup 멱등이 기존 레코드를 안 덮는다
 r1 = approval.request("t1", "mail", {"subject": "s", "body": "b"},
                       partner="hello@x", dedup_key="k-mail-1")
-check("① 신필드 존재(decision/decided_at/modified None)",
-      r1["decision"] is None and r1["decided_at"] is None and r1["modified"] is None)
+# [W9 Batch D] `modified` 는 스키마에서 뺐다 — W8 내내 **항상 None** 이었고 읽는 곳이
+# 없었다(무수정 측정은 W10 에서 sent-mail 대조로 한다). 저장된 값과 계산된 값이 공존하면
+# 언젠가 어긋나므로, 쓰지 않는 필드는 자리를 비운다.
+check("① 결정 필드 초기값(decision/decided_at/decided_by 전부 None)",
+      r1["decision"] is None and r1["decided_at"] is None and r1["decided_by"] is None)
+check("① 파생 필드는 저장하지 않는다(status/channel/target/sent/delivered/modified)",
+      not ({"status", "channel", "target", "sent", "delivered", "modified"} & set(r1)),
+      f"잔존={sorted({'status','channel','target','sent','delivered','modified'} & set(r1))}")
+check("① 파생값은 계산으로 얻는다",
+      approval.status_of(r1) == "drafted" and approval.route_of(r1)[0] == "gmail",
+      f"{approval.status_of(r1)} · {approval.route_of(r1)}")
 # 기존 레코드에 slack_ts 를 심어두고 재요청 — 덮이면 안 됨
 r1["slack_ts"] = "123.456"
 approval.save(r1)
@@ -106,9 +115,20 @@ try:
     check("A-F9 경로 문자 key 거부", False, "통과해버림")
 except ValueError:
     check("A-F9 경로 문자 key 거부", True)
-d1 = approval.request("t-def", "judgment", {"text": "1"})
-d2 = approval.request("t-def", "judgment", {"text": "2"})
-check("A-F9 기본 key 가 안정적(타임스탬프 없음 → dedup 작동)", d1["key"] == d2["key"], d1["key"])
+# [W9 A-M8] **단언을 뒤집었다.** 예전엔 "기본 key 가 안정적이라 dedup 이 작동한다"가
+# 정답이었는데, 바로 그 안정성이 **서로 다른 요청을 조용히 병합**했다: A社·B社 요청이
+# 같은 key(`t-def-judgment`)로 뭉쳐 큐 파일 1개만 남고, 반환값에 신규/기존 표시가 없어
+# 호출부는 병합 사실조차 몰랐다(mail 이면 수신자까지 첫 요청 것으로 고정).
+# 기본값은 편의가 아니라 함정이었다 — 이제 dedup_key 는 필수다.
+try:
+    approval.request("t-def", "judgment", {"text": "1"})
+    check("A-M8 dedup_key 없으면 거부", False, "기본값으로 통과해버림")
+except ValueError as e:
+    check("A-M8 dedup_key 없으면 거부(조용한 병합 차단)", "dedup_key" in str(e))
+d1 = approval.request("t-def", "judgment", {"text": "1"}, dedup_key="t-def-a")
+d2 = approval.request("t-def", "judgment", {"text": "2"}, dedup_key="t-def-b")
+check("A-M8 서로 다른 key 는 서로 다른 레코드로 남는다",
+      d1["key"] != d2["key"] and d1["payload"]["text"] == "1" and d2["payload"]["text"] == "2")
 
 # A-F12: 종결된 건은 pending 에서 빠진다(무한 누적 방지)
 approval.decide("k-live-1", "rejected")

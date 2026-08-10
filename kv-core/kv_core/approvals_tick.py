@@ -53,11 +53,20 @@ def _age_days(created: str) -> float:
 
 
 def _card(r: dict) -> str:
+    """승인 카드. [W9 A-M12] **전문 확인 경로를 카드에 박는다.**
+
+    본문을 200자만 보여주는데 draft-after-approve 라 Gmail 초안은 승인 **후에** 생긴다 —
+    즉 승인 시점에 전문을 볼 수단이 카드에 없었다. 심사역이 앞 200자만 보고 ✅ 를 누르면
+    뒤쪽의 환각·오류가 그대로 통과하고, 그러면 승인 게이트 자체가 형식이 된다.
+    """
     p = r.get("payload") or {}
-    body = (p.get("body") or p.get("text") or "")[:200]
+    full = (p.get("body") or p.get("text") or "")
+    body = full[:200]
+    more = f"  …외 {len(full) - 200}자" if len(full) > 200 else ""
     return (f"⏳ 승인요청 [{r.get('kind')}] `{r['key']}` ({r.get('task')})\n"
             f"To: {p.get('to', '-')} · Subject: {p.get('subject', '-')}\n"
-            f"{body}\n"
+            f"{body}{more}\n"
+            f"전문: `python -m kv_core.approval show {r['key']}`\n"
             f"✅ 승인 · ❌ 거부 (이 메시지에 이모지)")
 
 
@@ -156,8 +165,11 @@ def _reconcile() -> int:
         if decision == "rejected" and any(rx.get("name") in slackbot.APPROVE_EMOJI
                                           for rx in reactions):
             print(f"⚠️  {r['key']}: ✅+❌ 동시 반응 — reject 우선(fail-safe) 처리")
-        approval.decide(r["key"], decision, by=by)  # first-decision-wins — CLI 경합 안전
-        n += 1
+        # [W9 A-L16] 반환값을 버리면 `None`(레코드 소멸)이나 no-op 에서도 카운트가 올라
+        # 틱 요약이 거짓말을 한다("decide 3" 인데 실제 기록 0). 의도한 값일 때만 센다.
+        got_r = approval.decide(r["key"], decision, by=by)  # first-decision-wins — CLI 경합 안전
+        if got_r and got_r.get("decision") is not None:
+            n += 1
     return n
 
 
@@ -195,7 +207,22 @@ def _execute() -> int:
             got = gmail.get_draft(draft_id)              # read-back — "만들었다 ≠ 반영됐다"
             if not got or got.get("id") != draft_id:
                 raise RuntimeError(f"read-back 불일치: {draft_id}")
-            approval.update(key, draft_id=draft_id, executed_at=_now_z(), status="executed",
+            # [W9 재설계 Batch D] **초안을 만든 뒤 한 번 더 확인한다.**
+            # Phase0 의 재확인은 `create_draft` **전**에만 있었다. Gmail 호출이 초 단위라
+            # 그 사이 들어온 거부는 못 막고, 그 뒤 무조건 `status="executed"` 를 썼다 —
+            # 동시성 랩이 잡은 것이 정확히 이것이다(decision=rejected + status=executed).
+            # 초안 생성 자체는 되돌릴 수 없으므로(이미 Gmail 에 있다) **고아로 표기**하고
+            # 실행완료로 확정하지 않는다. 사람이 지울 수 있게 사실을 남기는 쪽이 정직하다.
+            after = approval.load(key)
+            if after is not None and after.get("decision") != "approved":
+                approval.update(key, orphan_draft_id=draft_id, executing_at=approval.DELETE)
+                alerts.observe("orphan_draft", f"orphan-draft-{key}",
+                               f"⚠️ {key}: 초안 생성 중 결정이 "
+                               f"'{after.get('decision')}' 로 바뀌었다 — Gmail 초안 {draft_id} 이"
+                               f" 남아 있다(발송 아님). 확인 후 삭제 요망.", key=key)
+                print(f"⚠️  {key}: 실행 중 결정 변경 — 초안 {draft_id} 을 고아로 표기(실행완료 아님)")
+                continue
+            approval.update(key, draft_id=draft_id, executed_at=_now_z(),
                             execute_error=approval.DELETE,
                             executing_at=approval.DELETE)   # [A-M9] 성공하면 마커를 남기지 않는다
             print(f"✅ 실행: {key} → Gmail 초안 {draft_id} (To: {to} · 발송 아님)")

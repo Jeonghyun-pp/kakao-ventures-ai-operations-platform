@@ -89,8 +89,10 @@ gmail.create_draft = _stub_create
 r2 = approval.load(k2)
 check("A-2 실행 중 기록된 필드가 보존됨", r2.get("note") == "이 필드는 살아남아야 한다",
       f"note={r2.get('note')!r}")
-check("A-2 실행 결과도 함께 기록됨", r2.get("status") == "executed" and r2.get("draft_id"),
-      f"status={r2.get('status')} draft={r2.get('draft_id')}")
+# [W9 Batch D] `status` 는 저장하지 않고 계산한다(파생 상태를 두 벌 두지 않는다).
+check("A-2 실행 결과도 함께 기록됨",
+      approval.status_of(r2) == "executed" and r2.get("draft_id"),
+      f"status={approval.status_of(r2)} draft={r2.get('draft_id')}")
 check("A-2 성공 시 executing_at 잔재 없음", "executing_at" not in r2,
       str(r2.get("executing_at")))
 
