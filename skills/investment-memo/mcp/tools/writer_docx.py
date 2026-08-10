@@ -30,7 +30,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 
-from .ooxml_normalize import unwrap_junk_sdt
+from .ooxml_normalize import audit_layout, normalize_layout, unwrap_junk_sdt
 from .tables_fill import fill_tables
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,18 @@ FLAG_TO_KEY = {
 
 ABC_HEADLINE_SECTIONS = {"투자 포인트"}
 
+# 이미지 크기 (inch). A4 세로 + 좌우 여백 기준 본문 폭이 6.19"다.
+# 이 폭을 넘기면 그림이 본문 밖으로 삐져나가 인쇄본에서 잘린다.
+TEXT_WIDTH_IN = 6.19
+IMG_DEFAULT_WIDTH_IN = 5.0
+# 가로로 긴 로드맵·타임라인 슬라이드를 고정 폭 5"로 넣으면 높이가 0.5" 밑으로
+# 눌려 글자를 읽을 수 없다. 최소 이 높이는 확보하도록 폭을 키운다.
+IMG_MIN_HEIGHT_IN = 0.9
+# 본문 폭까지 키워도 이 높이가 안 나오면 어떻게 배치해도 판독 불가다 — 경고한다.
+IMG_UNREADABLE_HEIGHT_IN = 0.7
+# 한 페이지를 넘기지 않도록 하는 상한
+IMG_MAX_HEIGHT_IN = 7.5
+
 
 def write_docx(
     sections: dict,
@@ -83,6 +95,7 @@ def write_docx(
     section_images: dict | None = None,
     template_path: str | None = None,
     tables: dict | None = None,
+    warnings: list | None = None,
 ) -> str:
     """템플릿 .docx의 플래그를 교체하여 투심보고서를 생성한다.
 
@@ -90,6 +103,8 @@ def write_docx(
         tables: 표 데이터. {"회사정보": {"회사명": "..."}, "핵심인력": [[...]]}
                 tools/tables_fill.py의 TABLE_SPECS 키를 사용한다.
                 생략하면 표는 템플릿 상태 그대로 남는다.
+        warnings: 사람이 손봐야 하는 항목을 담아 돌려줄 리스트 (선택).
+                  로그로만 남기면 아무도 안 보므로 호출자가 사용자에게 전달한다.
     """
     if template_path is None:
         template_path = str(
@@ -126,6 +141,12 @@ def write_docx(
             logger.warning("템플릿에서 못 찾은 표: %s", report["missing_tables"])
         if report["unmatched_labels"]:
             logger.warning("표에서 못 찾은 라벨: %s", report["unmatched_labels"])
+        if report.get("dropped_columns"):
+            logger.warning("표 열 부족으로 버려진 값: %s", report["dropped_columns"])
+            if warnings is not None:
+                warnings.extend(
+                    f"표 열 부족: {k} — {v}" for k, v in report["dropped_columns"].items()
+                )
 
     # 자체 numbering 주입 (템플릿 numId에 의존하지 않음): 불릿 + a) b) c)
     bullet_num_id = _ensure_bullet_num(doc)
@@ -134,6 +155,7 @@ def write_docx(
     # 섹션 내용 교체
     used_images: set[str] = set()
     figure_counter = [0]
+    image_warnings: list[str] = []
 
     for flag, key in FLAG_TO_KEY.items():
         content = sections.get(key, "")
@@ -148,7 +170,20 @@ def write_docx(
             doc, flag, str(content), output_dir, used_images, sec_imgs,
             section_key=key, figure_counter=figure_counter, abc_num_id=abc_num_id,
             company_name=company_name, bullet_num_id=bullet_num_id,
+            image_warnings=image_warnings,
         )
+
+    # 표 레이아웃 정규화 — 반드시 표 채우기·내용 삽입이 끝난 뒤에 한다.
+    # 셀 끝 빈 문단 정리와 부동 표 해제는 채워진 결과에도 적용돼야 한다.
+    layout = normalize_layout(doc)
+    if any(layout.values()):
+        logger.info("표 레이아웃 정규화: %s", layout)
+    for problem in audit_layout(doc):
+        logger.warning("레이아웃 위반 잔존 — %s", problem)
+        if warnings is not None:
+            warnings.append(f"레이아웃: {problem}")
+    if warnings is not None:
+        warnings.extend(f"이미지 판독 불가: {w}" for w in image_warnings)
 
     doc.save(str(output_path))
     return str(output_path.resolve())
@@ -191,12 +226,69 @@ def _replace_in_runs(paragraph, flag: str, replacement: str):
             run.text = new_text if i == 0 else ""
 
 
+def _picture_size(abs_path: Path) -> tuple:
+    """네이티브 비율을 보고 삽입 크기를 정한다.
+
+    고정 폭 5"로 넣으면 가로로 긴 슬라이드(예: 1620×137px 마일스톤 로드맵)가
+    5"×0.42"로 눌려 표 안 글자가 5pt 이하가 된다. 사람이 열어보기 전까지
+    아무도 모르고, 열어봐도 원본을 다시 캡처하는 것 말고는 손쓸 수 없다.
+
+    Returns:
+        (width, height, warning|None) — width/height는 docx.shared.Inches
+    """
+    from docx.image.image import Image as DocxImage
+
+    try:
+        img = DocxImage.from_file(str(abs_path))
+        ratio = img.px_width / img.px_height
+    except Exception:  # 메타데이터를 못 읽으면 기존 동작 유지
+        return Inches(IMG_DEFAULT_WIDTH_IN), None, None
+
+    width = IMG_DEFAULT_WIDTH_IN
+    height = width / ratio
+
+    # 너무 납작하면 본문 폭 한도까지 키운다
+    if height < IMG_MIN_HEIGHT_IN:
+        width = min(TEXT_WIDTH_IN, IMG_MIN_HEIGHT_IN * ratio)
+        height = width / ratio
+
+    # 너무 길면 한 페이지에 맞춘다
+    if height > IMG_MAX_HEIGHT_IN:
+        height = IMG_MAX_HEIGHT_IN
+        width = height * ratio
+
+    width = min(width, TEXT_WIDTH_IN)
+    height = width / ratio
+
+    warning = None
+    if height < IMG_UNREADABLE_HEIGHT_IN:
+        warning = (
+            f"{abs_path.name}: 원본 {img.px_width}×{img.px_height}px는 본문 폭"
+            f"({TEXT_WIDTH_IN}\")에 넣어도 높이 {height:.2f}\"라 글자를 읽을 수 없음. "
+            "원본 슬라이드를 상하 2단으로 잘라 두 장으로 넣을 것"
+        )
+    return Inches(width), Inches(height), warning
+
+
+def _add_picture(paragraph, abs_path: Path):
+    """비율을 지켜 그림을 넣는다. 판독 불가 크기면 경고를 남긴다."""
+    width, height, warning = _picture_size(abs_path)
+    run = paragraph.add_run()
+    if height is None:
+        run.add_picture(str(abs_path), width=width)
+    else:
+        run.add_picture(str(abs_path), width=width, height=height)
+    if warning:
+        logger.warning("이미지 판독 불가 — %s", warning)
+    return warning
+
+
 def _replace_flag_with_content(
     doc, flag: str, content: str, output_dir: Path,
     used_images: set, section_images: list,
     section_key: str = "", figure_counter: list | None = None,
     abc_num_id: int | None = None, company_name: str = "",
-    bullet_num_id: int | None = None,
+    bullet_num_id: int | None = None, image_warnings: list | None = None,
 ):
     """플래그를 markdown 내용으로 교체한다. 헤드라인/불릿은 워드 네이티브 목록으로 만든다."""
     if figure_counter is None:
@@ -256,8 +348,9 @@ def _replace_flag_with_content(
                     if abs_path.exists():
                         p = _get_or_create(doc, paragraph, current_element, first_line)
                         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        run = p.add_run()
-                        run.add_picture(str(abs_path), width=Inches(5))
+                        warn = _add_picture(p, abs_path)
+                        if warn and image_warnings is not None:
+                            image_warnings.append(warn)
                         current_element = p._element
                         first_line = False
                         # 캡션 (Financial Projection은 "{회사}'s Financial Projection" 고정, 그 외 Figure 번호)
@@ -347,8 +440,9 @@ def _replace_flag_with_content(
                     if abs_path.exists():
                         img_p = _new_paragraph_after(doc, current_element)
                         img_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        run = img_p.add_run()
-                        run.add_picture(str(abs_path), width=Inches(5))
+                        warn = _add_picture(img_p, abs_path)
+                        if warn and image_warnings is not None:
+                            image_warnings.append(warn)
                         current_element = img_p._element
                         figure_counter[0] += 1
                         cap_p = _new_paragraph_after(doc, current_element)

@@ -133,47 +133,23 @@ def _auth_suspect() -> str | None:
             f"인증 만료 의심. 맥에서 `claude` 로그인 상태 확인 요망.")
 
 
-def _task_failures() -> list[tuple[str, str]]:
-    """워터마크 격차 기반 — last_attempt 는 전진하는데 last_success 가 주기×N 이상 뒤짐."""
-    from datetime import date as _date
-    from . import cadence, registry, scheduler
-    mult = int((config().get("task_failure") or {}).get("consecutive_periods", 3))
+def _task_failures(state=None) -> list[tuple[str, str]]:
+    """알림 대상 task → (identity, 문구).
+
+    [W9 재설계 Batch B] **판정을 여기서 하지 않는다.** 예전엔 이 함수가 워터마크 격차를
+    직접 계산했고, orrery 는 또 자기대로 계산했다 — 그래서 같은 judge 에 🔴 와 ⚠️ 라는
+    두 답이 나왔다(C-H4). 이제 둘 다 `health.compute()` 하나를 본다.
+
+    부수 효과로 커버리지 구멍도 닫힌다: 예전 필터 `t.runner != "local" and not t.shadow`
+    가 launchd-direct 를 통째로 제외해, **매일 노션에 138행을 착지시키는 appstore-sourcing
+    이 알림 커버리지 0** 이었다(C-M2). health 는 러너와 무관하게 같은 규칙으로 판정한다.
+    """
+    from . import health
+    st = state if state is not None else health.compute()
     out: list[tuple[str, str]] = []
-    for t in registry.load():
-        if not t.scheduled or (t.runner != "local" and not t.shadow):
-            continue
-        wm = scheduler.read_watermark(t)
-        la, ls = wm.get("last_attempt"), wm.get("last_success")
-        if not la:
-            continue                              # 시도 자체가 없음(미배선) — 다이제스트 몫
-        if not ls:
-            # [W9 B-F3] **never-succeeded 클래스** — 예전엔 "회귀만 알린다"며 이 상태를
-            # 온보딩과 같은 통에 넣어 제외했는데, 실측 결과 **매일 시도하고 매일 실패하는
-            # judge 가 영원히 침묵**했다(알림 커버리지 8개 중 2개). 소음을 줄이려다 신호를
-            # 죽인 것. 유예를 넉넉히 주되(기본 주기×N일) 결국은 알린다.
-            first = str(wm.get("first_attempt") or la)[:10]
-            try:
-                days = (_date.today() - _date.fromisoformat(first)).days
-            except ValueError:
-                continue
-            grace = cadence.freshness_limit(t) * mult
-            if days >= grace:
-                out.append((f"never-succeeded-{t.name}",
-                            f"🔴 {t.name}: 배선 후 {days}일간 **한 번도 성공하지 못했다** "
-                            f"(마지막 시도 {la}) — 배선/전제 조건 확인 요망."))
-            continue
-        # [W9] 신선도 한계는 선언(freshness_days) 우선 — orrery 와 같은 함수를 공유
-        limit = cadence.freshness_limit(t)
-        try:
-            la_d = _date.fromisoformat(str(la)[:10])
-            ls_d = _date.fromisoformat(str(ls)[:10])
-        except ValueError:
-            continue
-        behind = (la_d - ls_d).days
-        if behind >= limit * mult:
-            tail = f"성공 {ls or '없음'} · 시도 {la}"
-            out.append((f"task-fail-{t.name}",
-                        f"🔴 {t.name}: 주기×{mult} 이상 연속 실패 의심 ({tail}) — 로그 확인 요망."))
+    for t in st.alertable_tasks():
+        kind = "never-succeeded" if t.status == "never_bad" else "task-fail"
+        out.append((f"{kind}-{t.name}", f"🔴 {t.name}: {t.note}"))
     return out
 
 

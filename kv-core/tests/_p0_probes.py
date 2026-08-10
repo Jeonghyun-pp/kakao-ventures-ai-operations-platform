@@ -15,6 +15,7 @@ os.environ.setdefault("KV_NO_SEND", "1")
 
 import json  # noqa: E402
 import sys  # noqa: E402
+from datetime import date  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 assert os.environ.get("KV_DATA"), "KV_DATA 스크래치 필수"
@@ -186,8 +187,11 @@ for i in range(2):                                 # 미해결 2건 — 더 오�
     (d / "state.json").write_text(json.dumps(
         {"state": "failed", "updated": f"2026-08-05T0{i}:00:00Z"}), encoding="utf-8")
 
-fails = orrery._recent_failures()
-unresolved = [f for f in fails if not f.get("resolved")]
+# [W9 재설계 Batch B] 판정이 orrery → health 로 옮겨갔다. 프로브가 지키는 성질은 그대로다
+# (미해결이 cap 에 잘려 사라지지 않는가) — 호출 지점만 정본을 따라간다.
+from kv_core import health  # noqa: E402
+fails = health._failures(date.today(), [])
+unresolved = [f for f in fails if not f.resolved]
 check("C-1 미해결 2건이 살아남음", len(unresolved) == 2,
       f"미해결 {len(unresolved)}건 / 전체 {len(fails)}건")
 check("C-1 해결건도 cap 안에서 함께 보고됨", len(fails) - len(unresolved) > 0,

@@ -427,13 +427,23 @@ def create_report(
         raise ValueError("company_name과 folder_path가 필요함 (save_section 호출 또는 인자 전달).")
 
     md_path = write_markdown(sections, company_name, folder_path, section_images)
-    docx_path = write_docx(sections, company_name, folder_path, section_images, tables=tables)
+    build_warnings: list[str] = []
+    docx_path = write_docx(
+        sections, company_name, folder_path, section_images,
+        tables=tables, warnings=build_warnings,
+    )
 
     note = ""
     if not tables:
         note = (
             "\n⚠️ 표 데이터가 없어 docx의 표 8개가 비어 있음. "
             "save_tables로 저장한 뒤 다시 생성할 것."
+        )
+    if build_warnings:
+        # 코드가 자동으로 못 고치는 것들이다. 로그로만 남기면 아무도 안 보므로
+        # 반환값에 실어 사용자에게 그대로 전달한다.
+        note += "\n\n⚠️ 사람이 확인해야 하는 항목:\n" + "\n".join(
+            f"  - {w}" for w in build_warnings
         )
     return f"markdown: {md_path}\ndocx: {docx_path}{note}"
 

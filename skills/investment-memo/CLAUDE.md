@@ -67,6 +67,39 @@ FastMCP 기반 진입점. 서버 프로세스 내 전역 상태를 공유하므�
 - `FLAG_TO_KEY` dict이 템플릿 `{{플래그}}` → `sections` key 매핑 정의. 템플릿의 플래그 집합과 정확히 일치해야 함 (`{{회사명}}`·`{{작성일}}`은 단순 치환이라 별도 처리)
 - 워드 네이티브 목록(numbering 자체 주입), `주요 경쟁자` 섹션만 실제 docx 표로 렌더(그 외 표는 텍스트 폴백), Figure 번호 캡션, 작성일 16pt 등 실서식 재현
 - **`투자 포인트` 섹션은 이미지 삽입이 코드 레벨에서 차단됨** (writer.py와 동일 정책)
+- 이미지 크기는 **고정 폭이 아니라 네이티브 비율 기반**(`_picture_size`). 본문 폭
+  6.19" 상한, 최소 높이 0.9" 확보. 그래도 0.7" 미만이면 판독 불가로 보고 경고를
+  `warnings` 리스트에 실어 `create_report` 반환값으로 올린다
+- 생성 마지막에 `normalize_layout(doc)` + `audit_layout(doc)` 실행
+
+**`mcp/tools/ooxml_normalize.py`** — 텍스트를 바꾸지 않는 구조 정규화
+- `unwrap_junk_sdt` — 구글 닥스 `goog_rdk_*` sdt 잔해 제거 (표 채우기 전제조건)
+- `normalize_layout` — 표 레이아웃 4종 일괄 보정. **템플릿 자체가 원인**이라
+  매 산출물에서 재발했다:
+  - `unfloat_tables` — `w:tblpPr` 제거. 템플릿 표 8개 중 **3개**(회사 히스토리·
+    지식재산권·회수방안)가 부동 표라 앞 본문 길이가 바뀔 때마다 본문을 덮었다
+  - `normalize_table_indent` — 420 twip로 통일. 핵심인력 795 / 투자내역 903이
+    본문보다 밀려 보였다
+  - `trim_cell_trailing_empty` — 셀 끝 빈 문단 제거. `vAlign=center`가 걸려
+    있어도 빈 줄까지 포함해 가운데를 잡아 글자가 위에 붙는 증상의 정체
+  - `tighten_cell_bullets` — 셀 안 불릿 ind를 220/220으로
+- `audit_layout` — 정규화 후 잔존 위반 보고
+- `normalize_file(path)` — 파일 제자리 정규화. **화면 텍스트가 한 글자라도
+  달라지면 저장하지 않고 예외.** 사람이 Word로 편집한 뒤 재실행용
+  (Word에서 표를 드래그하면 부동 표 속성이 다시 붙는다)
+
+**`mcp/tools/tables_fill.py`**
+- `TABLE_SPECS[].headers` — 템플릿 헤더가 잘못된 표를 생성 시 교정한다.
+  지식재산권은 `("구분","구분")` 2열로 축퇴되어 출원번호를 넣을 자리가 없었고,
+  투자내역은 `유치 금액(원)` 헤더에 달러 값이 들어간 딜이 있었다
+- `ensure_columns` — 데이터가 표보다 열이 많으면 마지막 셀을 복제해 늘린다.
+  이전에는 초과 열을 **조용히 버렸다**. 못 늘린 경우 `report["dropped_columns"]`로 보고
+
+**`mcp/tools/style_check.py`**
+- 분량 임계값(중앙값 68자 등) + `BANNED` 금지 표현 정규식. 둘 다 `save_section`
+  시점에 검사되어 그 자리에서 고치게 한다
+- `BANNED`에는 **오탐 여지가 없는 패턴만** 넣는다. 한 번이라도 정상 문장을
+  잡으면 이후 모든 경고가 무시된다 (`검증 가능한`, `종합 진단`은 통과해야 함)
 
 ### `create_report`의 유효한 sections key
 

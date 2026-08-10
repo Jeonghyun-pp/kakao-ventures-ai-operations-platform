@@ -23,6 +23,55 @@ MAX_DEPTH = 2                # 하위 불릿 2단계까지 (가이드라인)
 
 BULLET_RE = re.compile(r"^(\s*)[-*]\s+(.*)$")
 
+# 실제 투심 피드백에서 반복 삭제 지시를 받은 표현.
+# 오탐이 나면 룰을 무시하게 되므로, 다른 뜻으로 쓰일 여지가 없는 것만 넣는다.
+# (인물평·표 중복처럼 정규식으로 못 잡는 것은 프롬프트 자기점검표 소관)
+BANNED = [
+    (
+        re.compile(r"검증\s*(됨|완료|필요|예정)|미검증|검증\s*신호"),
+        "error",
+        "검증 라벨(`검증됨`/`미검증`/`검증 예정`/`검증 신호`) — 투심에서 "
+        "\"누가 무엇으로 검증했나\"에 답할 수 없다. 라벨을 빼고 사실과 시점으로 "
+        "쓸 것: `민감도 94% 확인 (2026.04 미팅)`",
+    ),
+    (
+        re.compile(r"^\s*[-*]?\s*\**\s*(종합하면|정리하면|요약하면)"),
+        "error",
+        "요약 문단 — 불릿 구조가 이미 요약이라 같은 말이 두 번 나온다. "
+        "삭제하고, 결론이 필요하면 첫 볼드 헤드라인이 결론이 되게 쓸 것",
+    ),
+    (
+        re.compile(r"Phase\s*\d+\s*[-–—]\s"),
+        "error",
+        "Phase 뒤 하이픈 — 불릿 글머리와 겹쳐 계층이 무너져 보인다. 콜론으로: "
+        "`Phase 1: 국내 진입`",
+    ),
+    (
+        re.compile(r"(단정하기 어려우나|속단하기 이르나|판단하기 이르나)"),
+        "warning",
+        "면피성 유보 — 논지를 스스로 무효화한다. 불확실성은 별도 문단이 아니라 "
+        "해당 주장 옆 괄호 한 줄로",
+    ),
+]
+
+
+def check_banned(content: str) -> tuple[list[str], list[str]]:
+    """금지 표현을 찾는다.
+
+    Returns:
+        (errors, warnings) — 각 항목에 줄 번호와 대체 방법을 담는다
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    for lineno, raw in enumerate(content.split("\n"), start=1):
+        for pattern, severity, fix in BANNED:
+            match = pattern.search(raw)
+            if not match:
+                continue
+            msg = f"L{lineno}: \"{match.group(0).strip()}\" — {fix}"
+            (errors if severity == "error" else warnings).append(msg)
+    return errors, warnings
+
 
 def parse_bullets(content: str) -> list[dict]:
     """마크다운 본문에서 불릿을 뽑는다.
@@ -58,15 +107,15 @@ def check(content: str, section_name: str = "") -> dict:
         {"ok": bool, "errors": [...], "warnings": [...], "stats": {...}}
     """
     bullets = parse_bullets(content)
-    errors: list[str] = []
-    warnings: list[str] = []
+    # 금지 표현은 불릿 유무와 무관하게 검사한다 — 요약 문단은 불릿이 아니다
+    errors, warnings = check_banned(content)
 
     if not bullets:
         return {
-            "ok": True,
-            "errors": [],
-            "warnings": [],
-            "stats": {"불릿수": 0},
+            "ok": not errors,
+            "errors": errors,
+            "warnings": warnings,
+            "stats": {"불릿수": 0, "금지표현": len(errors) + len(warnings)},
         }
 
     lengths = [b["chars"] for b in bullets]
@@ -121,6 +170,10 @@ def check(content: str, section_name: str = "") -> dict:
             "평균": round(st.mean(lengths)),
             "최장": max(lengths),
             "장문비율": round(long_ratio * 100),
+            "금지표현": sum(
+                1 for line in content.split("\n")
+                for pattern, _, _ in BANNED if pattern.search(line)
+            ),
         },
     }
 
@@ -128,13 +181,19 @@ def check(content: str, section_name: str = "") -> dict:
 def format_result(result: dict, section_name: str = "") -> str:
     """검사 결과를 사람이 읽는 형태로."""
     stats = result["stats"]
-    if not stats.get("불릿수"):
+    if not stats.get("불릿수") and not result["errors"] and not result["warnings"]:
         return ""
 
-    lines = [
-        f"📏 문체 검사 — 불릿 {stats['불릿수']}개, 중앙값 {stats['중앙값']}자, "
-        f"{LONG_CHARS}자 초과 {stats['장문비율']}%"
-    ]
+    if stats.get("불릿수"):
+        head = (
+            f"📏 문체 검사 — 불릿 {stats['불릿수']}개, 중앙값 {stats['중앙값']}자, "
+            f"{LONG_CHARS}자 초과 {stats['장문비율']}%"
+        )
+    else:
+        head = "📏 문체 검사"
+    if stats.get("금지표현"):
+        head += f", 금지 표현 {stats['금지표현']}건"
+    lines = [head]
     for msg in result["errors"]:
         lines.append(f"  ❌ {msg}")
     for msg in result["warnings"]:

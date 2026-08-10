@@ -143,8 +143,9 @@ def e4():
     t = Task(name="chaos-wm", skill="_chaos", cadence="daily",
              catch_up="coalesce", watermark="last_success")
     job.atomic_write(scheduler._wm_path(t), '{"last_success": "not-a-date"}')
-    st = orrery._freshness(t, "not-a-date", None, date(2026, 8, 7))
-    notes.append(f"워터마크 파손→{st['status']}")
+    from kv_core import health as _hz      # [W9 Batch B] 판정 정본은 health 하나다
+    st = _hz.compute(now=date(2026, 8, 7), tasks=[t]).tasks[0]
+    notes.append(f"워터마크 파손→{st.icon}")
 
     # (c) 승인 큐 레코드 파손 → 건너뛰고 계속
     (approval._queue_dir() / "broken.json").write_text("{ not json", encoding="utf-8")
@@ -161,7 +162,7 @@ def e4():
     parsed = sum(1 for ln in lines if _is_json(ln))
     notes.append(f"카운터 torn→전 줄 판독 {parsed}/{len(lines)}")
 
-    ok = (len(evs) >= 2 and st["status"] == "⚠️" and parsed == len(lines))
+    ok = (len(evs) >= 2 and st.icon == "⚠️" and parsed == len(lines))
     # 브리핑 전체가 살아있는지 최종 확인
     orrery.gather(with_network=False)
     return ok, " · ".join(notes) + " · 브리핑 크래시 0"

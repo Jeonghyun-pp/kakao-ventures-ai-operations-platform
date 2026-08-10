@@ -218,13 +218,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from . import orrery, secrets
         secrets.load()                              # 웹훅 env
-        d = orrery.gather(with_network=False)       # 발화 컨텍스트에선 외부 조회 생략(빠르게)
-        has_red = any(r["status"] == "🔴" for r in d["tasks"]) or bool(d["failures"])
-        if n_ok > 0 or has_red:
-            sent = orrery.push_slack(d)
+        s = orrery.gather(with_network=False)       # 발화 컨텍스트에선 외부 조회 생략(빠르게)
+        # [W9 C-M1] 게이트는 **state.reds()** 를 본다. 예전엔 `bool(d["failures"])` 였는데
+        # 그 목록은 **해결분 포함 원본**이고 렌더러는 미해결만 표시했다 — 해결된 실패
+        # 3~4건이 7일간 창에 남아 하루 ~6틱마다 다이제스트를 띄우고 내용은 "미해결 0건"
+        # 이었다(alert fatigue). 표시와 게이트가 이제 같은 판단을 공유한다.
+        if n_ok > 0 or s.reds():
+            sent = orrery.push_slack(s)
             if not sent:                            # [A9] 발송 실패도 침묵하지 않는다
                 print("⚠️  다이제스트 발송 실패(웹훅 미설정/네트워크) — 아래 텍스트 폴백:")
-                print(orrery.render_slack(d))
+                print(orrery.render_slack(s))
     except Exception as e:                          # noqa: BLE001
         print(f"⚠️  orrery 다이제스트 실패(실행에는 무영향): {e!r}")
 

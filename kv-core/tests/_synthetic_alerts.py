@@ -79,24 +79,33 @@ check("③ 차단 이벤트 장부 기록", n_events == 2, f"events={n_events}")
 check("③ 발송은 하루 1회(dedup)", len(_sent) == n_before + 1, f"sent+{len(_sent)-n_before}")
 gate._cfg = None
 
-# ④ task 구조적 실패: attempt 전진·success 4일 뒤짐(daily×3 초과) → 발동 / 2일 → 미발동
+# ④ task 구조적 실패 — **신선도 한계 초과** → 발동 / 한계 안 → 미발동
+#
+# [W9 재설계 Batch B] 임계의 의미가 바뀌었다(의도된 변경).
+#   구: `last_attempt - last_success` **격차** ≥ 주기×3     ← alerts 만의 규칙
+#   신: `now - last_success` > `freshness_limit`            ← orrery 와 **같은 규칙**
+# 예전엔 orrery 가 "2일 밀림 = 🔴"이라 그리는 동안 alerts 는 격차 2 < 3 이라 침묵했다.
+# 같은 질문에 두 답이 나오던 지점이고(C-H4 계열), 통합의 대가로 알림이 하루 빨라진다.
+# 지배적 실패 모드가 **가짜 침묵**이었으므로 이 방향이 맞다(유예는 dispatch 정책의 몫).
 from kv_core import scheduler
 from kv_core.registry import Task
 t = Task(name="syn-alert-task", skill="_alerts-syn", cadence="daily",
          catch_up="coalesce", watermark="last_success")
 scheduler.write_watermark(t, {"last_attempt": today.isoformat(),
-                              "last_success": (today - timedelta(days=4)).isoformat()})
+                              "last_success": (today - timedelta(days=4)).isoformat(),
+                              "first_attempt": (today - timedelta(days=9)).isoformat()})
 import kv_core.registry as _reg
 _orig_load = _reg.load
 _reg.load = lambda *a, **k: [t]
 alerts_reg = alerts
 got4 = alerts_reg.scan()
-check("④ 격차 4일(≥3) → task-fail 발동", "task-fail-syn-alert-task" in got4, f"{got4}")
+check("④ 4일 밀림(한계 1일 초과) → task-fail 발동", "task-fail-syn-alert-task" in got4, f"{got4}")
 scheduler.write_watermark(t, {"last_attempt": today.isoformat(),
-                              "last_success": (today - timedelta(days=2)).isoformat()})
+                              "last_success": (today - timedelta(days=1)).isoformat(),
+                              "first_attempt": (today - timedelta(days=9)).isoformat()})
 for m in (paths.data_root() / "_alerts" / "sent").glob("task-fail-*"):
     m.unlink()
-check("④ 격차 2일(<3) → 미발동", "task-fail-syn-alert-task" not in alerts_reg.scan())
+check("④ 1일 경과(한계 안) → 미발동", "task-fail-syn-alert-task" not in alerts_reg.scan())
 _reg.load = _orig_load
 
 # ⑤ push 원자성: 마커 선점 시 notify 0
@@ -192,15 +201,32 @@ check("점검 first_attempt 는 이후 보존(덮어쓰지 않음)",
       wm_fa2.get("first_attempt") == today.isoformat()
       and wm_fa2.get("last_attempt") == (today + timedelta(days=1)).isoformat(), f"{wm_fa2}")
 
-# 구 스키마(first_attempt 없음) 폴백이 **오작동하지 않는지** — 폴백은 안전하게 보수적이어야
+# 구 스키마(first_attempt 없음) — **단언을 뒤집었다.**
+#
+# [W9 리뷰 C-H5] 이 자리에는 "폴백으로 미발동(오탐 0)"이 정답으로 박혀 있었다. 그런데 그
+# "폴백"은 `first_attempt or last_attempt` 였고, `last_attempt` 는 매일 갱신되므로 경과일이
+# **영원히 0**이 된다 — 즉 이 단언은 오탐을 막은 게 아니라 **영구 침묵을 CI 가 보증**하고
+# 있었다. 실제로 judge 는 4일간 매일 실패하면서 알림이 0이었고, 사람이 손으로 워터마크에
+# 값을 넣고서야 울렸다. "테스트가 선언이 아니라 기억을 단언한" 사례다.
+#
+# 지금 health 는 ①잡 디렉토리에서 최초 시도일을 복원하고 ②그것마저 없으면 **모른다는
+# 사실 자체를 알린다**. 침묵보다 한 번의 확인 요청이 싸다.
 t_old = _T(name="syn-oldwm", skill="_alerts-syn", cadence="daily",
            catch_up="coalesce", watermark="last_success")
 scheduler.write_watermark(t_old, {"last_attempt": today.isoformat()})   # first_attempt 없음
 _reg.load = lambda *a, **k: [t_old]
 for m in (paths.data_root() / "_alerts" / "sent").glob("never-*"):
     m.unlink()
-check("점검 구 스키마는 폴백으로 미발동(오탐 0)",
-      not any(i.startswith("never-succeeded") for i in alerts.scan()))
+check("구 스키마(first_attempt 없음)는 침묵하지 않고 알린다",
+      any(i.startswith("never-succeeded") for i in alerts.scan()))
+
+# 그리고 잡 흔적이 있으면 손으로 넣지 않아도 최초 시도일이 복원된다(자기치유)
+from kv_core import health as _hz, job as _job
+_job.create("_alerts-syn", {"x": 1}, "syn-oldwm-2026-07-20")
+st_heal = _hz.compute(tasks=[t_old])
+check("잡 흔적에서 first_attempt 자기치유",
+      st_heal.tasks[0].first_seen == "2026-07-20" and st_heal.tasks[0].first_seen_known,
+      f"first_seen={st_heal.tasks[0].first_seen}")
 _reg.load = _orig_load
 
 # B-F8: identity 위생 — 경로 문자가 있어도 raise 하지 않는다

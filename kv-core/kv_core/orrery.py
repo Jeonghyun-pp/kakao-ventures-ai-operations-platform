@@ -1,322 +1,60 @@
-"""KV-ORRERY — 재진입 브리핑. 관측 평면(observation plane)의 첫 표면. [W7]
+"""KV-ORRERY — 재진입 브리핑. 관측 평면의 첫 표면. [W7 · W9 재설계에서 판정 분리]
+
+## 이 파일이 하는 일 = **렌더링뿐**
+
+W9 이전에는 여기에 판정이 있었다(`_freshness`·`_launchd_direct_health`·`_recent_failures`).
+그래서 alerts 와 답이 갈렸다 — **judge 가 4일째 전멸인데 여기선 ⚠️, alerts 는 🔴**.
+지금 판정은 전부 `kv_core.health.compute()` 하나에 있고, 이 파일은 그 결과를 **그리기만** 한다.
+표면을 추가하려면 렌더러만 늘린다. 판정을 여기 다시 넣으면 이중 진실원이 부활한다.
 
 ## 네 가지 질문에 한 판으로 답한다
 ①뭐 돌았나 ②뭐가 **안** 돌았나(absence) ③뭐 실패했나·격리됐나 ④얼마 썼나(쿼터·$)
 
 ## read-only 관측자
-이 모듈은 **아무것도 쓰지 않는다** — 파일 읽기와 조립뿐. 관측이 상태를 바꾸면 관측이 아니다.
-(유일한 출력은 렌더링: 터미널 텍스트 또는 슬랙 다이제스트 발송 — 상태 변경이 아니라 표면.)
-
-## 진실은 저장하고 뷰는 계산한다 (on-demand derived view)
-원천 = 이미 존재하는 파일들이다. 새 기록을 만들지 않고, 부를 때마다 조립한다(schema-on-read):
-    tasks.yaml                          약속(선언된 cadence·runner)
-    $KV_DATA/<skill>/cadence/*.json     실제(워터마크)         → 약속-실제 diff = 안 벌어진 일
-    $KV_DATA/<skill>/jobs/*/state.json  잡 상태(failed 수색)
-    $KV_DATA/<skill>/dlq/*.jsonl        격리(DLQ)
-    $KV_DATA/_approvals/*.json          승인 대기
-    $KV_DATA/_usage/claude/*.jsonl      claude 콜 미터링
-    ~/kv-data/net-sourcing/last_run_health.json   launchd-direct 잡의 헬스(이종 원천)
-
-## 안 벌어진 일 (absence detection)
-"로그가 없다는 로그는 없다" — 부재는 **선언(cadence)과 워터마크의 차이**로만 잡힌다.
-임계: 지연 > 주기+1일 → 🔴 (W9 stale 감지의 전신 — 여기선 단순 규칙).
+아무것도 쓰지 않는다 — 읽기와 조립뿐(유일한 출력은 렌더링·발송이라는 표면).
 """
 from __future__ import annotations
 
-import json
-from datetime import date, datetime, timezone
-from pathlib import Path
+from datetime import date
 
-from . import cadence, gate, paths, registry, scheduler
-
-try:
-    from . import workers
-    _WIRED: set | None = set(workers.WIRED)
-except Exception as _e:                 # noqa: BLE001
-    # [중간점검 D3] 침묵하면 배선된 task 가 "미배선(정상)" 🔕 로 위장된다 — loud + 미상(None) 구분.
-    print(f"⚠️  orrery: workers 로드 실패 — 배선 상태 미상으로 표시한다: {_e!r}")
-    _WIRED = None
+from . import health
+from .health import SystemState
 
 
-def _utc_today() -> date:
-    return datetime.now(timezone.utc).date()
+def gather(now: date | None = None, *, with_network: bool = True) -> SystemState:
+    """상태 수집 — **판정하지 않는다**. health 에 위임하고 결과를 그대로 돌려준다."""
+    return health.compute(now=now, with_network=with_network)
 
 
-def _ts_to_utc_date(ts: str) -> date:
-    """이종 원천 ts 정규화 — naive(오프셋 없음)면 **KST 로 간주**해 UTC 로 변환.
+# ─────────────────────────── 렌더러 ───────────────────────────
 
-    [중간점검 D4] 헬스 파일 writer 는 naive KST 를 쓰고 orrery 는 UTC now 와 빼서
-    🔴 경보가 하루 늦었다(TZ 경계 사고 계열 3번째). schema-on-read 는 읽는 쪽이 정규화한다.
-    """
-    from datetime import timedelta
-    dt = datetime.fromisoformat(ts)
-    if dt.tzinfo is None:
-        dt = dt - timedelta(hours=9)            # KST → UTC
-        return dt.date()
-    return dt.astimezone(timezone.utc).date()
-
-
-# ─────────────────────────── 조립 (gather — 순수 읽기) ───────────────────────────
-
-def _task_rows(now: date) -> list[dict]:
-    """스케줄 task 별: 약속(cadence) vs 실제(워터마크) → 신선도 판정."""
-    rows: list[dict] = []
-    for t in registry.load():
-        if not t.scheduled:
-            continue
-        row = {"name": t.name, "cadence": t.cadence, "runner": t.runner,
-               "shadow": t.shadow,
-               "wired": (t.name in _WIRED) if _WIRED is not None else None}
-        if t.runner == "launchd-direct":
-            # 스케줄러 밖에서 돎 — 워터마크가 없다. 헬스 파일(있으면)로 신선도 판정(schema-on-read).
-            row.update(_launchd_direct_health(t, now))
-        else:
-            wm = scheduler.read_watermark(t)
-            ls, la = wm.get("last_success"), wm.get("last_attempt")
-            row.update({"last_success": ls, "last_attempt": la,
-                        **_freshness(t, ls, la, now)})
-        rows.append(row)
-    return rows
-
-
-def _wm_of(t) -> dict:
-    """워터마크 읽기(관측 전용) — 파손·부재는 빈 dict."""
-    try:
-        return scheduler.read_watermark(t)
-    except Exception:                            # noqa: BLE001
-        return {}
-
-
-def _freshness(t, last_success: str | None, last_attempt: str | None, now: date) -> dict:
-    gap = cadence.gap_days(t.cadence, where=t.name)
-    if not last_success:
-        if last_attempt:
-            # [W9 Phase0 0-7] 예전엔 여기서 조기 return 하며 ⚠️ 로 고정했다 — judge 가 4일째
-            # 전멸인데 다이제스트 헤더는 🔴0 이었다(alerts 는 🔴 라고 답하는데, C-H4).
-            # 같은 질문에 두 답이 나오면 사람은 더 낙관적인 쪽을 믿는다. 승격 기준을 맞춘다.
-            wm = _wm_of(t)
-            first = str(wm.get("first_attempt") or last_attempt)[:10]
-            try:
-                days = (now - date.fromisoformat(first)).days
-            except ValueError:
-                days = 0
-            limit = cadence.freshness_limit(t)
-            if days >= limit * 3:                 # alerts._task_failures 와 같은 기준
-                return {"status": "🔴",
-                        "note": f"배선 후 {days}일간 성공 0 (한계 {limit}일×3 초과) — 확인 요망"}
-            return {"status": "⚠️", "note": f"시도는 있으나 성공 0 ({days}일째) — 로그 확인"}
-        if _WIRED is None:                       # [D3] workers 로드 실패 — 미상을 정상으로 위장 금지
-            return {"status": "⚠️", "note": "배선 상태 미상(workers 로드 실패) — 로그 확인"}
-        if t.name not in _WIRED and t.runner == "local":
-            return {"status": "🔕", "note": "러너 미배선(워터마크 없음이 정상)"}
-        return {"status": "⚠️", "note": "가동 이력 없음"}
-    try:
-        last = date.fromisoformat(last_success[:10])
-    except ValueError:                           # [D2] 파손 1개가 브리핑 전체를 못 죽인다
-        return {"status": "⚠️", "note": f"워터마크 파손(last_success={last_success!r}) — 파일 확인"}
-    late = (now - last).days
-    # [W9] 신선도 한계는 선언(freshness_days) 우선 — 관측·알림이 같은 함수를 공유(D9 유예 규칙 포함)
-    limit = cadence.freshness_limit(t)
-    if late > limit:
-        return {"status": "🔴", "note": f"{late}일 밀림 (신선도 한계 {limit}일 초과)"}
-    if late > gap:
-        return {"status": "⚠️", "note": f"{late}일 경과 (주기 {gap}일)"}
-    return {"status": "✅", "note": f"{late}일 전 성공"}
-
-
-def _launchd_direct_health(t, now: date) -> dict:
-    p = paths.data_root() / t.skill / "last_run_health.json"
-    if not p.exists():
-        return {"status": "⚠️", "note": "헬스 파일 없음(관측 불가)", "last_success": None}
-    try:
-        h = json.loads(p.read_text(encoding="utf-8"))
-        raw_ts = str(h.get("ts", ""))
-        if not raw_ts:                            # [D10] 매직넘버 99 대신 정직한 부재 표기
-            return {"status": "⚠️", "note": "헬스 ts 없음(관측 불가)", "last_success": None}
-        d_utc = _ts_to_utc_date(raw_ts)           # [D4] naive KST → UTC 정규화
-        late = (now - d_utc).days
-        ok = bool(h.get("ok"))
-        gap = cadence.gap_days(t.cadence, where=t.name)   # [D10] cadence 선언 사용(하드코딩 제거)
-        grace = 0 if gap <= 1 else 1
-        if not ok:
-            status = "⚠️" if late <= gap else "🔴"
-        else:
-            status = "✅" if late <= gap else ("⚠️" if late <= gap + max(grace, 1) else "🔴")
-        note = f"{late}일 전 {'정상' if ok else '저하(degraded)'} (plist 직접 실행)"
-        return {"status": status, "note": note, "last_success": d_utc.isoformat() if ok else None}
-    except (json.JSONDecodeError, ValueError, OSError):
-        return {"status": "⚠️", "note": "헬스 파일 파손", "last_success": None}
-
-
-_ATTEMPT_RE = __import__("re").compile(r"-r\d+$")
-
-
-def _job_base(job_id: str) -> str:
-    """attempt-suffix 제거 — `judge-2026-08-06-r2` → `judge-2026-08-06`."""
-    return _ATTEMPT_RE.sub("", job_id)
-
-
-def _recent_failures(days: int = 7, cap: int = 10, unresolved_cap: int = 50) -> list[dict]:
-    """최근 failed 잡 — state.json mtime 기준 최근 N일만 훑는다(전량 스캔 회피).
-
-    [W9] **해결 여부**를 함께 판정한다. 실측(8/7)에서 다이제스트가 매일 "실패 4건"이라
-    알렸는데 실제 미해결은 0건이었다 — 전부 나중 attempt(-r2)가 성공했거나 수정 전 잔재.
-    거짓 경보가 반복되면 진짜 실패가 묻힌다(alert fatigue). 해결 판정 두 갈래:
-      ① 같은 base job_id 의 다른 attempt 가 completed  ② 그 task 의 last_success ≥ 실패 시각
-    """
-    rows: list[dict] = []
-    completed_bases: set[tuple[str, str]] = set()      # (skill, base) — 성공한 attempt 보유
-    cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
-    root = paths.data_root()
-    if not root.exists():
-        return rows
-    for sp in sorted(root.glob("*/jobs/*/state.json")):
-        skill, jid = sp.parts[-4], sp.parts[-2]
-        try:
-            if sp.stat().st_mtime < cutoff:
-                continue
-            st = json.loads(sp.read_text(encoding="utf-8"))
-            state = st.get("state")
-            if state == "completed":
-                completed_bases.add((skill, _job_base(jid)))
-            elif state == "failed":
-                rows.append({"skill": skill, "job": jid, "ts": st.get("updated", ""),
-                             "broken": False})
-        except (json.JSONDecodeError, OSError):
-            # [D8] 파손은 ts="" 로 정렬 맨 뒤 — '파손' 문자열이 유니코드 정렬로 최신 자리를
-            # 무기한 점유하던 것 정정. 표기는 렌더러가 broken 플래그로 한다.
-            rows.append({"skill": skill, "job": jid, "ts": "", "broken": True})
-
-    # task 별 last_success 수집(워터마크) — 실패 이후 성공했으면 그 실패는 해결된 것
-    last_ok: dict[str, str] = {}
-    for t in registry.load():
-        if not t.scheduled:
-            continue
-        ls = scheduler.read_watermark(t).get("last_success")
-        if ls:
-            last_ok[f"{t.skill}/{t.name}"] = str(ls)[:10]
-
-    for r in rows:
-        base = _job_base(r["job"])
-        resolved = (r["skill"], base) in completed_bases
-        if not resolved and r["ts"]:
-            # job_id 가 `<task>-<날짜>` 관례라 task 명을 앞에서 뽑는다(날짜 10자 + 하이픈)
-            task = base[:-11] if len(base) > 11 and base[-11] == "-" else base
-            ls = last_ok.get(f"{r['skill']}/{task}")
-            resolved = bool(ls and ls >= str(r["ts"])[:10])
-        r["resolved"] = resolved
-    rows.sort(key=lambda r: str(r["ts"]), reverse=True)
-
-    # [W9 Phase0 0-8] cap 을 **미해결/해결 분리 후** 각각 적용한다.
-    # 예전엔 정렬 직후 `rows[:cap]` 이었다 — 해결된 실패가 더 최신이면 상위 10칸을 채우고
-    # 미해결 2건이 잘려 다이제스트가 "미해결 0건"이라 답했다(C-H1). 오늘 넣은 resolved 강등이
-    # **잘라내기보다 뒤에** 있었던 순서 오류다. 미해결은 소음이 아니므로 넉넉히 남긴다.
-    unresolved = [r for r in rows if not r["resolved"]]
-    resolved = [r for r in rows if r["resolved"]]
-    dropped = len(unresolved) - unresolved_cap
-    if dropped > 0:
-        print(f"⚠️  orrery: 미해결 실패 {len(unresolved)}건 중 {dropped}건 생략(cap {unresolved_cap})")
-    return unresolved[:unresolved_cap] + resolved[:cap]
-
-
-def _dlq_summary() -> list[dict]:
-    out = []
-    for p in sorted(paths.data_root().glob("*/dlq/*.jsonl")):
-        try:
-            n = sum(1 for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip())
-        except OSError:
-            n = -1
-        out.append({"skill": p.parts[-3], "file": p.name, "count": n})
-    return out
-
-
-def _approvals() -> list[dict]:
-    """[D6] 정본 필터 재사용 — approval.pending() 은 sent 를 거른다. 전 파일 나열은
-    감사 기록(영구 보존)까지 '대기'로 세어 단조 증가하는 거짓 백로그였다."""
-    if not (paths.data_root() / "_approvals").exists():
-        return []                                # 큐 자체가 없으면 pending() 을 안 부른다 —
-                                                 # pending()의 _queue_dir 가 mkdir 부작용을 가짐(read-only 보호)
-    try:
-        from . import approval
-        # [W8] key 표기 정정(레코드 필드는 dedup_key 가 아니라 key) + decision 라벨 포함
-        return [{"key": r.get("key", "?"), "kind": r.get("kind", "?"),
-                 "task": r.get("task", "?"), "status": r.get("status", "?"),
-                 "decision": r.get("decision"), "draft_id": r.get("draft_id")}
-                for r in approval.pending()]
-    except Exception as e:                       # noqa: BLE001
-        print(f"⚠️  orrery: 승인 큐 조회 실패 — {e!r}")
-        return []
-
-
-def _alerts_today() -> list[str]:
-    """오늘(UTC) 발송된 즉시 알림 identity — 마커 디렉토리 읽기(존재 확인 먼저, read-only)."""
-    d = paths.data_root() / "_alerts" / "sent"
-    if not d.exists():
-        return []
-    today = _utc_today().isoformat()
-    return sorted(p.name[: -len(today) - 1] for p in d.glob(f"*-{today}"))
-
-
-def _cost(*, with_network: bool = True) -> dict:
-    rc = (gate.config().get("claude") or {})
-    claude = {"calls": gate.calls_today("claude"),
-              "warn": rc.get("daily_calls_warn"), "block": rc.get("daily_calls_block")}
-    apify: dict = {"available": False}
-    if with_network:
-        try:
-            v = gate.check("apify", quiet=True)
-            apify = {"available": v.used_usd is not None, "used": v.used_usd,
-                     "ceiling": v.ceiling_usd}
-        except Exception as e:         # noqa: BLE001  브리핑은 네트워크 장애에도 죽지 않는다
-            print(f"⚠️  orrery: apify 조회 실패 — {e!r}")   # [D12] 삼킨 예외도 한 줄은 남긴다
-    return {"claude": claude, "apify": apify}
-
-
-def gather(now: date | None = None, *, with_network: bool = True) -> dict:
-    now = now or _utc_today()
-    log = paths.data_root() / "_scheduler" / "launchd.log"
-    try:                               # [D11] exists→stat 사이 삭제 내성
-        last_touch = (datetime.fromtimestamp(log.stat().st_mtime, tz=timezone.utc)
-                      .isoformat(timespec="minutes"))
-    except OSError:
-        last_touch = None
-    return {"now": now.isoformat(), "log_last_touch": last_touch,
-            "tasks": _task_rows(now), "failures": _recent_failures(),
-            "dlq": _dlq_summary(), "approvals": _approvals(),
-            "alerts_today": _alerts_today(),
-            "cost": _cost(with_network=with_network)}
-
-
-# ─────────────────────────── 렌더러 (조립과 분리 — 표면 추가는 여기만) ───────────────────────────
-
-def render_text(d: dict) -> str:
+def render_text(s: SystemState) -> str:
     L: list[str] = []
     # [D11] mtime 은 "발화 성공"이 아니라 "로그가 마지막으로 자란 시각"(실패·수동 kickstart 포함)
-    L.append(f"╔═ KV-ORRERY 재진입 브리핑 · {d['now']} (UTC) "
-             f"· 로그 마지막 갱신 {d['log_last_touch'] or '기록 없음'}")
+    L.append(f"╔═ KV-ORRERY 재진입 브리핑 · {s.now.isoformat()} (UTC) "
+             f"· 로그 마지막 갱신 {s.log_last_touch or '기록 없음'}")
     L.append("║")
     L.append("║ ── 약속 vs 실제 (안 벌어진 일 감지) ──")
-    for r in d["tasks"]:
+    for t in s.tasks:
         # [T7] shadow 는 로컬 검증 신호일 뿐 — primary(GH) 건강이 아님을 표기에 박는다
-        tag = " [shadow-local]" if r.get("shadow") else ""
-        note = r["note"] + (" · primary(GH) 관측 없음" if r.get("shadow") else "")
-        tail = f"(last_success={r.get('last_success')})" if r.get("last_success") else ""
-        L.append(f"║  {r['status']} {r['name']:18} {r['cadence']:9}{tag:15} {note} {tail}")
+        tag = " [shadow-local]" if t.shadow else ""
+        note = t.note + (" · primary(GH) 관측 없음" if t.shadow else "")
+        tail = f"(last_success={t.last_success})" if t.last_success else ""
+        L.append(f"║  {t.icon} {t.name:18} {(t.cadence or '-'):9}{tag:15} {note} {tail}")
     L.append("║")
-    # [W9] 미해결만 🔴 — 해결분(나중 attempt 성공·이후 last_success)은 요약 1줄로 강등
-    fails = d["failures"]
-    unresolved = [f for f in fails if not f.get("resolved")]
-    resolved_n = len(fails) - len(unresolved)
-    L.append(f"║ ── 실패 잡 (최근 7일, 미해결 {len(unresolved)}건"
+    # 미해결만 🔴 — 해결분(나중 attempt 성공·이후 last_success)은 요약 1줄로 강등
+    un = s.unresolved_failures
+    resolved_n = len(s.failures) - len(un)
+    L.append(f"║ ── 실패 잡 (최근 7일, 미해결 {len(un)}건"
              + (f" · 해결됨 {resolved_n}건" if resolved_n else "") + ") ──")
-    for f in unresolved[:5]:
-        ts = "state 파손" if f.get("broken") else str(f["ts"])[:16]
-        L.append(f"║  🔴 {f['skill']}/{f['job']}  ({ts})")
-    if not unresolved:
+    for f in un[:5]:
+        ts = "state 파손" if f.broken else str(f.ts)[:16]
+        L.append(f"║  🔴 {f.skill}/{f.job}  ({ts})")
+    if not un:
         L.append("║  (미해결 없음)")
     # [D5] 파손(-1)은 합산에서 제외하고 별도 표기 — 센티널을 산술에 섞지 않는다
-    dlq_ok = [q for q in d["dlq"] if q["count"] > 0]
-    dlq_broken = [q for q in d["dlq"] if q["count"] < 0]
+    dlq_ok = [q for q in s.dlq if q["count"] > 0]
+    dlq_broken = [q for q in s.dlq if q["count"] < 0]
     L.append(f"║ ── DLQ 격리 ({sum(q['count'] for q in dlq_ok)}건"
              + (f" · 파손 파일 {len(dlq_broken)}개" if dlq_broken else "") + ") ──")
     for q in dlq_ok:
@@ -325,73 +63,74 @@ def render_text(d: dict) -> str:
         L.append(f"║  🔴 {q['skill']}/{q['file']}: 읽기 실패(파손)")
     if not dlq_ok and not dlq_broken:
         L.append("║  (없음)")
-    ap = d["approvals"]
-    und = [a for a in ap if a.get("decision") is None]
-    apv = [a for a in ap if a.get("decision") == "approved"]
-    apv_wait = [a for a in apv if a.get("kind") == "mail" and not a.get("draft_id")]
-    rej = [a for a in ap if a.get("decision") == "rejected"]
-    L.append(f"║ ── 승인 큐 (⏳미결 {len(und)} · ✅승인 {len(apv)}"
-             f"{f'(실행대기 {len(apv_wait)})' if apv_wait else ''} · ❌거부 {len(rej)}) ──")
-    for a in und[:5]:
-        L.append(f"║  ⏳ [{a['kind']}] {a['task']} · {a['key']}")
-    if not ap:
+    # [A-M6] 오늘 벌어진 일을 표면에 남긴다 — 예전엔 pending() 기반이라 거부·실행완료가
+    # 관측에서 통째로 사라졌고 `❌거부` 는 어떤 입력에도 0인 죽은 카운터였다.
+    ap = s.approvals
+    td = ap.get("today", {})
+    L.append(f"║ ── 승인 큐 (⏳미결 {ap.get('undecided', 0)}"
+             f" · 실행대기 {ap.get('approved_pending_exec', 0)}"
+             f" · 오늘 ✅{td.get('approved', 0)} ❌{td.get('rejected', 0)}"
+             f" 📤{td.get('executed', 0)} · 누적 {ap.get('total', 0)}) ──")
+    for row in ap.get("undecided_rows", []):
+        L.append(f"║  ⏳ [{row['kind']}] {row['task']} · {row['key']}")
+    if not ap.get("total"):
         L.append("║  (없음)")
-    al = d.get("alerts_today") or []
-    if al:
-        L.append(f"║ ── 오늘 즉시 알림 ({len(al)}건) ── {' · '.join(al[:4])}")
-    c = d["cost"]
-    cl = c["claude"]
+    if s.alerts_today:
+        L.append(f"║ ── 오늘 즉시 알림 ({len(s.alerts_today)}건) ── "
+                 f"{' · '.join(s.alerts_today[:4])}")
+    cl = s.costs["claude"]
     warn = "미설정" if cl["warn"] is None else cl["warn"]
     block = "미설정" if cl["block"] is None else cl["block"]
     L.append("║ ── 비용·쿼터 ──")
     # [D12] 창 기준 명시 — "오늘"은 UTC 일 단위(KST 09시에 리셋)
     L.append(f"║  claude: 오늘 {cl['calls']}콜 (경고 {warn} · 차단 {block}) — UTC 일 단위·KST 09시 리셋")
-    if c["apify"].get("available"):
-        L.append(f"║  apify : ${c['apify']['used']:.2f} / ${c['apify']['ceiling']:.0f}")
+    ap_cost = s.costs["apify"]
+    if ap_cost.get("available"):
+        L.append(f"║  apify : ${ap_cost['used']:.2f} / ${ap_cost['ceiling']:.0f}")
     else:
         L.append("║  apify : 조회 불가(토큰 없음/오프라인)")
     L.append("╚═")
     return "\n".join(L)
 
 
-def render_slack(d: dict) -> str:
+def render_slack(s: SystemState) -> str:
     """슬랙 다이제스트 — 몇 줄 요약. 문제 없으면 짧게, 있으면 문제부터."""
-    bad = [r for r in d["tasks"] if r["status"] == "🔴"]
-    warn = [r for r in d["tasks"] if r["status"] == "⚠️"]
-    ok = [r for r in d["tasks"] if r["status"] == "✅"]
-    fails, ap = d["failures"], d["approvals"]
-    dlq_n = sum(q["count"] for q in d["dlq"] if q["count"] > 0)
-    cl = d["cost"]["claude"]
+    bad = [t for t in s.tasks if t.icon == "🔴"]
+    warn = [t for t in s.tasks if t.icon == "⚠️"]
+    ok = [t for t in s.tasks if t.icon == "✅"]
+    dlq_n = sum(q["count"] for q in s.dlq if q["count"] > 0)
+    cl = s.costs["claude"]
 
-    L = [f"*KV-ORRERY* {d['now']} — ✅{len(ok)} ⚠️{len(warn)} 🔴{len(bad)}"]
-    for r in bad:
-        tag = "[shadow-local] " if r.get("shadow") else ""     # [T7] 컷오버 판단 오염 방지
-        L.append(f"🔴 {tag}{r['name']}: {r['note']}")
-    for r in warn:
-        tag = "[shadow-local] " if r.get("shadow") else ""
-        L.append(f"⚠️ {tag}{r['name']}: {r['note']}")
-    unresolved = [f for f in fails if not f.get("resolved")]   # [W9] 미해결만 알린다
-    if unresolved:
-        recent = next((f for f in unresolved if not f.get("broken")), unresolved[0])
-        L.append(f"🔴 미해결 실패 잡 {len(unresolved)}건 (최근: {recent['skill']}/{recent['job']})")
-    dlq_broken = [q for q in d["dlq"] if q["count"] < 0]
+    L = [f"*KV-ORRERY* {s.now.isoformat()} — ✅{len(ok)} ⚠️{len(warn)} 🔴{len(bad)}"]
+    for t in bad + warn:
+        tag = "[shadow-local] " if t.shadow else ""     # [T7] 컷오버 판단 오염 방지
+        L.append(f"{t.icon} {tag}{t.name}: {t.note}")
+    un = s.unresolved_failures
+    if un:
+        recent = next((f for f in un if not f.broken), un[0])
+        L.append(f"🔴 미해결 실패 잡 {len(un)}건 (최근: {recent.skill}/{recent.job})")
+    dlq_broken = [q for q in s.dlq if q["count"] < 0]
     if dlq_n:
         L.append(f"⚠️ DLQ 격리 {dlq_n}건")
-    if dlq_broken:                                             # [D5] 슬랙에서도 파손 은닉 금지
+    if dlq_broken:                                      # [D5] 슬랙에서도 파손 은닉 금지
         L.append(f"🔴 DLQ 파일 파손 {len(dlq_broken)}개")
-    und_n = sum(1 for a in ap if a.get("decision") is None)
-    if und_n:
-        L.append(f"⏳ 승인 대기 {und_n}건 — ✅/❌ 이모지로 결정")
+    ap = s.approvals
+    if ap.get("undecided"):
+        L.append(f"⏳ 승인 대기 {ap['undecided']}건 — ✅/❌ 이모지로 결정")
+    td = ap.get("today", {})
+    if any(td.values()):
+        L.append(f"오늘 승인 ✅{td.get('approved', 0)} ❌{td.get('rejected', 0)} "
+                 f"📤{td.get('executed', 0)}")
     block = "미설정" if cl["block"] is None else cl["block"]
     L.append(f"claude {cl['calls']}콜/일 (차단 {block}, UTC 기준)")
     return "\n".join(L)
 
 
-def push_slack(d: dict | None = None) -> bool:
+def push_slack(s: SystemState | None = None) -> bool:
     """다이제스트 발송 — 실패해도 파이프라인을 죽이지 않는다(notify 규약)."""
     from . import notify
-    d = d or gather()
-    return notify.slack(render_slack(d))
+    s = s if s is not None else gather()
+    return notify.slack(render_slack(s))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -402,14 +141,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     from . import secrets
     secrets.load()                     # APIFY_TOKEN·웹훅 — 읽기용
-    d = gather(with_network=not args.no_net)
+    s = gather(with_network=not args.no_net)
     if args.slack:
-        ok = push_slack(d)
+        ok = push_slack(s)
         print("슬랙 발송 " + ("✅" if ok else "실패(웹훅 미설정?) — 아래 텍스트로 대체:"))
         if not ok:
-            print(render_text(d))
+            print(render_text(s))
         return 0
-    print(render_text(d))
+    print(render_text(s))
     return 0
 
 

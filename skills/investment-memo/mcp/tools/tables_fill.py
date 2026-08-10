@@ -37,6 +37,12 @@ HEADING_TO_KEY = {
 
 # 표 식별 서명과 채우기 방식.
 # signature: 표에 반드시 존재해야 하는 라벨들. 하나라도 없으면 다른 표로 본다.
+#
+# headers: 지정하면 헤더 행을 이 값으로 덮어쓰고, 열 수가 모자라면 열을 늘린다.
+#   템플릿 헤더가 잘못된 표가 있다 —
+#   · 지식재산권: ("구분","구분")으로 축퇴되어 출원번호를 넣을 자리가 없었다
+#   · 투자내역: "유치 금액(원)"인데 실제 값이 달러인 딜이 있어 헤더와 값이 어긋났다
+#     (원화를 전제하지 않는 "유치 금액"으로 두고 통화는 값에 붙인다)
 TABLE_SPECS = [
     {
         "key": "회사정보",
@@ -62,6 +68,7 @@ TABLE_SPECS = [
         "key": "투자내역",
         "signature": ("날짜", "유치 금액(원)", "주당단가", "참여 투자자"),
         "mode": "grid",
+        "headers": ("날짜", "유치 금액", "주당단가", "참여 투자자"),
     },
     {
         "key": "주요경쟁자",
@@ -74,6 +81,9 @@ TABLE_SPECS = [
         "key": "지식재산권",
         "signature": (),
         "mode": "grid",
+        # 출원번호가 없으면 심사 자리에서 "이거 실제로 출원된 건 맞나"를 못 답한다.
+        # 번호를 먼저 두어 식별자 → 명칭 → 상태 순으로 읽히게 한다.
+        "headers": ("구분", "출원번호", "지식재산권명", "상태"),
     },
     {
         "key": "회수방안",
@@ -253,16 +263,125 @@ def _unmerge_vertical(table, header_rows: int) -> int:
     return removed
 
 
-def fill_grid(table, rows: list, fill_cell, header_rows: int = 1) -> int:
+def _table_width(table) -> int:
+    """표 전체 폭(twip)을 반환한다. 없으면 본문 폭을 가정한다."""
+    grid = table._tbl.find(qn("w:tblGrid"))
+    if grid is not None:
+        total = 0
+        for col in grid.findall(qn("w:gridCol")):
+            try:
+                total += int(col.get(qn("w:w")) or 0)
+            except ValueError:
+                pass
+        if total:
+            return total
+    return 9026  # A4 세로 기준 본문 폭
+
+
+def _set_grid(table, ncols: int) -> None:
+    """열 폭을 균등 분할해 tblGrid와 각 셀의 tcW를 다시 쓴다."""
+    from docx.oxml import OxmlElement
+
+    total = _table_width(table)
+    each = total // ncols
+    widths = [each] * ncols
+    widths[-1] = total - each * (ncols - 1)  # 반올림 오차를 마지막 열에 몰아준다
+
+    grid = table._tbl.find(qn("w:tblGrid"))
+    if grid is not None:
+        table._tbl.remove(grid)
+    grid = OxmlElement("w:tblGrid")
+    for w in widths:
+        col = OxmlElement("w:gridCol")
+        col.set(qn("w:w"), str(w))
+        grid.append(col)
+    # tblGrid는 tblPr 바로 뒤에 와야 한다
+    pr = table._tbl.find(qn("w:tblPr"))
+    if pr is not None:
+        pr.addnext(grid)
+    else:
+        table._tbl.insert(0, grid)
+
+    for tr in table._tbl.findall(qn("w:tr")):
+        for i, tc in enumerate(tr.findall(qn("w:tc"))):
+            if i >= ncols:
+                break
+            tc_pr = tc.find(qn("w:tcPr"))
+            if tc_pr is None:
+                tc_pr = OxmlElement("w:tcPr")
+                tc.insert(0, tc_pr)
+            for old in tc_pr.findall(qn("w:tcW")):
+                tc_pr.remove(old)
+            tcw = OxmlElement("w:tcW")
+            tcw.set(qn("w:w"), str(widths[i]))
+            tcw.set(qn("w:type"), "dxa")
+            tc_pr.insert(0, tcw)
+
+
+def ensure_columns(table, ncols: int) -> int:
+    """표의 열 수를 ncols로 맞춘다 (늘리기만 한다).
+
+    템플릿 표가 데이터보다 열이 적으면 fill_grid가 초과 열을 **조용히 버린다.**
+    지식재산권 표가 2열이라 출원번호를 넣을 자리가 없던 것이 그 예다.
+    마지막 셀을 복제해 늘리므로 테두리·음영·폰트가 그대로 따라온다.
+
+    Returns:
+        추가한 열 수
+    """
+    current = max(
+        (len(tr.findall(qn("w:tc"))) for tr in table._tbl.findall(qn("w:tr"))),
+        default=0,
+    )
+    if current == 0 or current >= ncols:
+        return 0
+
+    for tr in table._tbl.findall(qn("w:tr")):
+        cells = tr.findall(qn("w:tc"))
+        if not cells:
+            continue
+        for _ in range(ncols - len(cells)):
+            clone = copy.deepcopy(cells[-1])
+            # 복제 셀의 내용은 비운다 — 값이 아니라 서식만 물려받아야 한다
+            for p in clone.findall(qn("w:p"))[1:]:
+                clone.remove(p)
+            first = clone.find(qn("w:p"))
+            if first is not None:
+                for r in first.findall(qn("w:r")):
+                    first.remove(r)
+            # 가로 병합이 걸려 있으면 새 열이 먹히지 않는다
+            tc_pr = clone.find(qn("w:tcPr"))
+            if tc_pr is not None:
+                for span in tc_pr.findall(qn("w:gridSpan")):
+                    tc_pr.remove(span)
+            tr.append(clone)
+
+    _set_grid(table, ncols)
+    return ncols - current
+
+
+def fill_grid(
+    table, rows: list, fill_cell, header_rows: int = 1, headers: tuple | None = None
+) -> int:
     """헤더 아래 데이터 행을 rows로 교체한다.
 
     행이 모자라면 마지막 데이터 행을 복제해 늘리고, 남으면 비운다.
+    headers를 주면 헤더 행을 덮어쓰고, 필요하면 열도 늘린다.
 
     Returns:
         채운 데이터 행 수
     """
     if not rows:
         return 0
+
+    need = max(len(headers or ()), max((len(r) for r in rows), default=0))
+    if need:
+        ensure_columns(table, need)
+
+    if headers and header_rows:
+        head_cells = _distinct_cells(table.rows[0])
+        for ci, label in enumerate(headers):
+            if ci < len(head_cells):
+                fill_cell(head_cells[ci], str(label))
 
     ncols = len(table.columns)
 
@@ -304,7 +423,10 @@ def fill_tables(document, data: dict, fill_cell) -> dict:
         {"filled": {키: 설명}, "missing_tables": [...], "unmatched_labels": {...}}
     """
     tables = identify_tables(document)
-    report = {"filled": {}, "missing_tables": [], "unmatched_labels": {}}
+    report = {
+        "filled": {}, "missing_tables": [], "unmatched_labels": {},
+        "dropped_columns": {},
+    }
 
     for key, payload in data.items():
         if not payload:
@@ -325,7 +447,13 @@ def fill_tables(document, data: dict, fill_cell) -> dict:
             if unmatched:
                 report["unmatched_labels"][key] = unmatched
         else:
-            count = fill_grid(table, payload, fill_cell)
+            count = fill_grid(table, payload, fill_cell, headers=spec.get("headers"))
             report["filled"][key] = f"{count}행"
+            widest = max((len(r) for r in payload), default=0)
+            if widest > len(table.columns):
+                report["dropped_columns"][key] = (
+                    f"데이터 {widest}열 → 표 {len(table.columns)}열, "
+                    f"{widest - len(table.columns)}열이 버려짐"
+                )
 
     return report

@@ -122,38 +122,38 @@ check("R2 first_attempt 결측 워터마크에서 never-succeeded 발동",
       "never-succeeded-judge" in fired, f"발동={sorted(fired)}")
 
 # ── R1. 관측과 알림이 같은 답을 내는가 (C-H4 회귀 잠금) ──
-d = orrery.gather(now=TODAY, with_network=False)
-rows = {r["name"]: r for r in d["tasks"]}
-judge_red = rows.get("judge", {}).get("status") == "🔴"
+st = orrery.gather(now=TODAY, with_network=False)
+rows = {t.name: t for t in st.tasks}
+judge_red = rows["judge"].icon == "🔴" if "judge" in rows else False
 judge_alert = "never-succeeded-judge" in fired
 check("R1 judge: 관측🔴 ↔ 알림 발동이 일치", judge_red == judge_alert,
-      f"orrery={rows.get('judge', {}).get('status')} · alerts발동={judge_alert}")
+      f"orrery={rows['judge'].icon if 'judge' in rows else '?'} · alerts발동={judge_alert}")
 
-# 전 task 에 대해 일반화 — 알림이 울리는데 관측이 ✅ 이면 그게 이중 진실원이다
+# 전 task 에 대해 일반화 — 알림이 울리는데 관측이 ✅ 이면 그게 이중 진실원이다.
+# **판정이 한 곳이면 이 리스트는 구조적으로 빌 수밖에 없다** — 그게 이 단언의 의미다.
 contradictions = []
-for ident, _ in alerts._task_failures():
-    name = ident.split("-", 2)[-1] if ident.startswith("never-succeeded-") else ident.replace("task-fail-", "")
+for ident, _ in alerts._task_failures(st):
+    name = (ident.replace("never-succeeded-", "") if ident.startswith("never-succeeded-")
+            else ident.replace("task-fail-", ""))
     row = rows.get(name)
-    if row and row["status"] == "✅":
+    if row and row.icon == "✅":
         contradictions.append(f"{name}(관측✅·알림🔴)")
 check("R1 알림🔴 인데 관측✅ 인 task 0건", not contradictions, str(contradictions))
 
 # ── R3. 구 스키마 승인 레코드를 미결로 해석하는가 ──
-ap = d["approvals"]
-old = [a for a in ap if a.get("key") == "old-schema"]
-check("R3 구 스키마 레코드를 미결로 해석", len(old) == 1 and old[0].get("decision") is None,
-      f"{len(old)}건")
+check("R3 구 스키마 레코드를 미결로 해석",
+      st.approvals["undecided"] == 1 and st.approvals["total"] == 1,
+      str(st.approvals))
 
 # ── R4. 파손 1개가 전체를 죽이지 않는가 ──
-check("R4 파손 승인 레코드가 있어도 브리핑 조립 성공", isinstance(d.get("tasks"), list))
+check("R4 파손 승인 레코드가 있어도 브리핑 조립 성공", isinstance(st.tasks, list))
 check("R4 파손 잡 상태가 실패 목록에 broken 으로 남음",
-      any(f.get("broken") for f in d["failures"]), str(d["failures"]))
-txt = orrery.render_text(d)
+      any(f.broken for f in st.failures), str(st.failures))
+txt = orrery.render_text(st)
 check("R4 렌더까지 완주", "KV-ORRERY" in txt and len(txt) > 200)
 
 # ── R5. read-only 계약 ──
 before = _tree_digest(_SCRATCH)
-orrery.gather(now=TODAY, with_network=False)
 orrery.render_slack(orrery.gather(now=TODAY, with_network=False))
 after = _tree_digest(_SCRATCH)
 check("R5 gather/render 가 데이터를 변경하지 않음", before == after)
@@ -176,21 +176,21 @@ else:
             shutil.copy2(sub, dst)
     print(f"  · 복사 완료: {sum(1 for _ in _SCRATCH.rglob('*'))} 항목")
 
-    d = orrery.gather(with_network=False)
-    rows = {r["name"]: r for r in d["tasks"]}
-    fired = {ident for ident, _ in alerts._task_failures()}
-    print(f"  · 실 상태: " + " ".join(f"{n}{r['status']}" for n, r in rows.items()))
+    st = orrery.gather(with_network=False)
+    rows = {t.name: t for t in st.tasks}
+    fired = {ident for ident, _ in alerts._task_failures(st)}
+    print("  · 실 상태: " + " ".join(f"{n}{t.icon}" for n, t in rows.items()))
     print(f"  · 알림 발동: {sorted(fired) or '없음'}")
 
     contradictions = []
-    for ident, _ in alerts._task_failures():
+    for ident, _ in alerts._task_failures(st):
         name = (ident.replace("never-succeeded-", "") if ident.startswith("never-succeeded-")
                 else ident.replace("task-fail-", ""))
         row = rows.get(name)
-        if row and row["status"] == "✅":
+        if row and row.icon == "✅":
             contradictions.append(f"{name}(관측✅·알림🔴)")
     check("실데이터: 알림🔴 인데 관측✅ 인 task 0건", not contradictions, str(contradictions))
-    check("실데이터: 브리핑 렌더 완주", "KV-ORRERY" in orrery.render_text(d))
+    check("실데이터: 브리핑 렌더 완주", "KV-ORRERY" in orrery.render_text(st))
     check("실데이터: 원본 ~/kv-data 무변경", _tree_digest(REAL) == real_before)
 
 # ══════════════════════════════════════════════════════════════════════
