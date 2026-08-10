@@ -283,6 +283,17 @@ def _from_auth(state) -> list[tuple[str, str]]:
     return []
 
 
+def _from_scheduler(state) -> list[tuple[str, str]]:
+    """[C-H6] 스케줄러 정지 — **10분 틱이 알린다**(스케줄러 자신이 아니라).
+
+    이 신호가 없으면 스케줄러 정지의 MTTD 는 "사람이 요즘 조용하네 할 때까지"였다.
+    """
+    sc = state.scheduler or {}
+    if not sc.get("silent"):
+        return []
+    return [("scheduler-silent", f"🔴 {sc.get('note')}")]
+
+
 def _from_events(today: date) -> list[tuple[str, str]]:
     """오늘 관측된 사실 → 알림 후보. **kind 를 가리지 않는다.**
 
@@ -339,6 +350,7 @@ def dispatch(state=None, *, today: date | None = None) -> list[str]:
     if state is not None:
         candidates += _try("from_state", _from_state, state) or []
         candidates += _try("from_auth", _from_auth, state) or []
+        candidates += _try("from_scheduler", _from_scheduler, state) or []
     candidates += _try("from_events", _from_events, today) or []
 
     active = {ident for ident, _ in candidates}

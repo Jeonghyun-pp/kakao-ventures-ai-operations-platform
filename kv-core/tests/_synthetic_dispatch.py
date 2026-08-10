@@ -97,6 +97,38 @@ check("④ 82파일 → 성공(경고)", workers.run_appstore_snapshot(app_t, NO
 _fill(40)
 check("④ 40파일 → 실패", workers.run_appstore_snapshot(app_t, NOW) is False)
 
+# [W9 재설계 Batch E · R5] **진공과 결손을 가른다**
+# 실환경 증상: 7006(카지노) 유료 차트가 8/4 부터 매일 `[]` — 한국 스토어에 원래 없는
+# 차트라 그게 애플의 정답인데, 구 판정은 "비어있지 않은 배열만 유효"라 83/84 로 세어
+# **매일 부분결손 경보**를 쐈다. 빈 배열은 잘 형성된 응답이고 0바이트·절단은 아니다.
+for f in snap.glob("appstore_board_*.json"):
+    f.unlink()
+for i in range(84):
+    body = "[]" if i == 7 else '["app1","app2"]'      # 1개만 정당하게 빈 차트
+    (snap / f"appstore_board_{i}_top-free_{date.today().isoformat()}.json").write_text(body)
+check("④ 진공: 정당하게 빈 차트 1개는 결손이 아니다(경보 없이 성공)",
+      workers.run_appstore_snapshot(app_t, NOW) is True)
+n_v, rows_v, empty_v = workers._board_files_today()
+check("④ 진공: 빈 차트를 온전한 것으로 세되 목록으로 남긴다",
+      n_v == 84 and len(empty_v) == 1, f"온전 {n_v} · 빈 {empty_v}")
+
+# 반대 방향 — **전량 진공은 결손이다**(규칙 05 를 집계 수준에서 지킨다)
+for f in snap.glob("appstore_board_*.json"):
+    f.unlink()
+for i in range(84):
+    (snap / f"appstore_board_{i}_top-free_{date.today().isoformat()}.json").write_text("[]")
+check("④ 전량 진공은 실패 처리(수집 고장)",
+      workers.run_appstore_snapshot(app_t, NOW) is False)
+
+# 0바이트·절단은 여전히 무효 — T4 보호가 약해지지 않았는지 확인
+for f in snap.glob("appstore_board_*.json"):
+    f.unlink()
+for i in range(84):
+    body = "" if i < 10 else '["app1","app2"]'
+    (snap / f"appstore_board_{i}_top-free_{date.today().isoformat()}.json").write_text(body)
+n_t4, _, _ = workers._board_files_today()
+check("④ T4 보호 유지: 0바이트는 온전한 것으로 세지 않는다", n_t4 == 74, f"온전 {n_t4}(74 기대)")
+
 print()
 if FAIL:
     print(f"❌ 실패: {FAIL}")

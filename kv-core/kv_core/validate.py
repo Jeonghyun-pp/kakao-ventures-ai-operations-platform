@@ -141,14 +141,45 @@ def validate_records(
     return ok, bad
 
 
+# DLQ 회전 임계 — 넘으면 `.1` 로 밀고 새로 시작한다(보관 1세대). [W9 C-M6]
+_DLQ_MAX_BYTES = 5 * 1024 * 1024
+_DLQ_MAX_RECORD = 20_000        # 한 항목이 이 이상이면 원문을 잘라 담는다
+
+
 def _dlq_append(dlq_path: Path, entries: list[dict]) -> None:
-    """DLQ 는 **append(jsonl)** — 덮어쓰면 지난 회차 격리분이 유실된다(리뷰 W5-med)."""
+    """DLQ 는 **append(jsonl)** — 덮어쓰면 지난 회차 격리분이 유실된다(리뷰 W5-med).
+
+    [W9 C-M6] 다만 회전이 없으면 무한히 자란다. `validate_text` 는 파싱 실패 시 **claude
+    원문 전체**를 덤프하므로 하루치가 100KB 를 넘고, meeting-mail 이 halt→quarantine 으로
+    바뀌면서 깨진 출력이 파이프라인을 세우지 않고 계속 쌓이게 됐다(성장률 증가).
+    그리고 관측자가 매 브리핑마다 이 파일을 통째로 읽는다 — 커질수록 관측이 느려진다.
+
+    두 가지로 막는다: ①항목 하나가 지나치게 크면 원문을 잘라 담고 ②파일이 임계를 넘으면
+    한 세대만 남기고 회전한다. **격리 기록 자체를 지우지는 않는다**(조용한 삭제 금지).
+    """
     from datetime import datetime, timezone
     dlq_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if dlq_path.exists() and dlq_path.stat().st_size >= _DLQ_MAX_BYTES:
+            rotated = dlq_path.with_suffix(dlq_path.suffix + ".1")
+            rotated.unlink(missing_ok=True)
+            dlq_path.rename(rotated)
+            print(f"⚠️  DLQ 회전: {dlq_path.name} → {rotated.name} (임계 {_DLQ_MAX_BYTES//1024//1024}MB)")
+    except OSError as e:                              # 회전 실패가 격리 기록을 막으면 안 된다
+        print(f"⚠️  DLQ 회전 실패(기록은 계속): {e!r}")
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with open(dlq_path, "a", encoding="utf-8") as f:
         for e in entries:
-            f.write(json.dumps({"ts": ts, **e}, ensure_ascii=False) + "\n")
+            line = json.dumps({"ts": ts, **e}, ensure_ascii=False)
+            if len(line) > _DLQ_MAX_RECORD:
+                # 원문을 통째로 담아 파일을 폭발시키지 않는다 — 진단에 필요한 앞부분만.
+                e = dict(e)
+                if isinstance(e.get("record"), dict) and isinstance(e["record"].get("raw"), str):
+                    e["record"] = dict(e["record"], raw=e["record"]["raw"][:4000] + "…(잘림)")
+                elif isinstance(e.get("raw"), str):
+                    e["raw"] = e["raw"][:4000] + "…(잘림)"
+                line = json.dumps({"ts": ts, "truncated": True, **e}, ensure_ascii=False)[:_DLQ_MAX_RECORD]
+            f.write(line + "\n")
 
 
 def validate_text(

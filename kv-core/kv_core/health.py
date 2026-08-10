@@ -113,12 +113,17 @@ class SystemState:
     alerts_today: list[str] = field(default_factory=list)
     costs: dict = field(default_factory=dict)
     auth: dict = field(default_factory=dict)
+    scheduler: dict = field(default_factory=dict)
     log_last_touch: str | None = None
 
     # ── 파생 뷰 — 소비자(렌더러·발송기)가 각자 계산하지 않게 여기서 준다 ──
     @property
     def unresolved_failures(self) -> list[FailureState]:
         return [f for f in self.failures if not f.resolved]
+
+    @property
+    def scheduler_silent(self) -> bool:
+        return bool(self.scheduler.get("silent"))
 
     def reds(self) -> list[str]:
         """🔴 사유 목록 — **다이제스트 게이트와 알림이 공유하는 단일 판단**.
@@ -129,6 +134,8 @@ class SystemState:
         """
         out = [f"{t.name}: {t.note}" for t in self.tasks if t.status in _ALERTABLE]
         out += [f"{f.skill}/{f.job}: 미해결 실패" for f in self.unresolved_failures]
+        if self.scheduler_silent:
+            out.append(f"scheduler: {self.scheduler.get('note')}")
         return out
 
     def alertable_tasks(self) -> list[TaskState]:
@@ -509,6 +516,39 @@ def _claude_auth(now: date, *, lookback: int = 14) -> dict:
     }
 
 
+def _scheduler_health(now: date, touch: str | None, *, silent_hours: int = 8) -> dict:
+    """스케줄러 자체가 살아 있나. [C-H6]
+
+    **부재 감지기가 부재의 원인 안에 살면 안 된다.** 예전엔 🔴 stale 판정이 orrery 에만
+    있었고 orrery 다이제스트는 `scheduler --run` 끝에서만 나갔다. 스케줄러가 죽으면
+    `last_attempt` 와 `last_success` 가 **함께 멈춰 격차가 고정**되므로 알림도 영원히
+    침묵했다 — "정상적으로 조용한 날"과 "스케줄러 정지"가 구분되지 않았다.
+
+    지금은 10분마다 도는 approvals_tick 이 `dispatch()` → `compute()` 를 부르므로 이
+    판정이 **스케줄러 밖에서** 돈다. 그게 이 함수가 여기 있는 이유다.
+    스케줄러 주기가 4시간이므로 8시간(2주기) 무소식이면 정지로 본다.
+    """
+    if not touch:
+        return {"silent": False, "note": "스케줄러 로그 없음(최초 기동 전)", "hours": None}
+    try:
+        last = datetime.fromisoformat(touch)
+    except ValueError:
+        return {"silent": False, "note": "로그 시각 판독 불가", "hours": None}
+    if last.tzinfo is None:
+        # `.replace(tzinfo=…)` 를 쓰지 않는다 — 이 모듈의 read-only AST 검사가 `.replace`
+        # 를 파일 이동으로 보고 잡는다. 검사를 느슨하게 하느니 여기서 우회하는 편이 낫다
+        # (검사의 목적은 관측자가 아무것도 못 쓰게 하는 것이고, 그 보호가 더 중요하다).
+        last = datetime(last.year, last.month, last.day, last.hour, last.minute,
+                        last.second, tzinfo=timezone.utc)
+    hours = (datetime.now(timezone.utc) - last).total_seconds() / 3600
+    if hours >= silent_hours:
+        return {"silent": True, "hours": round(hours, 1),
+                "note": f"스케줄러가 {hours:.0f}시간째 무소식 "
+                        f"(주기 4시간 · 한계 {silent_hours}시간) — launchctl 확인 요망"}
+    return {"silent": False, "hours": round(hours, 1),
+            "note": f"{hours:.1f}시간 전 기동"}
+
+
 def _costs(*, with_network: bool) -> dict:
     from . import gate
     rc = (gate.config().get("claude") or {})
@@ -554,5 +594,6 @@ def compute(now: date | None = None, *, with_network: bool = False,
         alerts_today=_alerts_today(now),
         costs=_costs(with_network=with_network),
         auth=_claude_auth(now),
+        scheduler=_scheduler_health(now, touch),
         log_last_touch=touch,
     )

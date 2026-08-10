@@ -322,13 +322,41 @@ class heavy_slot:
             os.close(self.fd)
         self.path.unlink(missing_ok=True)
 
+    # 락이 이 시간을 넘기면 pid 가 살아 있어도 회수한다. [W9 A-L13]
+    # heavy 잡의 최장 런타임(judge 3시간)보다 넉넉히 위. 유령 락으로 시스템이 영구
+    # 정지하는 것보다, 아주 드물게 이중 실행을 감수하는 편이 낫다 — 이중 실행은
+    # 멱등 설계가 흡수하지만 영구 정지는 아무도 모른다(A-H3·A-H4 가 그 실증이었다).
+    MAX_HOLD_SEC = 6 * 3600
+
     def _stale(self) -> bool:
-        """락 파일의 pid 가 이미 죽었으면 stale — 회수 가능."""
+        """회수 가능한 락인가 — pid 생존 **그리고** 나이를 함께 본다.
+
+        [W9 A-L13] pid 만 보면 두 가지가 샌다.
+          ① 빈 락파일(O_EXCL 성공 후 write 전 찰나)을 제3자가 보면 `int("")` → 0 → stale
+             로 판정해 **정당한 락을 뺏는다**. 생성 직후 몇 초는 보호한다.
+          ② 맥 슬립·SIGKILL 로 죽은 뒤 그 pid 가 **재사용**되면 영원히 not-stale 이다.
+             그러면 모든 진입이 SlotBusy 로 조용히 물러난다(A-H3 실증: decide 영구 no-op).
+        """
         try:
-            pid = int(self.path.read_text().strip() or "0")
-        except (ValueError, OSError):
+            age = time.time() - self.path.stat().st_mtime
+        except OSError:
+            return True
+        try:
+            raw = self.path.read_text().strip()
+        except OSError:
+            return True
+        if not raw:
+            # ① 쓰기 전 찰나 — 아주 최근이면 정당한 락으로 본다.
+            return age > 5
+        try:
+            pid = int(raw)
+        except ValueError:
             return True
         if pid <= 0:
+            return True
+        if age > self.MAX_HOLD_SEC:
+            # ② pid 재사용 방어 — 이만큼 오래 잡고 있는 정상 잡은 없다.
+            print(f"⚠️  락 {self.path.name} 이 {age/3600:.1f}시간째 — 유령 락으로 보고 회수한다")
             return True
         try:
             os.kill(pid, 0)      # 신호 0 = 존재 확인만
