@@ -177,10 +177,15 @@ def append_event(kind: str, **meta) -> None:
     d.mkdir(parents=True, exist_ok=True)
     # [자기리뷰 F4] 일자별 파일 — 단일 파일은 회전이 없어 무한히 자라고, 읽는 쪽이 매 틱
     # 전량 read_text 를 한다. 날짜로 나누면 tail 도 전량 읽기도 필요 없어진다.
-    p = d / f"events-{datetime.now(timezone.utc).date().isoformat()}.jsonl"
+    # 파일은 **그 이벤트의 시각**으로 이름 짓는다. 예전엔 벽시계 오늘로 지었는데, 읽는 쪽
+    # (`_from_events`)은 주입된 `today` 기준으로 파일을 고르므로 둘이 어긋났다 —
+    # UTC 자정이 넘어가는 순간 방금 기록한 사실을 못 찾는다(날짜가 바뀌며 실제로 드러났다).
+    # 쓰는 쪽과 읽는 쪽이 같은 기준을 쓰게 한다.
+    ts = str(meta.pop("ts", "") or datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    day = ts[:10] if len(ts) >= 10 else datetime.now(timezone.utc).date().isoformat()
+    p = d / f"events-{day}.jsonl"
     _repair_torn_tail(p)
-    line = json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                       "kind": kind, **meta}, ensure_ascii=False)
+    line = json.dumps({"ts": ts, "kind": kind, **meta}, ensure_ascii=False)
     with open(p, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
@@ -473,7 +478,7 @@ def _from_events(today: date, *, lookback_days: int = 2,
             except json.JSONDecodeError:
                 continue
             ts = str(e.get("ts", ""))
-            if ts[:10] < cutoff:                 # 필터 먼저
+            if not (cutoff <= ts[:10] <= today.isoformat()):   # 창 [cutoff, today] — 위아래 모두
                 continue
             ident, text = e.get("identity"), e.get("text")
             if ident and text:
