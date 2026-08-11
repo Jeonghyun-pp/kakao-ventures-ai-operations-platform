@@ -78,7 +78,21 @@ def _targets(cfg: dict, channel: str, include_base: bool) -> list[tuple[str, str
             raise SystemExit(f"🔴 모르는 채널 '{channel}' — 가능: {sorted(_CHANNEL_BY_KEY.values())}")
         out.append((_CHANNEL_BY_KEY.get(key, key), str(m[key]).split("://", 1)[-1]))
     else:
+        # [2026-08-11] **판정 대상 채널은 선언으로 정한다** (`config.judge.channels`).
+        #
+        # 파일럿 실측이 앱스토어를 빼야 할 이유를 셋 보여줬다:
+        #   ① 판정 결과를 **읽는 코드가 없다** — meeting-mail 은 "Tier 칸 없음"으로 명시 제외하고,
+        #      다른 소비자도 없다. 노션에 쓰고 아무도 안 읽는 값에 claude 콜을 태우고 있었다.
+        #   ② 판정할 재료가 없다 — 앱 메타데이터뿐이라 **팀 신호를 원리적으로 못 본다**.
+        #      극초기 DB 831건 실측에서 팀이 지배 축(Catch 83% 칸)인데 그 축이 통째로 빠진다.
+        #   ③ 그래서 recall 우선 원칙이 그대로 새어 나온다 — Pass 27.8%(주 135건, 목표의 9배)이고
+        #      그중 31%가 확신이 아니라 "애매해서 살린 것"이었다.
+        # 결정 #5 "앱스토어는 판단 없는 보드"가 애초에 옳았고, 실측이 그걸 사후 정당화했다.
+        # 앱스토어 순위 관측은 `appstore-rank` 스킬과 board.py 가 이미 따로 한다.
+        allow = (cfg.get("judge") or {}).get("channels")
         for key, raw in m.items():
+            if allow is not None and key not in allow:
+                continue
             db = str(raw).split("://", 1)[-1]
             if db and not db.endswith("TODO"):
                 out.append((_CHANNEL_BY_KEY.get(key, key), db))
