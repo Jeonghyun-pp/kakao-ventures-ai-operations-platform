@@ -80,9 +80,11 @@
   covers: [그물망]
   status: done
   notes: |
-    GH Actions 는 은퇴 전 **1주 백업 병행**(~2026-08-14) — 섀도의 역방향(reverse shadow: 구가 신을 백업).
-    저장소 분리(GH=data 브랜치 · 로컬=~/kv-data)라 규칙 01(신·구 병행 금지) 위반 아님.
-    은퇴 절차: .github/workflows/appstore-snapshot.yml 의 schedule 제거(수동 dispatch 만 남김).
+    ✅ [2026-08-11] GH Actions **은퇴 완료** — schedule 제거, 수동 dispatch 만 남김.
+    1주 백업 병행(2026-08-07~08-11, 역방향 섀도: 구가 신을 백업) 동안 로컬이 매일 84/84 성공.
+    저장소 분리(GH=data 브랜치 · 로컬=~/kv-data)라 병행 중에도 규칙 01 위반 아니었다.
+    되돌리려면 그 파일의 schedule 주석을 풀면 된다 — 코드 변경 0.
+    이제 이 task 의 유일한 실행 주체는 로컬 launchd com.kv.scheduler 다.
 
 - name: appstore-sourcing    # [W6] 카탈로그 등재 — 실행 주체는 기존 plist(스케줄러 불관여)
   skill: net-sourcing
