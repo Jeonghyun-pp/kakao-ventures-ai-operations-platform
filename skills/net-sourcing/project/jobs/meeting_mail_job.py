@@ -140,6 +140,12 @@ def s_collect_catch(skill: str, job_id: str) -> None:
                     "reason": notion._plain(p.get("AI Reason")),
                     "headline": notion._plain(p.get("Author Headline")),
                     "raw_text": (notion._plain(p.get("Raw Text")) or "")[:2000],
+                    # [2026-08-11] 연락처 단서 — core/contact.resolve 가 이 필드들을 본다.
+                    # 수집 시점에 이미 있는 것만 담는다(추가 조회 없음).
+                    "homepage": (p.get("Homepage") or {}).get("url") or "",
+                    "linkedin_url": (p.get("LinkedIn URL") or {}).get("url") or "",
+                    "author_username": notion._plain(p.get("Author Username")),
+                    "career": (notion._plain(p.get("대표 콘텐츠")) or "")[:1500],
                 })
             if not d.get("has_more") or not d.get("next_cursor"):   # [C-L12] 가드 통일
                 break
@@ -221,7 +227,18 @@ def s_draft(skill: str, job_id: str) -> None:
             print(f"⚠️  {c.get('name')}({c['page_id'][:8]}): 계약 위반 {len(bad)}건 → DLQ 격리")
             job.append_event(skill, job_id, "draft_rejected", page_id=c["page_id"])
         for rec in ok[:1]:                 # [C-L17] 후보당 1건만 채택(LLM 이 2건 내면 첫 건)
-            rec["to"] = RECIPIENT          # ★ 수신자는 코드가 결정한다 — LLM 출력 불신
+            # ★ 수신자는 코드가 결정한다 — LLM 출력 불신.
+            # [2026-08-11] 연락처를 해석해 **닿는 방법**을 함께 싣는다.
+            # 이메일을 찾았어도 `to` 는 여전히 RECIPIENT(hello@) 다 — 자동 발송은 W10 이고,
+            # 그 전까지 초안이 창업자에게 바로 나가는 주소를 갖고 있으면 사람이 실수로
+            # 보낼 수 있다. 찾은 주소는 `founder_email` 로 **따로** 실어 사람이 확인 후 쓴다.
+            from core import contact
+            c = contact.resolve(c_row := c, crawl=True)
+            rec["to"] = RECIPIENT
+            rec["contact_channel"] = c.channel
+            rec["founder_email"] = c.email or ""
+            rec["contact_handle"] = c.handle or ""
+            rec["contact_source"] = c.source
             rec["page_id"] = c["page_id"]
             rec["name"] = c["name"]
             with open(dpath, "a", encoding="utf-8") as f:      # 후보 단위 커서

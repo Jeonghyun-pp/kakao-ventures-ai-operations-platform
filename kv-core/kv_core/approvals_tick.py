@@ -63,8 +63,25 @@ def _card(r: dict) -> str:
     full = (p.get("body") or p.get("text") or "")
     body = full[:200]
     more = f"  …외 {len(full) - 200}자" if len(full) > 200 else ""
+
+    # [2026-08-11] **닿는 방법을 카드에 드러낸다.**
+    # 극초기 창업자는 공개 이메일이 드물어(실측 3~5%) 대부분 DM 으로 가야 한다.
+    # 그 사실이 카드에 없으면 사람이 ✅ 를 눌러 Gmail 초안을 만들고 나서야
+    # "보낼 주소가 없네"를 알게 된다 — 승인 게이트가 헛도는 것이다.
+    ch = p.get("contact_channel") or ""
+    line = ""
+    if ch == "email" and p.get("founder_email"):
+        line = f"📧 창업자 메일: {p['founder_email']}  ({p.get('contact_source', '')})\n"
+    elif ch in ("linkedin_dm", "threads_dm"):
+        where = "링크드인" if ch == "linkedin_dm" else "스레드"
+        line = (f"💬 **공개 이메일 없음 → {where} DM 으로 보내야 함**\n"
+                f"    대상: {p.get('contact_handle', '-')}\n")
+    elif ch == "none":
+        line = "⚠️ **연락 수단을 못 찾았다** — 사람이 직접 찾아야 한다\n"
+
     return (f"⏳ 승인요청 [{r.get('kind')}] `{r['key']}` ({r.get('task')})\n"
             f"To: {p.get('to', '-')} · Subject: {p.get('subject', '-')}\n"
+            f"{line}"
             f"{body}{more}\n"
             f"전문: `python -m kv_core.approval show {r['key']}`\n"
             f"✅ 승인 · ❌ 거부 (이 메시지에 이모지)")
