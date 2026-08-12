@@ -100,6 +100,25 @@
   status: done
   notes: main.py run --channel appstore ($0·수집→노션 착지 138행/일). 스케줄러 이관은 appstore-snapshot 컷오버 검증 후 검토.
 
+- name: bplan-score              # [W11] 비플랜 1차 스크리닝 — 미판정 행 → claude → 노션 `점수`
+  skill: mail-harness
+  kind: routine
+  cadence: daily
+  catch_up: coalesce
+  watermark: last_success
+  resources: [claude, notion-bplan]
+  stages: [criteria-gate, export, score-apply]
+  origin: system
+  covers: [비플랜]
+  status: partial
+  notes: |
+    🔴 **안전선: `점수`·`포워드 이유`·`fwd to whom?` 만 쓴다. `To do` 를 안 건드린다.**
+    드랍 메일 초안은 `To do == To Drop AND 드랍메일 == False` 인 행에만 생기므로
+    (bplan/main.py:query_to_drop_pages), 판정이 틀려도 하류가 한 칸도 안 움직인다.
+    `_assert_safe_patch()` 가 기입 직전에 강제하고 --synthetic 이 회귀를 잠근다.
+    정확도가 전량-Red 기준선(73%)을 못 넘은 상태다(tools/bplan_backtest.py) — 그래서
+    돌리되 하류는 사람이 연다. 매일 산출물이 보여야 기준을 깎을 재료가 생긴다.
+
 - name: mail-triage
   skill: mail-harness
   kind: routine
@@ -124,7 +143,11 @@
   origin: system                     # 접수는 시스템 시작 · 드랍/후속은 approval 호출시 partner 로 override
   covers: [비플랜]
   status: partial
-  notes: sync/drop ✅ · scoring(judge-bplan)·후속미팅 🔴 · A1 외부 커서(watermark_reader)
+  notes: |
+    sync/drop ✅(자체 plist) · 후속미팅 🔴 · A1 외부 커서(watermark_reader)
+    scoring 은 **별도 task `bplan-score`** 로 분리했다(2026-08-12 W11) — sync/deliver 는
+    mail-harness 자체 plist 가 돌리고 판정만 kv-core 스케줄러가 돌린다. 한 이름에 두 러너를
+    묶으면 어느 쪽이 실패했는지 워터마크가 구분하지 못한다.
 
 # ── 온디맨드 task ──
 - name: investment-memo

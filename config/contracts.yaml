@@ -30,6 +30,23 @@ judge-tier:
     reason:    {type: str, required: false, nonempty: true}
     one_liner: {type: str, required: false, nonempty: true}
 
+# ── 비플랜 1차 스크리닝 (노션 '점수' select 기입 = 가역) ── [W11 신규]
+# 정답지가 있는 유일한 판정이다 — 판정 완료 499건이 노션에 있어 **노션에 쓰기 전에**
+# 백테스트로 정확도를 잴 수 있다(tools/bplan_backtest.py). 그물망 judge 엔 없던 자산.
+#
+# `score` enum 은 라이브 스키마(`점수` select)에서 온 값이다. 최종 권위는 행별 `allowed`.
+#   `?` = 미채점 — 도메인 라우팅한 건에 쓴다. **빈칸으로 두면 안 된다**: 빈칸은
+#   "아직 판정 안 함"과 구별되지 않아 다음 회차 큐에 영원히 다시 들어온다
+#   (그물망에서 컷 값이 없어 `is_empty` 에 매주 재순환하던 것과 같은 함정).
+bplan-score:
+  on_invalid: quarantine          # 판정 기입은 select 덮어쓰기 = 가역
+  min_records: 1                  # 대상을 넣고 0건이면 계통 장애(인증 만료·형식 붕괴)
+  schema:
+    page_id: {type: str, required: true, nonempty: true}
+    score:   {type: str, required: true, enum: ["칼드랍", "Red", "Orange", "Green", "?"]}
+    fwd:     {type: str, required: false, enum: ["ReviewerTwo", "ReviewerOne", "zero", ""]}
+    reason:  {type: str, required: false, nonempty: true}
+
 # ── 앱스토어 판정 (노션 '판정' select = 가역) ── [W6 신규]
 judge-appstore:
   on_invalid: quarantine

@@ -24,6 +24,7 @@ from . import paths
 from .registry import Task
 
 _PROJ = paths.repo_root() / "skills" / "net-sourcing" / "project"
+_MAIL_PROJ = paths.repo_root() / "skills" / "mail-harness" / "project"
 _PY = paths.repo_root() / ".venv" / "bin" / "python"
 
 
@@ -146,7 +147,26 @@ def run_meeting_mail(task: Task, period: date) -> bool:
     return rc == 0
 
 
+# ─────────────────────────── bplan-score ───────────────────────────
+
+def run_bplan_score(task: Task, period: date) -> bool:
+    """[W11] 비플랜 1차 스크리닝. **`점수` 만 쓴다 — `To do` 는 안 건드린다.**
+
+    그래서 판정이 틀려도 드랍 메일 경로가 안 열린다(사람이 To do 를 옮겨야 열린다).
+    타임아웃 30분: 미판정 행이 하루 수십 건 규모라 배치 몇 개면 끝난다.
+    """
+    print(f"▶ bplan-score ({period}) — jobs/bplan_score_job.py")
+    try:
+        rc = subprocess.run([str(_PY), "jobs/bplan_score_job.py"],
+                            cwd=_MAIL_PROJ, timeout=1800, check=False).returncode
+    except subprocess.TimeoutExpired:
+        print("🔴 bplan-score: 30분 timeout — 실패 처리")
+        return False
+    return rc == 0
+
+
 WIRED: dict[str, Runner] = {
+    "bplan-score": run_bplan_score,
     "appstore-snapshot": run_appstore_snapshot,
     "judge": run_judge,
     "meeting-mail": run_meeting_mail,
