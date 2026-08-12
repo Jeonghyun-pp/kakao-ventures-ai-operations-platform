@@ -71,7 +71,13 @@ def classify(msgs: list[dict], cfg: dict) -> dict[str, dict]:
         return {}
     fallback = {m["id"]: {"category": rules.UNKNOWN, "reason": "LLM 미사용 — 사람 확인 필요"}
                 for m in msgs}
-    if not cfg.get("llm", {}).get("enabled", True) or not available():
+    # 🔴 [2026-08-13] 기본값이 `True` 였다 — **설정을 잃으면 켜지는** fail-open 이었다.
+    #    `llm:` 블록이 사라지거나 키 이름이 바뀌면 상한 없는 Anthropic API 패스가 열린다.
+    #    같은 리포의 net-sourcing 은 `enabled, False` 로 이미 fail-closed 다(core/judge.py:77) —
+    #    같은 결정의 두 구현이 반대 방향으로 기본값을 잡고 있었다.
+    #    ADR 0003 은 이 경로를 **은퇴 대상**으로 선언했다. 진짜 은퇴(파일 삭제 + session.py 재배선)
+    #    전까지의 최소 조치로 fail-closed 로 뒤집는다.
+    if not cfg.get("llm", {}).get("enabled", False) or not available():
         return fallback
 
     payload = [

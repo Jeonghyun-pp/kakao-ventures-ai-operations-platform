@@ -16,6 +16,7 @@ mail-harness 는 아무도 안 봤다. 그래서 2026-08-12 에 mail-harness 를
     O3  자동화 잡이 노션 위험 칸을 쓰지 않는다
     O4  자율성 설정이 발송을 끈 상태다
     O5  🔴 컷오버 전 HARD-GATE — 스케줄러가 apply·sync·drop 을 부르지 않는다
+    O6  🔴 ADR 0003 — 은퇴 대상 API 경로의 잠금이 fail-closed 다
 
 실행: KV_DATA=<스크래치> python kv-core/tests/_synthetic_outbound.py
 파일을 읽기만 한다 — 네트워크·프로세스 0.
@@ -212,6 +213,40 @@ _gate_doc = (_REPO / "skills/mail-harness/SKILL.md").read_text(encoding="utf-8")
 check("O5 HARD-GATE 선언이 문서에 살아 있다",
       "HARD-GATE" in _gate_doc and "컷오버" in _gate_doc,
       "게이트를 해제할 땐 이 테스트의 허용 목록도 함께 넓혀야 한다")
+
+print("\n=== O6: 은퇴 대상 API 경로의 잠금이 fail-closed 인가 ===\n")
+# ADR 0003 은 "AI = claude -p 구독 단일화 · API 키 제거"를 결정했다. 그런데 `core/llm.py` 두 벌이
+# 살아 있고 실제로 import 된다(`net-sourcing/core/judge.py` · `mail-harness/triage/main.py`).
+# 진짜 은퇴 전까지 이 경로를 막는 것은 `enabled` 플래그 하나뿐이다.
+#
+# 🔴 그 하나가 **fail-open 이면 잠금이 아니다.** mail-harness 쪽이 `.get("enabled", True)` 였다 —
+#    `llm:` 블록이 사라지거나 키 이름이 바뀌면 상한 없는 API 패스가 열린다.
+#    이 경로엔 `gate.check_calls` 도 `resources.yaml` 의 anthropic 축도 없어 **계측조차 0**이다.
+_llm_files = sorted(_REPO.glob("skills/*/project/**/llm.py"))
+open_defaults = []
+for p in _llm_files:
+    if "_archive" in str(p):
+        continue
+    for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
+        # cfg...get("enabled", <기본값>) 의 기본값이 True 면 fail-open
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "get" and len(n.args) == 2
+                and isinstance(n.args[0], ast.Constant) and n.args[0].value == "enabled"
+                and isinstance(n.args[1], ast.Constant) and n.args[1].value is True):
+            open_defaults.append(f"{p.relative_to(_REPO)}:{n.lineno}")
+check("O6 LLM 게이트 기본값이 fail-closed 다", not open_defaults,
+      "\n       ".join(open_defaults) or f"llm.py {len(_llm_files)}개 확인")
+
+# 호출부도 본다 — judge.py 처럼 호출 직전에 다시 검사하는 쪽이 있다
+_callers = []
+for p in _REPO.glob("skills/*/project/**/*.py"):
+    if "_archive" in str(p) or p.name == "llm.py":
+        continue
+    src = p.read_text(encoding="utf-8", errors="ignore")
+    if "llm.available()" in src or "from core import llm" in src or ", llm," in src:
+        _callers.append(str(p.relative_to(_REPO)))
+check("O6 은퇴 대상 경로의 호출부를 파악하고 있다(진짜 은퇴 전까지 추적)",
+      len(_callers) >= 1, str(_callers))
 
 # ══════════════════════════════════════════════════════════════════════
 print()
