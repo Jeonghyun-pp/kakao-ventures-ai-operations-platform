@@ -214,6 +214,50 @@ check("O5 HARD-GATE 선언이 문서에 살아 있다",
       "HARD-GATE" in _gate_doc and "컷오버" in _gate_doc,
       "게이트를 해제할 땐 이 테스트의 허용 목록도 함께 넓혀야 한다")
 
+print("\n=== O7: 게이트가 리포 밖 실행 주체(launchd)까지 본다 ===\n")
+# 🔴 [W12 리뷰 C-F-B18] O5 는 `workers.py` **소스 하나만** 본다. 그런데 sync/drop 을 실제로
+#    실행할 주체는 `com.kv.mail-harness.plist` 다 — 그 진입점은 자연어 프롬프트
+#    (`claude -p "…phase1 → phase2…"`) + `--allowedTools "Bash …"` 라서 **AST 로 잡을 대상이 없다.**
+#    harness phase1 = bplan sync · phase2 = bplan drop.
+#
+#    지금 안 터지는 이유는 그 plist 가 미설치라서다 — 설계가 아니라 우연이다.
+#    이 파일이 O5 자리에 스스로 적어둔 문장과 같은 상태였다:
+#    *"2026-08-12 에 이 게이트를 내가 어겼다 … 우연이 막았지 설계가 막은 게 아니다."*
+_PLIST_GATED = ("phase2", "bplan drop", "bplan sync", "/mail-harness")
+
+# ① 리포 안의 템플릿 — CI 에서도 항상 검사된다.
+#    템플릿이 게이트 대상 명령을 담는 것 자체는 막지 않는다(컷오버 후엔 그게 정상이다).
+#    막는 것은 **경고 없이 담는 것**이다. 로드 금지 경고가 사라지면 사람이 그냥 설치한다.
+_tmpl = sorted(_REPO.glob("skills/**/com.kv.*.plist.template"))
+_unguarded = [str(p.relative_to(_REPO)) for p in _tmpl
+              if any(g in (b := p.read_text(encoding="utf-8")) for g in _PLIST_GATED)
+              and "HARD-GATE" not in b]
+check("O7 게이트 대상 명령을 담은 plist 템플릿에 로드 금지 경고가 있다", not _unguarded,
+      "\n       ".join(_unguarded) or f"템플릿 {len(_tmpl)}본 확인")
+check("O7 plist 템플릿을 실제로 찾았다(0본이면 위 검사가 공허하다)", len(_tmpl) >= 1,
+      f"{len(_tmpl)}본")
+
+# ② 이 기계에 **실제로 설치된** plist — CI 러너에는 없으므로 있을 때만 본다.
+#    ⚠️ 없다고 조용히 통과시키지 않는다. "확인 못 함"과 "확인했고 깨끗함"은 다른 사실이다
+#       (불변규칙 05 · R5 의 진공/결손 구분을 이 검사에도 적용한다).
+_agents = Path.home() / "Library/LaunchAgents"
+if _agents.is_dir():
+    _installed = sorted(_agents.glob("com.kv.*.plist"))
+    _live = []
+    for p in _installed:
+        try:
+            body = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if hit := [g for g in _PLIST_GATED if g in body]:
+            _live.append(f"{p.name} — {hit}")
+    check("O7 설치된 launchd 잡이 컷오버 게이트 대상을 부르지 않는다", not _live,
+          "\n       ".join(_live)
+          or f"설치 {len(_installed)}본 전부 무해: {[p.stem for p in _installed]}")
+else:
+    print("  ⏭️  O7 설치분 검사 건너뜀 — ~/Library/LaunchAgents 없음(CI 러너로 보인다). "
+          "리포 템플릿 검사는 위에서 이미 돌았다.")
+
 print("\n=== O6: 은퇴 대상 API 경로의 잠금이 fail-closed 인가 ===\n")
 # ADR 0003 은 "AI = claude -p 구독 단일화 · API 키 제거"를 결정했다. 그런데 `core/llm.py` 두 벌이
 # 살아 있고 실제로 import 된다(`net-sourcing/core/judge.py` · `mail-harness/triage/main.py`).

@@ -67,10 +67,62 @@ jobs:
           exit $fail
 
       - name: 스킬 잡 합성 (노션·claude 불호출)
+        # [W12] 하드코딩 2줄 → **자동 발견 + 검증되는 제외**.
+        # 바로 위 합성 스위트는 W9 에 이미 자동 발견으로 고쳤는데 **이 단계만 목록으로 남았다.**
+        # 그 뒤 만든 bplan_score_job 이 정확히 그 구멍으로 빠졌다 — 그 안에
+        # `_assert_safe_patch`(노션에 점수 칸 외 기입을 막는 **안전 경계의 유일한 집행자**)가
+        # 있는데 CI 가 한 번도 안 돌렸다.
+        #
+        # 제외는 "적어두면 끝"이 아니다. 목록이 썩는 것을 두 검사가 막는다:
+        #   ① 목록의 파일이 사라지면 에러 (이름이 바뀌었는데 제외만 남는 경우)
+        #   ② 제외된 잡이 workers.WIRED 에 들어가면 에러 (스캐폴드가 실물이 됐는데 제외 유지)
+        # ②가 핵심이다 — 지금 두 파일은 W3 스캐폴드라 제외가 정당하지만, 배선되는 순간
+        # `--synthetic` 없이 CI 를 통과하는 상태가 되면 안 된다.
         run: |
           set -e
-          KV_DATA="$RUNNER_TEMP/kvdata-mm" python skills/net-sourcing/project/jobs/meeting_mail_job.py --synthetic
-          KV_DATA="$RUNNER_TEMP/kvdata-jj" python skills/net-sourcing/project/jobs/judge_job.py --synthetic
+          EXCLUDE="skills/mail-harness/project/jobs/mail_job.py skills/net-sourcing/project/jobs/linkedin_job.py"
+
+          for f in $EXCLUDE; do
+            [ -f "$f" ] || { echo "::error::제외 목록의 $f 가 없다 — 목록이 썩었다"; exit 1; }
+          done
+
+          python - <<'PY'
+          # ⚠️ 손으로 적은 "파일 → task 이름" 매핑을 쓰지 않는다. 처음엔 그렇게 짰다가
+          #    `mail_job.py → mail-triage` 로 잘못 적어 거짓 실패를 냈다 — mail-triage 의
+          #    러너는 `triage/main.py` 이고 `jobs/mail_job.py` 와 무관하다.
+          #    **질문을 바꾼다: "workers.py 가 이 파일을 실제로 부르는가."** 그건 소스에서
+          #    직접 읽을 수 있으므로 사람이 매핑을 유지할 필요가 없다.
+          import ast, pathlib, sys
+          EXCLUDE = ["skills/mail-harness/project/jobs/mail_job.py",
+                     "skills/net-sourcing/project/jobs/linkedin_job.py"]
+          src = pathlib.Path("kv-core/kv_core/workers.py").read_text(encoding="utf-8")
+          invoked = {c.value for c in ast.walk(ast.parse(src))
+                     if isinstance(c, ast.Constant) and isinstance(c.value, str)
+                     and c.value.startswith("jobs/") and c.value.endswith(".py")}
+          bad = [f for f in EXCLUDE if f"jobs/{pathlib.Path(f).name}" in invoked]
+          if bad:
+              print(f"::error::제외된 잡을 workers.py 가 부른다 {bad} — "
+                    f"--synthetic 을 붙이고 제외에서 빼라")
+              sys.exit(1)
+          print(f"  제외 {len(EXCLUDE)}건 전부 미호출 확인 (workers 가 부르는 잡: {sorted(invoked)})")
+          PY
+
+          fail=0; ran=0
+          for f in skills/*/project/jobs/*_job.py; do
+            skip=0
+            for e in $EXCLUDE; do [ "$f" = "$e" ] && skip=1; done
+            [ $skip = 1 ] && { echo "── $f (제외: W3 스캐폴드 · 미배선)"; continue; }
+            echo "── $f"
+            t=$(basename "$f" .py)
+            if ! KV_DATA="$RUNNER_TEMP/kvdata-$t" python "$f" --synthetic; then
+              echo "::error::$f --synthetic 실패"; fail=1
+            fi
+            ran=$((ran+1))
+          done
+          # 발견기가 죽으면 이 단계가 조용히 0건 성공이 된다 — 진공을 결손과 구분한다.
+          [ "$ran" -ge 3 ] || { echo "::error::잡을 $ran 개만 돌렸다 — 발견이 깨졌다"; exit 1; }
+          echo "  잡 $ran 개 통과"
+          exit $fail
 
       - name: 무발송 구조 검사 (AST) — _synthetic_slice 의 핵심만 분리
         # 실 claude 를 부르는 슬라이스 전체는 CI 에서 못 돌리지만, **발송 경로 부재**는
