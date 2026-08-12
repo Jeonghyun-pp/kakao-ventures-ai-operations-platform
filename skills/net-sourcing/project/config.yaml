@@ -562,7 +562,21 @@ judge:
   # ── [W6] 무인 judge 러너 (jobs/judge_job.py) ──
   # 배치=세션 1콜. 불변식: judge 25 + meeting_mail 3 < 게이트 경고선 30 (테스트가 기계검증).
   batch_size: 20                         # 세션 1콜당 판정 행 수
-  max_batches_per_run: 20                # 런당 claude 호출 상한 [W9: 25→20, 최악치 20+9=29 < warn 30]
+  max_batches_per_run: 20                # 런당 claude 호출 상한 [W9: 25→20]
+
+  # 🔴 [적대리뷰 H3 · 2026-08-11] 위 상한은 **런 단위**라 attempt-suffix(-r2·-r3)가
+  #    뜨면 하루 3배(60콜)가 열렸다. 아래가 하루 단위 진짜 상한이다:
+  #        judge 천장 = resources.yaml daily_calls_block − reserve_calls_for_others
+  #    judge_job 이 배치마다 gate 의 **일별 장부**를 읽어 이 천장에서 멈춘다. attempt 가
+  #    몇 번 뜨든 장부는 하나라 자동 합산되고, meeting_mail 몫(최악 3×3=9)이 항상 남는다.
+  #    백로그 소화 중에는 경고선(30)을 넘길 수 있다 — 그건 사실이고, 봐야 하는 사실이다.
+  reserve_calls_for_others: 9            # meeting_mail 최악치(max_drafts × max_attempts)
+
+  # 🔴 [2026-08-12] batch_size 는 **행 개수**인데 timeout(300s)을 정하는 건 **프롬프트 크기**다.
+  #    실측(큐 1,505행): 스레드 행 664자 · 링크드인 행 3,004자(career 가 1,830자, 최대 26,723자).
+  #    같은 20행이 4.5배라 링크드인 배치는 300초 벽에 붙는다. 아래 둘이 진짜 상한이다.
+  batch_chars_budget: 40000              # 배치당 행 데이터 문자 예산 (링크드인 최대 예상 196s < 300s)
+  max_field_chars: 1500                  # 개별 필드 상한. career 는 **학력 줄을 남기고** 최신 경력부터 채운다
 
 # ── [W8] 미팅메일 초안 (jobs/meeting_mail_job.py) ──
 # 🔴 [W9 C-M8] 불변식의 모델이 틀렸었다: max_drafts_per_run 은 **attempt 당** 상한이고

@@ -45,17 +45,62 @@ from kv_core import paths, secrets  # noqa: E402
 SKILL = "net-sourcing"
 
 
+_STAMP = __import__("re").compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _stamp_of(p: Path) -> str | None:
+    """파일명에서 날짜. 형식이 아니면 None — **통과가 아니다**."""
+    s = p.stem.replace("judge_verdicts_", "")[:10]
+    return s if _STAMP.fullmatch(s) else None
+
+
 def _verdict_files(days: int) -> list[Path]:
+    """최근 N일 판정 파일. **날짜 형식을 검증한다.**
+
+    [적대리뷰 M3] 예전엔 `stamp >= cutoff` 문자열 비교뿐이라 `judge_verdicts_backup.json`
+    이 항상 통과했다(`"backup" >= "2026-07-28"` 은 True — 'b' > '2'). 게다가 `sorted()` 에서
+    날짜 파일 **뒤**에 와서 last-wins 로 실판정을 덮어썼다. 이 도구가 print 로 경고하던
+    "dry 파일럿 기록이 섞이면 전량 삭제로 보인다"가 정확히 그 경로다 — 경고 말고 막는다.
+    """
     d = paths.data(SKILL, create=False)
     if not d.exists():
         return []
-    cutoff = (date.today() - timedelta(days=days)).isoformat()
-    out = []
+    cutoff = date.today() - timedelta(days=days)
+    out, skipped = [], []
     for p in sorted(d.glob("judge_verdicts_*.json")):
-        # 파일명: judge_verdicts_YYYY-MM-DD_NN.json
-        stamp = p.stem.replace("judge_verdicts_", "")[:10]
-        if stamp >= cutoff:
-            out.append(p)
+        stamp = _stamp_of(p)
+        if stamp is None:
+            skipped.append(p.name)
+            continue
+        try:
+            if date.fromisoformat(stamp) >= cutoff:
+                out.append(p)
+        except ValueError:
+            skipped.append(p.name)
+    if skipped:
+        print(f"⚠️  날짜 형식이 아닌 판정 파일 {len(skipped)}건 제외 — {', '.join(skipped[:5])}")
+    return out
+
+
+def _applied_ids() -> set[str]:
+    """judge 가 **노션에 실제로 기입한** page_id 들.
+
+    [적대리뷰 M4] judge_job 은 판정 파일을 쓴 **다음** apply 한다. 그래서 "판정 파일엔
+    있는데 노션엔 안 써진" 행이 구조적으로 생긴다(개별 PATCH 실패·배치 중단). 예전엔
+    그게 전부 `cleared`(= 사람이 판정을 거부) 로 집계돼 **일치율 분모**에 들어갔다.
+    앞으로 하루 400 PATCH 를 치는데 실패분이 "사람이 거부함"으로 보이면 **룰을 잘못된
+    방향으로 깎는다** — W9 에서 정한 "한 메시지에 두 기준의 숫자를 섞지 않는다" 위반이다.
+    판별 근거는 이미 디스크에 있다: 배치마다 쓰는 `artifacts/applied_ids.jsonl`.
+    """
+    out: set[str] = set()
+    jobs = paths.data(SKILL, "jobs", create=False)
+    if not jobs.exists():
+        return out
+    for ap in jobs.glob("judge-*/artifacts/applied_ids.jsonl"):
+        try:
+            out |= {ln.strip() for ln in ap.read_text(encoding="utf-8").splitlines() if ln.strip()}
+        except OSError:
+            continue
     return out
 
 
@@ -68,7 +113,7 @@ def _judged(days: int) -> dict[str, dict]:
         except (json.JSONDecodeError, OSError) as e:
             print(f"⚠️  판정 파일 파손 {p.name} — 건너뜀 ({e!r})")
             continue
-        stamp = p.stem.replace("judge_verdicts_", "")[:10]
+        stamp = _stamp_of(p) or "?"
         for r in rows if isinstance(rows, list) else []:
             pid = str(r.get("page_id") or "")
             if pid:
@@ -77,39 +122,64 @@ def _judged(days: int) -> dict[str, dict]:
     return out
 
 
-def _live(page_ids: list[str], token: str) -> dict[str, dict]:
-    """노션 라이브 값 — page 단건 조회(대상만 읽는다)."""
-    import requests
-    from core import notion
-    H = {"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28",
-         "Content-Type": "application/json"}
+def _row(pr: dict) -> dict:
+    def val(k):
+        v = pr.get(k) or {}
+        t = v.get("type")
+        if t in ("select", "status"):
+            return ((v.get(t)) or {}).get("name")
+        if t in ("rich_text", "title"):
+            return "".join(x.get("plain_text", "") for x in v.get(t) or [])
+        return None
+
+    # 제목 칸 이름은 DB 마다 다르다(법인(서비스)·Name·이름…). **타입으로 찾는다** —
+    # 이름을 추측해 나열하면 DB 가 하나 늘 때마다 조용히 빈칸이 된다(스키마-온-리드).
+    title = next((k for k, v in pr.items() if (v or {}).get("type") == "title"), None)
+    return {"verdict": val("Tier") or val("판정"),
+            "name": (val(title) if title else "") or "",
+            "ai_reason": val("AI Reason") or ""}
+
+
+def _live(page_ids: list[str], token: str, cfg: dict) -> dict[str, dict]:
+    """노션 라이브 값.
+
+    [적대리뷰 H4] 예전엔 `requests.get` 로 **page 단건 무지연 순차 조회**였다. 기본
+    `--days 14` × 하루 400건이면 ~5,600콜을 3 req/s 한도에 그대로 때린다 → 대부분 429 →
+    `⚠️ 조회 실패` 수천 줄 → `대조 가능한 건 0`. "기준을 계속 깎는다"는 규약의 **유일한
+    계측기가 실제 규모에서 작동하지 않았다.** `core/notion.py` 는 07-11 사고(415행 무지연
+    순차 POST) 뒤에 백오프·페이싱을 넣어뒀는데, 신설 도구가 그걸 우회해 되돌린 것이다.
+
+    그래서 ① DB 를 통째로 한 번 스캔해 page_id 맵을 만들고(1,505행 ≈ 16콜)
+    ② 거기 없는 것만 단건 조회하되 `notion._read`(백오프 + 0.34s 페이싱)로 간다.
+    """
+    from core import judge_cli, notion
+    want = set(page_ids)
     out: dict[str, dict] = {}
-    for pid in page_ids:
+
+    dbs = [db for _, db in judge_cli._targets(cfg, "", False)]
+    for db in dbs:
         try:
-            r = requests.get(f"{notion.API}/pages/{pid}", headers=H, timeout=30)
-        except Exception as e:                    # noqa: BLE001  한 건 실패가 리포트를 죽이지 않는다
+            for page in notion._query_pages(cfg, token, db):
+                pid = str(page.get("id") or "").replace("-", "")
+                if pid in want or (page.get("id") in want):
+                    out[page.get("id") if page.get("id") in want else pid] = _row(
+                        page.get("properties") or {})
+        except Exception as e:                    # noqa: BLE001  한 DB 실패가 리포트를 죽이지 않는다
+            print(f"⚠️  DB 스캔 실패 {db[:8]}: {e!r}")
+
+    missing = [p for p in page_ids if p not in out]
+    if missing:
+        print(f"· DB 스캔에 없던 {len(missing)}건은 단건 조회(백오프·페이싱 경유)")
+    for pid in missing:
+        try:
+            r = notion._read(f"{notion.API}/pages/{pid}", token)
+        except Exception as e:                    # noqa: BLE001
             print(f"⚠️  조회 실패 {pid[:8]}: {e!r}")
             continue
         if r.status_code != 200:
             print(f"⚠️  조회 실패 {pid[:8]}: {r.status_code}")
             continue
-        pr = (r.json().get("properties") or {})
-
-        def val(k):
-            v = pr.get(k) or {}
-            t = v.get("type")
-            if t in ("select", "status"):
-                return ((v.get(t)) or {}).get("name")
-            if t in ("rich_text", "title"):
-                return "".join(x.get("plain_text", "") for x in v.get(t) or [])
-            return None
-
-        # 제목 칸 이름은 DB 마다 다르다(법인(서비스)·Name·이름…). **타입으로 찾는다** —
-        # 이름을 추측해 나열하면 DB 가 하나 늘 때마다 조용히 빈칸이 된다(스키마-온-리드).
-        title = next((k for k, v in pr.items() if (v or {}).get("type") == "title"), None)
-        out[pid] = {"verdict": val("Tier") or val("판정"),
-                    "name": (val(title) if title else "") or "",
-                    "ai_reason": val("AI Reason") or ""}
+        out[pid] = _row(r.json().get("properties") or {})
     return out
 
 
@@ -132,29 +202,38 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print(f"· judge 판정 {len(judged)}건 (최근 {args.days}일)")
 
-    live = _live(list(judged), token)
+    import yaml
+    cfg = yaml.safe_load((PROJ / "config.yaml").read_text(encoding="utf-8"))
+    live = _live(list(judged), token, cfg)
     print(f"· 노션 라이브 조회 {len(live)}건")
 
-    agree, changed, cleared = [], [], []
+    applied = _applied_ids()
+    agree, changed, cleared, unwritten = [], [], [], []
     for pid, j in judged.items():
         cur = live.get(pid)
         if cur is None:
             continue
         now = cur["verdict"]
         if not now:
-            cleared.append((pid, j, cur))          # 사람이 지웠다 = 판정 자체를 거부
+            # [적대리뷰 M4] 빈칸의 원인이 둘이다 — 갈라야 일치율이 정직해진다.
+            (cleared if pid in applied else unwritten).append((pid, j, cur))
         elif now == j["verdict"]:
             agree.append((pid, j, cur))
         else:
             changed.append((pid, j, cur))
 
+    # 분모는 **사람의 판단이 실제로 개입할 수 있었던 건**만. 애초에 안 써진 건은 제외한다.
     n = len(agree) + len(changed) + len(cleared)
     if not n:
-        print("· 대조 가능한 건 0")
+        print(f"· 대조 가능한 건 0 (기입 실패 {len(unwritten)}건은 분모 밖)")
         return 0
 
     print()
-    print(f"═══ 일치율 {100 * len(agree) // n}%  (동의 {len(agree)} · 수정 {len(changed)} · 삭제 {len(cleared)})")
+    print(f"═══ 일치율 {100 * len(agree) // n}%  "
+          f"(동의 {len(agree)} · 수정 {len(changed)} · 사람이 지움 {len(cleared)})")
+    if unwritten:
+        print(f"    ※ 기입 실패 {len(unwritten)}건은 분모에서 제외 — "
+              "노션에 애초에 안 써졌다(apply 실패·배치 중단). 사람의 거부가 아니다.")
     print()
 
     if changed:
@@ -174,15 +253,13 @@ def main(argv: list[str] | None = None) -> int:
 
     print()
     print("→ 위 '고친 것'을 references/judge-criteria.md 에 반영한다.")
-    print("  ⚠️ '삭제'는 사람이 지운 것일 수도, apply 가 실패해 애초에 안 써진 것일 수도 있다")
-    print("     (dry 파일럿 기록이 섞여 있으면 전량 삭제로 보인다). 판정 파일 출처를 먼저 확인하라.")
     print("  같은 방향의 수정이 반복되면 그건 룰의 구멍이지 판정의 실수가 아니다.")
 
     if args.json:
         Path(args.json).write_text(json.dumps(
             {"generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
              "days": args.days, "agree": len(agree), "changed": len(changed),
-             "cleared": len(cleared),
+             "cleared": len(cleared), "unwritten": len(unwritten),
              "rows": [{"page_id": p, "judge": j, "current": c}
                       for p, j, c in changed + cleared]},
             ensure_ascii=False, indent=1), encoding="utf-8")

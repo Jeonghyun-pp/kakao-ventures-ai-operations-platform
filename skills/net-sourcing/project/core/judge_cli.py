@@ -1,9 +1,11 @@
-"""반자동 judge — 주 1회 Claude Code 세션이 판단한다. **API 키 불필요.**
+"""judge 의 입출력 도구 — export(미판정 행 → 큐) / apply(판정 → 노션). **API 키 불필요.**
 
-## 왜 반자동인가 (사용자 결정 2026-07-13)
-수집은 주 ~1,000명을 착지시킨다. 판단 없이 사람이 다 볼 수 없다(실측 적중률 6%).
-그런데 크론이 LLM을 부르려면 ANTHROPIC_API_KEY가 필요하고, 그건 상한 없는 지출이다.
-→ 크론은 **수집·착지까지만**. 판단은 주 1회 Claude Code 세션이 한다.
+## 누가 부르나 (2026-08-11 정정)
+🔴 이 파일은 오래 "판단은 주 1회 사람이 붙은 세션"이라고 적혀 있었지만 **지금은 아니다.**
+`jobs/judge_job.py` 가 `tasks.yaml` 의 `cadence: daily` 로 스케줄러에서 무인 실행되고,
+`session.run_session`(구독 CLI — 키 불필요)으로 배치마다 LLM 을 부른다. 지출 상한은
+ANTHROPIC_API_KEY 유무가 아니라 `gate` 의 일별 호출 장부가 건다.
+사람이 손으로 부르는 것도 여전히 가능하다(같은 함수).
 
 ## 절차
   1. `main.py judge-export`            → data/judge_queue_{날짜}.json  (Tier가 빈 행 전부)
@@ -90,6 +92,16 @@ def _targets(cfg: dict, channel: str, include_base: bool) -> list[tuple[str, str
         # 결정 #5 "앱스토어는 판단 없는 보드"가 애초에 옳았고, 실측이 그걸 사후 정당화했다.
         # 앱스토어 순위 관측은 `appstore-rank` 스킬과 board.py 가 이미 따로 한다.
         allow = (cfg.get("judge") or {}).get("channels")
+        # [적대리뷰 M1] 선언 목록의 오타는 **채널 하나를 조용히 죽인다**. `"링크드인 "`
+        # (뒤 공백) 하나로 870건이 영구 미판정으로 남고 로그는 정상으로 보였다.
+        # `--channel` 은 모르는 값에 fail-loud 하는데 선언 목록만 안 했다 — 비대칭을 없앤다.
+        # `if not targets` 가드는 **전부** 빠졌을 때만 뜨므로 이걸 대신하지 못한다.
+        if allow is not None:
+            unknown = [k for k in allow if k not in m]
+            if unknown:
+                raise SystemExit(
+                    f"🔴 judge.channels 에 모르는 채널 {unknown} — "
+                    f"config.yaml 오타로 채널이 통째로 미판정에 남는다. 가능: {sorted(m)}")
         for key, raw in m.items():
             if allow is not None and key not in allow:
                 continue
@@ -97,6 +109,15 @@ def _targets(cfg: dict, channel: str, include_base: bool) -> list[tuple[str, str
             if db and not db.endswith("TODO"):
                 out.append((_CHANNEL_BY_KEY.get(key, key), db))
     if include_base:
+        # [적대리뷰 M2] base 는 전 채널 혼재 DB 라, 여기에 판정을 걸면 `judge.channels`
+        # 선언이 통째로 우회된다 — 프로브에서 앱스토어 492건이 **Tier 어휘로** 판정 대상이
+        # 됐다(문서는 앱스토어를 Pass/Drop 으로 가르친다 → 계약 위반 격리 아니면 오라벨).
+        # 동시에 스레드·링크드인 978건이 채널 DB 사본과 중복 재판정된다.
+        # 사람이 손으로 켜는 스위치라 스케줄러 경로는 안전하지만, 안전한 이유가
+        # "아무도 안 누른다"여선 안 된다. 선언이 있으면 경고를 남긴다.
+        if (cfg.get("judge") or {}).get("channels") is not None:
+            print("⚠️  --include-base: base DB 는 전 채널 혼재라 judge.channels 선언을 "
+                  "우회한다(앱스토어 포함·채널 DB 와 중복 판정). 의도한 것이 맞나?")
         out.append(("(base)", notion._db_id(cfg)))
     return out
 

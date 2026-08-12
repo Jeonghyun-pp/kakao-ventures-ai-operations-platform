@@ -100,8 +100,17 @@ jobs:
           n = yaml.safe_load(open("skills/net-sourcing/project/config.yaml"))
           r = yaml.safe_load(open("config/resources.yaml"))
           mm = n["meeting_mail"]
-          worst = int(n["judge"]["max_batches_per_run"]) + int(mm["max_drafts_per_run"]) * int(mm["max_attempts_per_day"])
-          warn = int(r["claude"]["daily_calls_warn"])
-          print(f"registry {len(ts)} tasks · contracts {len(cs)} · claude 최악 {worst} < warn {warn}")
-          assert worst < warn, f"불변식 위반: {worst} >= {warn}"
+          # [적대리뷰 H3] 예전 식은 judge 를 ×1 로 셌다 — judge_job 도 attempt-suffix 를
+          # 갖는데 meeting_mail 에만 ×attempts 보정을 했다. judge 는 이제 gate 일별 장부로
+          # 스스로 천장(block − reserve)에서 멈추므로, 검증할 불변식은 **예약이 실제
+          # meeting_mail 최악치를 덮는가**와 **하루 총합이 차단선을 안 넘는가** 둘이다.
+          mm_worst = int(mm["max_drafts_per_run"]) * int(mm["max_attempts_per_day"])
+          reserve = int(n["judge"]["reserve_calls_for_others"])
+          block = int(r["claude"]["daily_calls_block"])
+          judge_ceiling = block - reserve
+          print(f"registry {len(ts)} tasks · contracts {len(cs)} · "
+                f"judge 천장 {judge_ceiling} + meeting_mail 최악 {mm_worst} <= block {block}")
+          assert reserve >= mm_worst, f"예약 부족: {reserve} < meeting_mail 최악 {mm_worst}"
+          assert judge_ceiling + mm_worst <= block, f"불변식 위반: {judge_ceiling}+{mm_worst} > {block}"
+          assert judge_ceiling > 0, "judge 천장이 0 이하 — 예약이 차단선을 먹었다"
           PY

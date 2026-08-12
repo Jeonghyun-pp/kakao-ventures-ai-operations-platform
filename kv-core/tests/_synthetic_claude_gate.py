@@ -125,14 +125,32 @@ _al.dispatch()
 check("⑦ notify 전부 스텁 캡처(실발송 0)", len(_slack_captured) >= 1,
       f"captured={len(_slack_captured)}건")
 
-# ⑧ [E6] 두 파일에 걸친 불변식 기계검증: judge 상한 25 < claude 경고선 30
+# ⑧ [E6] 두 파일에 걸친 불변식 기계검증.
+#
+# 🔴 [적대리뷰 H3 · 2026-08-11] 예전 식(`max_batches_per_run < daily_calls_warn`)은
+#    judge 를 ×1 로 셌다. 그런데 judge_job 도 meeting_mail_job 과 **같은 attempt-suffix
+#    루프**(-r2·-r3)를 갖는다 — 잡이 실패하면 런 상한이 처음부터 다시 열려 하루 최악
+#    3 × 20 = 60콜이다. config.yaml 은 meeting_mail 에만 "최악치 = cap × attempts" 보정을
+#    적어두고 judge 엔 안 했고, 이 검증도 그 낙관을 그대로 복사했다.
+#    **검증이 모델을 낙관적으로 잡으면, 통과는 안전의 증거가 아니라 사각의 증거다.**
+#
+# 이제 judge 는 gate 의 일별 장부를 읽어 (차단선 − 예약) 에서 스스로 멈춘다. 그래서
+# 검증할 불변식은 둘이다: **예약이 meeting_mail 최악치를 실제로 덮는가**, 그리고
+# **judge 천장 + meeting_mail 최악치가 차단선을 안 넘는가**.
 import yaml
 _repo = Path(__file__).resolve().parents[2]
 res = yaml.safe_load((_repo / "config" / "resources.yaml").read_text(encoding="utf-8"))
 ncfg = yaml.safe_load((_repo / "skills/net-sourcing/project/config.yaml").read_text(encoding="utf-8"))
-mb = int(ncfg["judge"]["max_batches_per_run"])
-wr = int(res["claude"]["daily_calls_warn"])
-check("⑧ 불변식: max_batches_per_run < daily_calls_warn", mb < wr, f"{mb} < {wr}")
+_mm = ncfg["meeting_mail"]
+mm_worst = int(_mm["max_drafts_per_run"]) * int(_mm["max_attempts_per_day"])
+reserve = int(ncfg["judge"]["reserve_calls_for_others"])
+block = int(res["claude"]["daily_calls_block"])
+ceiling = block - reserve
+check("⑧ 불변식: 예약이 meeting_mail 최악치를 덮는다", reserve >= mm_worst,
+      f"예약 {reserve} >= {mm_worst}(={_mm['max_drafts_per_run']}×{_mm['max_attempts_per_day']})")
+check("⑧ 불변식: judge 천장 + meeting_mail 최악 <= 차단선", ceiling + mm_worst <= block,
+      f"{ceiling} + {mm_worst} <= {block}")
+check("⑧ 불변식: judge 천장이 양수(예약이 차단선을 먹지 않았다)", ceiling > 0, f"천장 {ceiling}")
 
 # 정리
 session.subprocess.run = subprocess_run_orig
