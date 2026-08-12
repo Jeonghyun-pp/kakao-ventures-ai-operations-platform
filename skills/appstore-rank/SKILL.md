@@ -32,11 +32,19 @@ description: App Store 급상승/급하락 랭킹 보드를 바로 띄운다(dia
 
 ## 실시간성
 - **절대순위**는 열 때마다 애플 SSR에서 실시간 수집(캐시 TTL 10분, 🔄새로고침은 즉시 재수집).
-- **변동값(Δ)**은 매일 자동 스냅샷(launchd `com.kv.appstore-rank-snapshot`, 매일 05:10)이 전 카테고리 200위를 저장해 확보된다. 스냅샷 job 확인:
+> 🔴 **[2026-08-13 정정] 아래 plist 는 은퇴했다. 재등록하지 마라.**
+> `com.kv.appstore-rank-snapshot`(05:10)은 W6 에서 은퇴했고, 지금 스냅샷의 **유일한 실행 주체**는
+> `com.kv.scheduler` → `workers.run_appstore_snapshot` 이다(`config/tasks.yaml` 참조).
+> `launchctl list | grep appstore-rank` 가 비어 있는 것이 **정상**이다 — 고장이 아니다.
+> 재등록하면 05:10 과 스케줄러가 같은 84차트를 긁어 **불변규칙 01(이중실행 금지) 위반**이 되고,
+> 애플 SSR 429 압력이 배가돼 정상 실행 쪽이 RSS 폴백으로 밀린다(8/12 로그에 429 5회 실측).
+> 상태 확인은 `python -m kv_core.orrery` 로 한다.
+
+- **변동값(Δ)**은 매일 자동 스냅샷이 전 카테고리 200위를 저장해 확보된다. (구) 스냅샷 job 확인:
   ```bash
   launchctl list | grep appstore-rank
   ```
-  없거나 꺼져 있으면 `~/kv-automation/skills/appstore-rank/install-cron.sh` 를 실행해 (재)등록한다.
+  ~~없거나 꺼져 있으면 `install-cron.sh` 로 (재)등록한다.~~ → **폐기.** 위 정정 상자 참조.
 
 ## 수동 명령(참고)
 ```bash

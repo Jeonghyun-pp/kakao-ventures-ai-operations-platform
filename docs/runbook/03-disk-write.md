@@ -20,9 +20,15 @@ ls ~/kv-data/net-sourcing/snapshots | wc -l
 ## 복구
 1. 공간 확보(안전한 순서):
    ```bash
-   # 90일 이전 스냅샷 — GH data 브랜치에 사본이 있으므로 로컬 삭제 안전
-   find ~/kv-data/net-sourcing/snapshots -name '*.json' -mtime +90 -delete
-   find ~/kv-data/_alerts/sent -type f -mtime +30 -delete
+   # 🔴 [2026-08-13 정정] 이 자리엔 원래 이렇게 적혀 있었다:
+   #     "90일 이전 스냅샷 — GH data 브랜치에 사본이 있으므로 로컬 삭제 안전"
+   #    **그 백업은 2026-08-11 에 은퇴했다**(GH Actions schedule 제거 → 로컬 단독).
+   #    지금 이 명령을 실행하면 사본 없는 원본을 지운다. 앱스토어 Δ 는 어제와 비교하는
+   #    값이라 한 번 지우면 그 구간이 **영구 손실**이다 — 다시 수집할 방법이 없다.
+   #    런북이 "안전하다"고 말하기 때문에 더 위험하다(지시를 믿고 실행한다).
+   ls ~/kv-data/net-sourcing/snapshots | wc -l          # 먼저 얼마나 있는지 본다
+   # 공간이 정말 급하면 외부로 복사한 뒤 지운다. 자동 삭제 명령은 두지 않는다.
+   find ~/kv-data/_alerts/sent -type f -mtime +30 -delete   # 알림 마커는 재생성되므로 안전
    ```
 2. **삭제 금지**: `cadence/*.json`(워터마크) · `_approvals/*.json`(감사 기록) · 진행 중 잡의 events
 3. 확보 후 `launchctl kickstart gui/$(id -u)/com.kv.scheduler`

@@ -1,4 +1,14 @@
 #!/bin/bash
+
+# 🔴 [2026-08-13] 이 스크립트는 **은퇴**했다.
+#    com.kv.appstore-rank-snapshot(05:10)은 W6 에서 내려갔고, 지금 스냅샷의 유일한 실행 주체는
+#    com.kv.scheduler → workers.run_appstore_snapshot 이다. 이걸 다시 설치하면 이중 수집이 된다
+#    (불변규칙 01 위반 · 애플 SSR 429 압력 배가 → 정상 실행이 RSS 폴백으로 밀린다).
+echo "🔴 이 스크립트는 은퇴했습니다. 스냅샷은 com.kv.scheduler 가 돌립니다."
+echo "   상태 확인: python -m kv_core.orrery"
+echo "   정말 설치하려면 이 가드(아래 exit)를 지우고 이유를 커밋 메시지에 남기세요."
+exit 1
+
 # App Store 랭킹 보드 — 매일 자동 스냅샷(전 카테고리 200위) launchd 등록.
 # 이걸 돌려두면 매일 05:10에 스냅샷이 쌓여 '언제 열어도' 전 카테고리 Δ(급상승/급하락)가 확보된다.
 # 해제:  launchctl unload -w ~/Library/LaunchAgents/com.kv.appstore-rank-snapshot.plist
