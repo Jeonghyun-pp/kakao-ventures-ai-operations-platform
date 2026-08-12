@@ -108,9 +108,14 @@ def s_collect_catch(skill: str, job_id: str) -> None:
     qdir = paths.data("_approvals")
 
     rows: list[dict] = []
+    # [적대리뷰 L5] 예전엔 `if ch == "앱스토어"` 하드코딩이었다. 지금은 결과가 같지만
+    # 채널 제외 선언이 두 곳에 살아서, `judge.channels` 를 되돌려도 여기는 안 따라온다.
+    # 판정 대상 선언은 한 곳(`config.judge.channels`)이고 여기는 그것을 **읽는다**.
+    # (Tier 칸이 없는 DB 는 애초에 Tier 필터 쿼리가 성립하지 않는다 — 선언과 사실이 일치한다.)
+    allow = (cfg.get("judge") or {}).get("channels")
     for ch, db in ch_dbs.items():
-        if ch == "앱스토어":
-            continue                       # Tier 칸이 없다(판정=Pass/Drop) — 사람 채널만
+        if allow is not None and ch not in allow:
+            continue
         url = f"{notion.API}/databases/{db}/query"
         payload: dict = {"filter": {"property": "Tier", "select": {"equals": "Catch"}},
                          "page_size": 100}
@@ -232,13 +237,17 @@ def s_draft(skill: str, job_id: str) -> None:
             # 이메일을 찾았어도 `to` 는 여전히 RECIPIENT(hello@) 다 — 자동 발송은 W10 이고,
             # 그 전까지 초안이 창업자에게 바로 나가는 주소를 갖고 있으면 사람이 실수로
             # 보낼 수 있다. 찾은 주소는 `founder_email` 로 **따로** 실어 사람이 확인 후 쓴다.
+            # [적대리뷰 H1] `c` 를 Contact 로 덮어쓰면 두 줄 뒤 `c["page_id"]` 가
+            # TypeError 로 죽는다 — 계약을 통과한 **첫 후보**에서 무조건. 이 스테이지는
+            # claude 1콜을 이미 태운 뒤라, 잡이 실패하고 -r2·-r3 로 하루 3콜을 태우며
+            # 초안은 0건이 된다. 후보(dict)와 연락처(Contact)는 이름을 분리한다.
             from core import contact
-            c = contact.resolve(c_row := c, crawl=True)
+            ct = contact.resolve(c, crawl=True)
             rec["to"] = RECIPIENT
-            rec["contact_channel"] = c.channel
-            rec["founder_email"] = c.email or ""
-            rec["contact_handle"] = c.handle or ""
-            rec["contact_source"] = c.source
+            rec["contact_channel"] = ct.channel
+            rec["founder_email"] = ct.email or ""
+            rec["contact_handle"] = ct.handle or ""
+            rec["contact_source"] = ct.source
             rec["page_id"] = c["page_id"]
             rec["name"] = c["name"]
             with open(dpath, "a", encoding="utf-8") as f:      # 후보 단위 커서
@@ -267,8 +276,16 @@ def s_request_approval(skill: str, job_id: str) -> None:
         approval.request(
             task="meeting-mail", kind="mail", origin="system", partner=RECIPIENT,
             dedup_key=f"meeting-mail-{d['page_id']}", live=False,   # draft-after-approve
+            # [적대리뷰 M2] 연락처 4개 키가 payload 에 없어서 승인 카드의 연락처 블록이
+            # **도달 불가능한 코드**였다. 심사역은 "DM 으로 가야 함" 경고를 못 본 채
+            # ✅ 를 누르고, 초안을 열어서야 보낼 주소가 없다는 걸 안다 — 카드가 막겠다던
+            # 바로 그 실패다. 드래프트 파일에만 있고 큐로 안 가면 없는 것과 같다.
             payload={"to": d["to"], "subject": d["subject"], "body": d["body"],
-                     "page_id": d["page_id"], "name": d.get("name", "")})
+                     "page_id": d["page_id"], "name": d.get("name", ""),
+                     "contact_channel": d.get("contact_channel", ""),
+                     "founder_email": d.get("founder_email", ""),
+                     "contact_handle": d.get("contact_handle", ""),
+                     "contact_source": d.get("contact_source", "")})
 
     job.process_items(skill, job_id, drafts, key=lambda d: d["page_id"],
                       process=_enqueue, stage="request-approval")

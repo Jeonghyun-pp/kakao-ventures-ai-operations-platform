@@ -60,6 +60,20 @@ def _card(r: dict) -> str:
     뒤쪽의 환각·오류가 그대로 통과하고, 그러면 승인 게이트 자체가 형식이 된다.
     """
     p = r.get("payload") or {}
+
+    def _mrkdwn(v: str) -> str:
+        """슬랙 mrkdwn 제어문자 무력화 — `<!channel>`·`<http://…|클릭>` 주입 차단."""
+        return str(v or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _mask(addr: str) -> str:
+        """`person-ad2ad12c6fa7@example.com` → `j****person-f7a96a9952e1@example.com` — 검증엔 충분하고 유출은 줄인다."""
+        local, _, dom = str(addr or "").partition("@")
+        if not dom:
+            return _mrkdwn(addr)
+        head = local[:1] if local else ""
+        tail = local[-1:] if len(local) > 2 else ""
+        return _mrkdwn(f"{head}{'*' * max(1, len(local) - len(head) - len(tail))}{tail}@{dom}")
+
     full = (p.get("body") or p.get("text") or "")
     body = full[:200]
     more = f"  …외 {len(full) - 200}자" if len(full) > 200 else ""
@@ -68,14 +82,24 @@ def _card(r: dict) -> str:
     # 극초기 창업자는 공개 이메일이 드물어(실측 3~5%) 대부분 DM 으로 가야 한다.
     # 그 사실이 카드에 없으면 사람이 ✅ 를 눌러 Gmail 초안을 만들고 나서야
     # "보낼 주소가 없네"를 알게 된다 — 승인 게이트가 헛도는 것이다.
-    ch = p.get("contact_channel") or ""
+    # [적대리뷰 L3] 이 값들은 **외부인이 프로필에 심은 문자열**이다. 슬랙 mrkdwn 은
+    # 기본 on 이라 `<!channel>` 이 그대로 렌더돼 전원 멘션이 울린다. 이스케이프한다.
+    # [적대리뷰 L4] 제3자 이메일(PII)이 슬랙 채널 이력에 영구 잔존한다. 발송에는 쓰이지
+    # 않고(`_execute` 는 `recipient_of` 만 본다) **표시 목적만**이므로 마스킹하고,
+    # 전문이 필요하면 `approval show` 로 본다.
+    ch = _mrkdwn(p.get("contact_channel") or "")
     line = ""
     if ch == "email" and p.get("founder_email"):
-        line = f"📧 창업자 메일: {p['founder_email']}  ({p.get('contact_source', '')})\n"
+        line = (f"📧 창업자 메일: {_mask(p['founder_email'])}  "
+                f"({_mrkdwn(p.get('contact_source', ''))})\n")
     elif ch in ("linkedin_dm", "threads_dm"):
         where = "링크드인" if ch == "linkedin_dm" else "스레드"
         line = (f"💬 **공개 이메일 없음 → {where} DM 으로 보내야 함**\n"
-                f"    대상: {p.get('contact_handle', '-')}\n")
+                f"    대상: {_mrkdwn(str(p.get('contact_handle') or '-'))}\n")
+    elif ch == "ambiguous":
+        # 후보가 여럿이라 코드가 고르지 않았다 — 고르는 것은 사람의 일이다.
+        line = (f"🔎 **이메일 후보가 여럿이라 정하지 않았다** — 사람이 고른다\n"
+                f"    {_mrkdwn(p.get('contact_source', ''))}\n")
     elif ch == "none":
         line = "⚠️ **연락 수단을 못 찾았다** — 사람이 직접 찾아야 한다\n"
 
