@@ -16,6 +16,7 @@ tail -20 ~/kv-data/_approvals/launchd.log  # 승인 리컨실러(10분) 틱 이�
 
 | # | 문서 | 증상 한 줄 |
 |---|---|---|
+- [00 — 새 맥에서 처음 돌리기(부트스트랩)](00-bootstrap.md) — clone→run 실측. 리포 밖 자산 목록과 부트스트랩 임계 경로(claude 로그인).
 | 1 | [claude 인증 만료](01-claude-auth.md) | 무인 전체 정지 — judge·meeting-mail 이 매일 실패 |
 | 2 | [노션 429·네트워크](02-notion-network.md) | 파이프라인이 ConnectionError/429 로 죽음 (2026-08-06 실발생) |
 | 3 | [디스크풀·쓰기 실패](03-disk-write.md) | 워터마크·장부 기록 실패 — 상태 신뢰 붕괴 |
