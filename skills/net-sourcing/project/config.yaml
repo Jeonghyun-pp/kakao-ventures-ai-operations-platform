@@ -578,14 +578,6 @@ judge:
   batch_chars_budget: 40000              # 배치당 행 데이터 문자 예산 (링크드인 최대 예상 196s < 300s)
   max_field_chars: 1500                  # 개별 필드 상한. career 는 **학력 줄을 남기고** 최신 경력부터 채운다
 
-# ── [W8] 미팅메일 초안 (jobs/meeting_mail_job.py) ──
-# 🔴 [W9 C-M8] 불변식의 모델이 틀렸었다: max_drafts_per_run 은 **attempt 당** 상한이고
-#    attempt-suffix 는 하루 3회까지라 최악 3×3=9콜이다(25+9=34 > 경고선 30).
-#    [C-H2] 후보 단위 커서를 넣어 재시도가 잔여분만 처리하게 고쳤으므로 실질은 3콜이지만,
-#    기계검증은 **최악치(cap × max_attempts)** 로 계산한다 — 모델이 낙관적이면 검증이 거짓말한다.
-meeting_mail:
-  max_drafts_per_run: 3                  # 후보당 세션 1콜
-  max_attempts_per_day: 3                # attempt-suffix 상한(judge_job·meeting_mail_job 공통 규율)
 
   # ── LLM 사실분류 (규칙 위에 얹는 2단) ──
   # "좋은 팀인가"는 판단하지 않는다. "홍보글인가"(스레드) · "대기업인가"(앱스토어)라는
@@ -670,6 +662,15 @@ meeting_mail:
       - mutual aid association
       - kukkiwon                         # 국기원 — denylist에 없어 통과했었음
       - 국기원
+
+# ── [W8] 미팅메일 초안 (jobs/meeting_mail_job.py) ──
+# 🔴 [W9 C-M8] 불변식의 모델이 틀렸었다: max_drafts_per_run 은 **attempt 당** 상한이고
+#    attempt-suffix 는 하루 3회까지라 최악 3×3=9콜이다(25+9=34 > 경고선 30).
+#    [C-H2] 후보 단위 커서를 넣어 재시도가 잔여분만 처리하게 고쳤으므로 실질은 3콜이지만,
+#    기계검증은 **최악치(cap × max_attempts)** 로 계산한다 — 모델이 낙관적이면 검증이 거짓말한다.
+meeting_mail:
+  max_drafts_per_run: 3                  # 후보당 세션 1콜
+  max_attempts_per_day: 3                # attempt-suffix 상한(judge_job·meeting_mail_job 공통 규율)
 
 schedule:
   # ★ [정책 2026-07-11] **매일 실행**으로 전환. 주 1회로는 두 채널이 구조적으로 유실된다:
