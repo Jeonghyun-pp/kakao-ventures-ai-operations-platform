@@ -15,6 +15,7 @@ mail-harness 는 아무도 안 봤다. 그래서 2026-08-12 에 mail-harness 를
     O2  아는 무해 예외만 허용목록에 있고, 목록은 좁다
     O3  자동화 잡이 노션 위험 칸을 쓰지 않는다
     O4  자율성 설정이 발송을 끈 상태다
+    O5  🔴 컷오버 전 HARD-GATE — 스케줄러가 apply·sync·drop 을 부르지 않는다
 
 실행: KV_DATA=<스크래치> python kv-core/tests/_synthetic_outbound.py
 파일을 읽기만 한다 — 네트워크·프로세스 0.
@@ -171,6 +172,46 @@ check("O4 never_auto_send 목록이 유지된다(승격돼도 사람을 거치�
 check("O4 발송 서킷브레이커가 살아 있다",
       isinstance(au.get("daily_send_cap"), int) and au["daily_send_cap"] > 0,
       f"daily_send_cap={au.get('daily_send_cap')}")
+
+print("\n=== O5: 컷오버 전 HARD-GATE — 스케줄러가 부작용 명령을 부르지 않는다 ===\n")
+# 🔴 `skills/mail-harness/SKILL.md` HARD-GATE #1:
+#   "컷오버가 완료되기 전에는 apply·sync·drop 이 실행되는 어떤 형태(크론·수동 run)도
+#    시작하지 않는다. **예외 없음.** 허용되는 것은 --dry-run 과 triage(읽기 전용) 뿐이다."
+#
+# 2026-08-12 에 이 게이트를 **내가 어겼다** — `triage/main.py run`(= triage + apply)을
+# 크론에 올렸고, apply 는 `gmail.archive()` 로 실 메일함을 바꾼다.
+# 한 번도 안 돈 이유는 배선이 그날 마지막 발화보다 3분 45초 늦어서였다 —
+# **우연이 막았지 설계가 막은 게 아니다.** 그래서 검사로 옮긴다.
+#
+# 게이트가 해제되면(컷오버 완료) 이 검사의 허용 목록을 넓히고 그 커밋에 근거를 남긴다.
+_GATED_SUBCOMMANDS = {"run", "apply", "sync", "drop"}
+_GATED_SCRIPTS = ("triage/main.py", "bplan/main.py", "harness.py")
+
+import ast as _a  # noqa: E402
+
+_wsrc = (_REPO / "kv-core/kv_core/workers.py").read_text(encoding="utf-8")
+violations = []
+for n in _a.walk(_a.parse(_wsrc)):
+    if not (isinstance(n, _a.Call) and isinstance(n.func, _a.Attribute)
+            and n.func.attr == "run" and n.args):
+        continue
+    arg = n.args[0]
+    if not isinstance(arg, _a.List):
+        continue
+    parts = [x.value for x in arg.elts if isinstance(x, _a.Constant)]
+    script = next((p for p in parts if any(g in str(p) for g in _GATED_SCRIPTS)), None)
+    if script and any(str(p) in _GATED_SUBCOMMANDS for p in parts):
+        bad = [p for p in parts if str(p) in _GATED_SUBCOMMANDS]
+        violations.append(f"workers.py:{n.lineno} — {script} {bad}")
+
+check("O5 스케줄러가 컷오버 게이트 대상 명령을 부르지 않는다", not violations,
+      "\n       ".join(violations) or "triage(읽기전용)·--dry-run 만 허용")
+
+# 게이트 문서가 살아 있는지도 본다 — 문서가 사라지면 이 검사의 근거가 사라진다
+_gate_doc = (_REPO / "skills/mail-harness/SKILL.md").read_text(encoding="utf-8")
+check("O5 HARD-GATE 선언이 문서에 살아 있다",
+      "HARD-GATE" in _gate_doc and "컷오버" in _gate_doc,
+      "게이트를 해제할 땐 이 테스트의 허용 목록도 함께 넓혀야 한다")
 
 # ══════════════════════════════════════════════════════════════════════
 print()

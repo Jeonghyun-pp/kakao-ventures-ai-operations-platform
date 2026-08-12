@@ -168,19 +168,30 @@ def run_bplan_score(task: Task, period: date) -> bool:
 # ─────────────────────────── mail-triage ───────────────────────────
 
 def run_mail_triage(task: Task, period: date) -> bool:
-    """[W11] hello@ 인바운드 분류 — 분류 → 아카이브/초안.
+    """[W11] hello@ 인바운드 **분류만** — 읽기 전용. 계획 파일만 남긴다.
 
-    ## 안전 경계 (코드로 이미 잠겨 있다)
-        아카이브   자동 (`autonomy.archive_auto: true`) — 되돌릴 수 있다
-        회신·포워드 **초안까지만** (`drafts().create`) — `messages().send` 가 리포에 0개
-        `send_enabled: false` · `auto_send_categories: []` · `never_auto_send` 4종
+    🔴 **`run` 이 아니라 `triage` 다.** 2026-08-13 정정.
+    어제(08-12) 배선할 때 `run`(= triage + apply)을 걸었는데, 그건
+    `skills/mail-harness/SKILL.md:22-26` 의 HARD-GATE #1 위반이다:
 
-    즉 이 잡이 외부로 내보내는 것은 없다. 사람이 Gmail 초안을 열어 보내야 나간다.
-    비플랜에서 `To do` 를 안 건드린 것과 같은 자리의 경계다.
+        "컷오버가 완료되기 전에는 apply·sync·drop 이 실행되는 어떤 형태
+         (크론·수동 run)도 시작하지 않는다. **예외 없음.**
+         컷오버 전 허용되는 것은 `--dry-run` 과 `triage`(읽기 전용) 뿐이다."
+
+    `apply` 는 `gmail.archive()` 로 **실 메일함을 바꾼다**(triage/main.py:163).
+    인박스·구글시트 A1 커서·노션 Bplan DB 가 원본 스킬과 물리적으로 공유되므로,
+    컷오버 전 병행 실행은 중복 초안·행 건너뜀을 만든다 — 그게 이 게이트의 이유다.
+
+    다행히 **한 번도 안 돌았다**: 배선(21:57:50)이 그날 마지막 스케줄러 발화(21:54:05)보다
+    3분 45초 늦었다. 우연이 막아준 것이지 설계가 막은 게 아니다.
+    → 그래서 `_synthetic_outbound.py` 에 게이트 검사를 추가한다(선언이 아니라 코드로).
+
+    지금 이 잡이 하는 일: 인박스를 읽고 분류해 **계획 파일만** 쓴다. 아카이브·초안 0.
+    컷오버(W5)가 끝나면 `run` 으로 승격한다 — 그때는 게이트가 해제된 뒤다.
     """
-    print(f"▶ mail-triage ({period}) — triage/main.py run")
+    print(f"▶ mail-triage ({period}) — triage/main.py triage (읽기 전용 · HARD-GATE 준수)")
     try:
-        rc = subprocess.run([str(_PY), "triage/main.py", "run"],
+        rc = subprocess.run([str(_PY), "triage/main.py", "triage"],
                             cwd=_MAIL_PROJ, timeout=1800, check=False).returncode
     except subprocess.TimeoutExpired:
         print("🔴 mail-triage: 30분 timeout — 실패 처리")
