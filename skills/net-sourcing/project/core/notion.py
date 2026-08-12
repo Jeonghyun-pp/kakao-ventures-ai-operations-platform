@@ -1064,6 +1064,11 @@ def land(cfg: dict, candidates: list[dict], run_id: str) -> tuple[int, int]:
     fu_on = bool(fu.get("enabled"))
 
     ok = skipped = patched = failed = appended = block_failed = touched = careers = 0
+    # 🔴 [2026-08-13 W12] 이번 실행에서 **방금 만든** 행의 pid. `_ROW_PROPS` 미스를 두 경우로
+    #    가르는 데 쓴다(아래 PATCH 직전의 스키마 가드 참조). 같은 배치에 같은 사람이 두 번
+    #    나오면 두 번째는 방금 만든 행을 갱신하는데, 그 행은 스캔 시점엔 없었으므로
+    #    `_ROW_PROPS` 에 없다 — 그건 "모른다"가 아니라 "타깃 DB 스키마가 정답"인 경우다.
+    created_now: set[str] = set()
     for cand in candidates:
         key = _landing_key(cand)
         props = _build_landing_properties(cfg, cand, schema, run_id)
@@ -1107,14 +1112,50 @@ def land(cfg: dict, candidates: list[dict], run_id: str) -> tuple[int, int]:
             #   생성용 props를 그대로 PATCH하면 심사역이 바꿔둔 Status가 'New'로 되돌아가고,
             #   최초 발굴일이 오늘로 덮이고, Post Count가 이번 2일치로 붕괴한다. 그건 갱신이 아니라 파괴다.
             patch_props = _merge_patch(pid, props, total_posts)
+
+            # ═══ 이 행이 실제로 가진 칸 ═══════════════════════════════════════════
+            # 🔴 [2026-08-13 W12 · 리뷰 B-F5] 바로 아래 주석이 이 함정을 **정확히 서술해놓고
+            #    4칸만 가드했다**(Last Seen·재검토·변화 요약·재검토 사유). `_merge_patch` 가
+            #    만든 나머지 11칸은 그대로 나갔다.
+            #
+            #    왜 위험한가: `seen` 은 **전 착지 DB**를 훑어 만든다(기본 DB 포함 — 기존 635/344명이
+            #    '처음 보는 사람'으로 중복 재생성되는 걸 막으려고 의도적으로 그렇게 했다).
+            #    그래서 `pid` 는 **타깃과 다른 DB의 행**일 수 있다. 그런데 `props` 는 타깃 DB
+            #    스키마(`_fetch_schema(cfg)`)로 만들어졌다. 실측 칸 수: base 54 · appstore 21 ·
+            #    threads 41 · linkedin 37 — 링크드인용 PATCH 를 base 행에 보내면 없는 칸 5개
+            #    (창업 개월·공백 개월·본업 공백·과거 스텔스·대표 콘텐츠) → **400**.
+            #
+            #    400 하나의 폭발 반경: failed += 1 → `pipeline.land:426` 이 `if failed: return`
+            #    → `_commit_hooks` 미호출 → **앱스토어 기준선·스레드 로테이션 커서·링크드인
+            #    seen-store 가 전부 미확정.** 그리고 seen-store 가 안 갱신되니 다음 실행에도 같은
+            #    사람이 같은 `profile_changed` 로 올라와 **같은 400**이 난다 — 사람이 코드를
+            #    고칠 때까지 안 풀리고, 그동안 매 실행이 링크드인을 재수집한다($1.6~$5.2/회).
+            _rp = _ROW_PROPS.get(pid)
+            if not _rp:
+                if pid in created_now:
+                    # 이번 실행에서 방금 만든 행이다 — 스캔 시점엔 없었을 뿐, 타깃 DB에 산다.
+                    # "모른다"가 아니라 "타깃 스키마가 정답"인 경우다.
+                    _rp = schema
+                else:
+                    # 🔴 **모른다.** 스캔이 실패한 DB의 행이거나(그 경우 위에서 이미 소리를 냈다)
+                    #    예상 못 한 경로로 온 pid다. 여기서 갈림길이 셋인데 —
+                    #      ⓐ 아무것도 안 보낸다 → 갱신이 **조용히 증발**한다(에러 없음, 로그는 성공,
+                    #         그 행만 옛 데이터로 남는다). 실패를 삼키는 쪽이라 불변규칙 06 위반.
+                    #      ⓑ 전부 보낸다 → 위의 400 연쇄. 지금까지의 동작이다.
+                    #      ⓒ 모른다고 말한다 → 그 행 **하나만** 실패로 세고 시끄럽게 보고.
+                    #    ⓒ 를 고른다. ⓐ·ⓑ 는 "이 상태가 얼마나 자주 일어나는지"를 영영 못 알려주는데,
+                    #    ⓒ 는 며칠 로그를 보면 빈도가 나오고 그때 진짜 처방을 정할 수 있다.
+                    failed += 1
+                    print(f"  ✗ 갱신 보류 [{cand.get('name', '?')}] — 이 행({pid[:8]})의 실제 칸을 "
+                          f"모른다(착지 DB 스캔에 없었다). 잘못된 칸을 보내면 PATCH 전체가 400 이 "
+                          f"나고 그 한 건이 전 채널 커밋을 정지시킨다 — 보내지 않고 실패로 센다.")
+                    continue
+            row_props = _rp
+
             # ★ 팔로업 표기 — 이 병합이 곧 "재조우로 새 정보가 왔다"는 뜻이다(스레드 새 글·링크드인
             #   프로필 변화 둘 다 이 지점을 지난다). Last Seen=오늘, 재검토=켬.
             #   🔴 켜기만 한다 — 끄는 건 사람이다(운영 규약). 그래서 _PATCH_EXCLUDE에도 들어 있다.
-            #   ⚠️ patch_props는 _build…의 스키마 교집합을 거치지 않는다 — 필드 존재를 확인 없이
-            #     실으면 그 행이 사는 DB에 필드가 없을 때 PATCH 전체가 400으로 죽는다.
-            #     행이 base/채널 어느 DB에 살든 정확하려면 **그 행의 실제 속성**(_ROW_PROPS)으로 가드.
             if fu_on:
-                row_props = _ROW_PROPS.get(pid) or schema
                 if "Last Seen" in row_props:
                     patch_props["Last Seen"] = {"date": {"start": date.today().isoformat()}}
                 if "재검토" in row_props:
@@ -1159,6 +1200,22 @@ def land(cfg: dict, candidates: list[dict], run_id: str) -> tuple[int, int]:
                             print(f"  · 이벤트 기록 실패(무시): {e}")
                     if "재검토 사유" in row_props:
                         patch_props["재검토 사유"] = {"select": {"name": "프로필변화"}}
+            # ═══ 그 행에 실제로 있는 칸만 남긴다 ═════════════════════════════════
+            # 위에서 `row_props` 를 확정했다(모르면 이미 continue 했다). 코드가 이 데이터를
+            # 줄곧 손에 들고 있었는데 4칸에만 썼다 — 나머지에도 쓴다.
+            _drop = sorted(set(patch_props) - set(row_props))
+            if _drop:
+                patch_props = {k: v for k, v in patch_props.items() if k in row_props}
+                # 조용히 버리지 않는다. 이 줄이 자주 뜨면 "행이 사는 DB"와 "타깃 DB"가 갈리는
+                # 빈도가 높다는 뜻이고, 그건 착지 대상 결정 자체를 다시 볼 신호다.
+                print(f"  · 칸 {len(_drop)}개 제외 [{cand.get('name', '?')}] — 이 행이 사는 DB에 "
+                      f"없다: {_drop}")
+            if not patch_props:
+                # 남는 게 없으면 PATCH 자체가 무의미하다(노션은 빈 properties 에 400 을 준다).
+                skipped += 1
+                print(f"  · 갱신 생략 [{cand.get('name', '?')}] — 보낼 수 있는 칸이 하나도 없다")
+                continue
+
             r = _write("PATCH", f"{API}/pages/{pid}", token, {"properties": patch_props})
             if r.status_code != 200:
                 failed += 1
@@ -1198,6 +1255,11 @@ def land(cfg: dict, candidates: list[dict], run_id: str) -> tuple[int, int]:
         pid = r.json().get("id", "")
         if key:
             seen[key] = pid
+        # [W12] 방금 만든 행이라고 표시한다 — 같은 배치에 이 사람이 또 나오면 위 갱신 경로로
+        # 가는데, 그 pid 는 착지 DB 스캔 시점엔 없었으므로 `_ROW_PROPS` 에 없다. 표시가 없으면
+        # 스키마 가드가 "모른다"로 보고 정상 갱신을 실패로 센다.
+        if pid:
+            created_now.add(pid)
         if rest and pid:
             n, nf = append_post_blocks(token, pid, rest)
             appended += n

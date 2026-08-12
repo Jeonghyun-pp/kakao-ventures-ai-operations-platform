@@ -58,16 +58,34 @@ def check(name: str, cond: bool, detail: str = "") -> None:
         FAIL.append(name)
 
 
+# 🔴 [2026-08-13 W12] 살아 있는 데몬이 이 트리에 계속 쓴다 — 그건 우리 위반이 아니다.
+#    `com.kv.approvals` 는 **10분마다** 돌고 `_approvals/launchd.log` 에 append 한다.
+#    그 틱이 이 테스트가 도는 창에 겹치면 "원본 무변경" 이 거짓 실패한다 — 실측 3회 중 1회.
+#    (W12 배치 3 작업 중 우연히 드러났다. 오래 오해할 만한 형태다: 실패가 산발적이고
+#     실패 메시지는 "우리가 썼다"로 읽힌다. 실제로 나는 처음에 내 변경 탓인 줄 알았다.)
+#
+#    ⚠️ 제외를 넓히면 검사가 공허해진다. **append-only 로그만** 뺀다 —
+#    상태 파일(cadence·events·cursor·_approvals/*.json·_alerts)은 그대로 지문에 든다.
+#    즉 "우리가 상태를 건드렸나"는 여전히 잡히고, "데몬이 로그를 늘렸나"만 무시한다.
+_VOLATILE = ("*.log",)
+
+
 def _tree_digest(root: Path) -> str:
-    """디렉토리 내용 지문 — read-only 계약 검증용."""
+    """디렉토리 내용 지문 — read-only 계약 검증용.
+
+    살아 있는 launchd 데몬이 쓰는 로그는 제외한다(위 주석 참조).
+    """
     h = hashlib.sha256()
     for p in sorted(root.rglob("*")):
-        if p.is_file():
-            h.update(str(p.relative_to(root)).encode())
-            try:
-                h.update(p.read_bytes())
-            except OSError:
-                h.update(b"<unreadable>")
+        if not p.is_file():
+            continue
+        if any(p.match(pat) for pat in _VOLATILE):
+            continue
+        h.update(str(p.relative_to(root)).encode())
+        try:
+            h.update(p.read_bytes())
+        except OSError:
+            h.update(b"<unreadable>")
     return h.hexdigest()
 
 
