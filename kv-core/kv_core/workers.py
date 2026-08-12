@@ -165,8 +165,32 @@ def run_bplan_score(task: Task, period: date) -> bool:
     return rc == 0
 
 
+# ─────────────────────────── mail-triage ───────────────────────────
+
+def run_mail_triage(task: Task, period: date) -> bool:
+    """[W11] hello@ 인바운드 분류 — 분류 → 아카이브/초안.
+
+    ## 안전 경계 (코드로 이미 잠겨 있다)
+        아카이브   자동 (`autonomy.archive_auto: true`) — 되돌릴 수 있다
+        회신·포워드 **초안까지만** (`drafts().create`) — `messages().send` 가 리포에 0개
+        `send_enabled: false` · `auto_send_categories: []` · `never_auto_send` 4종
+
+    즉 이 잡이 외부로 내보내는 것은 없다. 사람이 Gmail 초안을 열어 보내야 나간다.
+    비플랜에서 `To do` 를 안 건드린 것과 같은 자리의 경계다.
+    """
+    print(f"▶ mail-triage ({period}) — triage/main.py run")
+    try:
+        rc = subprocess.run([str(_PY), "triage/main.py", "run"],
+                            cwd=_MAIL_PROJ, timeout=1800, check=False).returncode
+    except subprocess.TimeoutExpired:
+        print("🔴 mail-triage: 30분 timeout — 실패 처리")
+        return False
+    return rc == 0
+
+
 WIRED: dict[str, Runner] = {
     "bplan-score": run_bplan_score,
+    "mail-triage": run_mail_triage,
     "appstore-snapshot": run_appstore_snapshot,
     "judge": run_judge,
     "meeting-mail": run_meeting_mail,

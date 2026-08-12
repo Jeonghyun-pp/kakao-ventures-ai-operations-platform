@@ -130,7 +130,14 @@
   origin: system
   covers: [메일관리]
   status: partial
-  notes: 컷오버 전(W5) · 광고아카이빙·Webflow·제안·인바운드 4업무 라우팅 규칙 존재
+  runner: local
+  notes: |
+    [W11 배선 2026-08-12] 분류·라우팅 규칙은 이미 있었는데 **아무도 안 돌리고 있었다**
+    (runner 미지정 → WIRED 밖 → 스케줄러가 loud 스킵). 코드를 새로 쓴 게 아니라 켠 것이다.
+    🔴 안전 경계: 아카이브만 자동(가역)이고 회신·포워드는 **초안까지**다.
+    `messages().send` 가 리포 전체에 0개이고 `autonomy.send_enabled: false` 다.
+    상세 룰(라이언 해외 헬스케어 예외·학회/기업탐방 분리 등)은 인프라 완성 후 다시 정한다 —
+    현재 미반영분은 폴백(#Squad-비플랜 공유)으로 흘러 사람이 본다.
 
 - name: bplan
   skill: mail-harness
