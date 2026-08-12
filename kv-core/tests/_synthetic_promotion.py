@@ -21,6 +21,7 @@
     G10 보낸편지함 조회가 잘렸으면 측정 자체가 무효다
     G11 초안 생성 **이전**에 나간 메일은 짝이 아니다
     G12 자격은 경로별로 본다 — 템플릿 경로 하나로 전체 자격이 생기지 않는다
+    G13 **구분선이 본문 앞쪽에 있어도** 본문을 삼키지 않는다 (테스트 리뷰 HIGH-2)
 
 실행: KV_DATA=<스크래치> python kv-core/tests/_synthetic_promotion.py
 외부 호출 0 — records·sent 를 주입한다(네트워크·시간 의존 없음).
@@ -126,6 +127,24 @@ v6 = P.measure(records=[rec(i) for i in range(6)],
 check("G6 못 찾은 건은 대조 모수에서 빠진다", v6.n == 4, f"n={v6.n} (4 기대)")
 check("G6 못 찾은 건을 별도로 보고한다", len(v6.unmatched) == 2, str(v6.unmatched))
 check("G6 그래서 표본 부족으로 자격 없음", not v6.eligible)
+
+print("\n=== G13: 서명 절단이 본문을 삼키지 않는다 ===\n")
+# 🔴 테스트 리뷰 HIGH-2: G1 픽스처는 서명이 **늘 본문 맨 끝**이라 절단 취소 가드가
+# 한 번도 안 돌았다(커버리지: 해당 분기 미실행). 그래서 옛 `re.S` 버전을 되돌려도
+# G1~G12 가 전부 초록이었다 — HIGH-1(초안을 전부 새로 써도 무수정률 100%)이
+# 그대로 재발해도 못 잡는다는 뜻이다. 구분선을 **앞쪽**에 둔 픽스처로 잠근다.
+_EARLY = ("안녕하세요, 대표님. 카카오벤처스입니다.\n"
+          "--------\n"
+          "저희가 신규 서비스에 관심을 갖고 지켜보던 중 인상적으로 접하게 되어 연락드렸습니다. "
+          "미팅을 요청드립니다. 투자 규모와 일정은 논의하면서 맞춰가면 좋겠습니다. 감사합니다.")
+check("G13 구분선 뒤가 길면 서명이 아니라 본문이다(절단하지 않는다)",
+      "미팅을 요청드립니다" in P.normalize(_EARLY),
+      f"normalize={P.normalize(_EARLY)[:60]!r}")
+g13 = P.measure(records=[rec(i, _EARLY) for i in range(6)],
+                sent=[msg(i, "죄송하지만 이번에는 어렵겠습니다.") for i in range(6)])
+check("G13 그래서 전부 새로 쓰면 무수정 0 이다(구 re.S 로 되돌리면 100%)",
+      g13.unmodified == 0 and not g13.eligible,
+      f"무수정 {g13.unmodified}/6 · 유사도 {[round(x.similarity, 3) for x in g13.pairs]}")
 
 print("\n=== G7~G12: 게이트가 **열리는 쪽**으로 틀리지 않는다 ===\n")
 

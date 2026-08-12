@@ -28,6 +28,7 @@
     K11 **본문 경로에도** 도메인 대조가 걸린다 (2차 리뷰 H1)
     K12 공유 호스팅에서는 도메인 일치를 채택 근거로 쓰지 않는다 (2차 리뷰 H2)
     K13 리다이렉트를 홉마다 재검증하며 따라간다 (2차 리뷰 H3)
+    K14 **s_draft 를 실제로 실행한다** — grep 이 아니라 (테스트 리뷰 HIGH-1)
 
 실행: KV_DATA=<스크래치> python kv-core/tests/_synthetic_contact.py
 외부 네트워크 0 — K9 만 **루프백 로컬 서버**를 띄운다. 스트리밍 상한·데드라인·
@@ -39,6 +40,7 @@ import os
 
 os.environ.setdefault("KV_NO_SEND", "1")
 
+import json  # noqa: E402
 import sys  # noqa: E402
 from pathlib import Path  # noqa: E402
 
@@ -81,11 +83,9 @@ check("K1 해석 결과가 rec 에 실린다",
       rec.get("contact_channel") == "email" and rec.get("founder_email") == "person-ad2ad12c6fa7@example.com",
       str(rec))
 
-# 실제 잡 코드가 이 규율을 지키는지 **소스로** 확인 — 같은 이름 재바인딩은 재발하기 쉽다.
 _job = (_REPO / "skills/net-sourcing/project/jobs/meeting_mail_job.py").read_text(encoding="utf-8")
-check("K1 잡 코드가 후보 변수를 Contact 로 덮어쓰지 않는다",
-      "c = contact.resolve(" not in _job,
-      "meeting_mail_job.py 에 `c = contact.resolve(` 가 있으면 재발")
+# (구) 여기 `"c = contact.resolve(" not in _job` grep 단언이 있었다. 테스트 리뷰가 변이로
+# 무력화를 실증했다 — 이름만 바꾸거나 재바인딩을 한 줄 미루면 통과한다. K14 가 대신한다.
 
 print("\n=== K2: 역할 주소는 개인이 아니다 ===\n")
 role = ["person-d03d4368c236@example.com", "person-640222a0dd49@example.com", "person-22c445ba383f@example.com", "person-ecac354a18d5@example.com",
@@ -122,6 +122,19 @@ bad = [u for u in hostile if C._public_host(u)]
 check("K5 사설·루프백·링크로컬·비 http 는 요청 대상이 아니다", not bad, str(bad))
 check("K5 소셜 링크는 크롤하지 않는다(우리가 이미 가진 정보다)",
       C._public_host("https://kr.linkedin.com/in/x") is None)
+# 🔴 **양성 대조가 없으면 이 함수가 통째로 죽어도 초록이다.**
+# 테스트 리뷰가 `_public_host` 를 항상 None 으로 바꿔도 4본 전부 통과함을 실증했다 —
+# 거부만 시험하면 "전부 거부"가 정답이 되기 때문이다. 그러면 홈페이지 경로가 조용히
+# 죽고 증상은 "이메일을 못 찾았다 → DM"이라 **정상 결과와 구분되지 않는다**.
+import socket as _sock  # noqa: E402
+_orig_gai = _sock.getaddrinfo
+_sock.getaddrinfo = lambda h, *a, **k: [(2, 1, 6, "", ("93.184.216.34", 0))]
+try:
+    check("K5 정상 공개 호스트는 **통과시킨다**(거부만 시험하면 함수가 죽어도 초록이다)",
+          C._public_host("https://acme.io/") == "acme.io",
+          str(C._public_host("https://acme.io/")))
+finally:
+    _sock.getaddrinfo = _orig_gai
 # [2차 리뷰 MED-4] 소스 grep 단언은 형태만 맞으면 통과한다 — 실증된 우회가 있었다
 # (`allow_redirects=bool(1),  # 정책: allow_redirects=False`). K9/K13 이 행위로 잡으므로 삭제.
 
@@ -325,6 +338,55 @@ finally:
 check("K13 홉마다 호스트를 재검증한다(최초 URL 만 보지 않는다)",
       "_public_host(url)" in (_REPO / "skills/net-sourcing/project/core/contact.py")
       .read_text(encoding="utf-8").split("for _ in range(_MAX_HOPS)")[1][:200])
+
+print("\n=== K14: s_draft 를 실제로 실행한다 ===\n")
+# 🔴 테스트 리뷰 HIGH-1: 여기가 이 파일의 존재 이유다.
+# H1(`TypeError: 'Contact' object is not subscriptable`)이 나흘을 살아남은 이유는
+# **그 줄을 아무도 실행하지 않았기 때문**이다. 그래서 잡겠다고 이 파일을 썼는데,
+# K1 이 소스 grep 이라 리뷰가 H1 을 **원형 그대로 재주입했을 때 18/18 이 초록**이었다.
+# 잡겠다고 만든 테스트가 못 잡으면 그건 테스트가 아니라 통과 개수다.
+sys.path.insert(0, str(_REPO / "skills/net-sourcing/project"))
+from jobs import meeting_mail_job as MM  # noqa: E402
+
+_jid = "meeting-mail-k14"
+_work = MM._work(_jid)
+_work.mkdir(parents=True, exist_ok=True)
+(_work / "candidates.json").write_text(json.dumps([{
+    "page_id": "pg-k14", "name": "루프톤", "one_liner": "AI 재고 최적화",
+    "raw_text": "연락은 person-ad2ad12c6fa7@example.com 로 주세요", "homepage": "https://acme.io",
+    "linkedin_url": "https://linkedin.com/in/jihoon"}], ensure_ascii=False), encoding="utf-8")
+
+# `contact` 는 s_draft 안에서 import 되므로 모듈 속성이 아니다 — 원본 모듈을 갈아끼운다.
+_orig = (MM.session.run_session, MM._cfg, C.from_site)
+MM.session.run_session = lambda prompt, **kw: json.dumps([{
+    "to": "x", "subject": "[카카오벤처스] 루프톤 미팅 요청의 건",
+    "body": "안녕하세요, 루프톤 김철수 대표님\n\n" + "본문 " * 40}], ensure_ascii=False)
+MM._cfg = lambda: {"meeting_mail": {"max_drafts_per_run": 3}}
+C.from_site = lambda *a, **k: ([], [])                 # 네트워크 0
+try:
+    MM.s_draft("net-sourcing", _jid)
+    crashed = None
+except Exception as e:                                 # noqa: BLE001
+    crashed = e
+finally:
+    MM.session.run_session, MM._cfg, C.from_site = _orig
+
+check("K14 s_draft 가 끝까지 돈다(후보 dict 를 Contact 로 덮으면 여기서 죽는다)",
+      crashed is None, repr(crashed) if crashed else "")
+_dp = MM._drafts_path(_jid)
+_rows = [json.loads(x) for x in _dp.read_text(encoding="utf-8").splitlines()] if _dp.exists() else []
+check("K14 초안이 실제로 기록된다", len(_rows) == 1, f"{len(_rows)}건")
+if _rows:
+    d = _rows[0]
+    check("K14 후보 식별자가 살아 있다(재바인딩되면 여기가 깨진다)",
+          d.get("page_id") == "pg-k14" and d.get("name") == "루프톤", str(d.get("page_id")))
+    check("K14 연락처 해석 결과가 실린다",
+          d.get("contact_channel") == "email" and d.get("founder_email") == "person-ad2ad12c6fa7@example.com",
+          f"{d.get('contact_channel')} / {d.get('founder_email')}")
+    check("K14 도메인 검증 결과까지 실린다(자동 발송이 읽을 값)",
+          d.get("contact_verified") is True, str(d.get("contact_verified")))
+    check("K14 수신자는 코드가 정한다(LLM 출력 불신)",
+          d.get("to") == MM.RECIPIENT, str(d.get("to")))
 
 # ══════════════════════════════════════════════════════════════════════
 print()
