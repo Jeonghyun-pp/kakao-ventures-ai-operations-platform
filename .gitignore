@@ -38,6 +38,14 @@ digests/
 analysis/
 state/
 jobs/
+# 🔴 [2026-08-12] 위 `jobs/` 는 **런타임 잡 디렉토리**(KV_DATA/<skill>/jobs/)를 겨냥한 것인데
+#    **소스** `skills/*/project/jobs/` 까지 잡고 있었다. 기존 파일(judge_job·mail_job)은 규칙보다
+#    먼저 추가돼 살아남았을 뿐이고, **새로 만드는 잡 파일은 조용히 커밋에서 빠진다** —
+#    로컬은 멀쩡히 돌고 테스트도 통과하는데 리포엔 없다(clone 하면 스테이지가 사라진 상태).
+#    실제로 오늘 bplan_score_job.py 가 이렇게 누락될 뻔했다. 소스 경로만 되살린다.
+#    (디렉토리가 제외되면 그 안 파일은 되살릴 수 없으므로 디렉토리부터 negate 한다.)
+!skills/*/project/jobs/
+!skills/*/project/jobs/*.py
 Drop_Mail_Drafts.md
 *.log
 logs/
