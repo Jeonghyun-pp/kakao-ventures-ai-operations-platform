@@ -45,7 +45,12 @@
   cadence: daily
   catch_up: coalesce
   watermark: last_success
-  resources: [claude, notion]   # gmail 없음 — draft-after-approve 라 gmail 부작용은 approvals tick 소관
+  # [2026-08-13 W12] `notion` 을 뺐다 — 선언이 낡아 코드와 갈라져 있었고, 코드가 정본이다.
+  # meeting_mail_job:318-321 (W9 C-M10): 노션은 collect 에서 수 초 쓰는 읽기인데 파이프라인
+  # 전체 락으로 잡으면 claude 초안(최대 15분) 동안 judge·sourcing 이 굶는다.
+  # 선언만 남겨두면 "락을 잡는다"고 믿게 만든다 — 발동하지 않는 가드다(ADR 0002).
+  # gmail 없음 — draft-after-approve 라 gmail 부작용은 approvals tick 소관.
+  resources: [claude]
   stages: [collect-catch, draft, request-approval]
   origin: system
   runner: local

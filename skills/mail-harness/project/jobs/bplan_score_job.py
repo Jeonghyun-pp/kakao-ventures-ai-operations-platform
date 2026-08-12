@@ -371,7 +371,17 @@ def main(argv=None) -> int:
         jid = cand
         break
     job.create(SKILL, {"kind": "bplan-score", "period": date.today().isoformat()}, jid)
-    return 0 if job.run_pipeline(SKILL, jid, _stages()) else 1
+    # 🔴 [2026-08-13 W12] 여기엔 `0 if job.run_pipeline(...) else 1` 이라 적혀 있었다.
+    #    `run_pipeline` 은 `Derived` 데이터클래스를 돌려주는데 `__bool__`·`__len__` 이 없어
+    #    **항상 truthy** 다 — 잡이 failed 여도, 슬롯 경합으로 queued 여도 rc=0 이었다.
+    #    귀결 둘: ① 러너가 True 를 돌려 워터마크가 실행 없이 전진한다(ADR 0004 결정 ② 위반,
+    #    at-least-once 붕괴) ② 위 `-r2` 재시도 루프는 당일 base 가 failed 여야 도는데
+    #    rc=0 이라 스케줄러가 재발화를 안 해 **재시도 3회 설계가 통째로 사문**이었다.
+    #    judge_job:427 · meeting_mail_job:323 은 처음부터 `d.state` 를 봤다 — 이 잡만 달랐다.
+    #    resources 도 빠져 있었다. tasks.yaml:109 가 [claude, notion-bplan] 을 선언했지만
+    #    인자로 안 넘어가 **claude 직렬화 밖**이었다(gate 의 TOCTOU 감수 전제가 깨진다).
+    d = job.run_pipeline(SKILL, jid, _stages(), resources=["claude", "notion-bplan"])
+    return 0 if d.state == "completed" else 1
 
 
 def _synthetic() -> int:

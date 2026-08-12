@@ -185,6 +185,59 @@ check("C2 meeting_mail 이 judge 의 블록을 삼키지 않았다", not stolen,
       f"삼킨 키 {stolen}" if stolen else f"자기 키만: {sorted(mm)}")
 
 # ══════════════════════════════════════════════════════════════════════
+print("\n=== C4: tasks.yaml 의 resources 선언이 코드 인자와 일치한다 ===\n")
+# 리뷰 E(F3)·C(F-B2) 가 독립적으로 짚은 것 — 선언과 집행이 다른 파일에 있고 대조기가 없었다.
+#
+#     tasks.yaml   bplan-score:  resources: [claude, notion-bplan]
+#     잡 소스      run_pipeline(SKILL, jid, _stages())        ← 인자 없음
+#
+# 선언이 사문이면 claude 직렬화(ADR 0003 결정 ③)가 그 task 에서만 조용히 꺼진다.
+tasks = yaml.safe_load((_REPO / "config/tasks.yaml").read_text(encoding="utf-8")) or {}
+_tlist = tasks.get("tasks") if isinstance(tasks, dict) else tasks
+declared = {t["name"]: sorted(t.get("resources") or [])
+            for t in (_tlist or []) if isinstance(t, dict) and t.get("name")}
+
+mismatch: list[str] = []
+rc_bad: list[str] = []
+seen_jobs = 0
+for jp in sorted(_REPO.glob("skills/*/project/jobs/*_job.py")):
+    src = jp.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        continue
+    for n in ast.walk(tree):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "run_pipeline"):
+            continue
+        seen_jobs += 1
+        got = sorted(el.value for kw in n.keywords if kw.arg == "resources"
+                     and isinstance(kw.value, ast.List)
+                     for el in kw.value.elts
+                     if isinstance(el, ast.Constant) and isinstance(el.value, str))
+        # task 이름은 잡 파일명에서 유도한다(bplan_score_job.py → bplan-score)
+        tname = jp.stem.removesuffix("_job").replace("_", "-")
+        want = declared.get(tname)
+        if want is None:
+            continue                       # tasks.yaml 에 없는 잡은 이 검사 대상이 아니다
+        if got != want:
+            mismatch.append(f"{tname}: 선언 {want} ≠ 인자 {got or '없음'}")
+
+    # rc 매핑 — `0 if <run_pipeline 호출> else 1` 은 Derived 가 항상 truthy 라 언제나 0 이다.
+    for n in ast.walk(tree):
+        if (isinstance(n, ast.IfExp) and isinstance(n.test, ast.Call)
+                and isinstance(n.test.func, ast.Attribute)
+                and n.test.func.attr == "run_pipeline"):
+            rc_bad.append(f"{jp.name}: run_pipeline 반환을 직접 진위로 쓴다 "
+                          f"(Derived 는 __bool__ 이 없어 **항상 참**)")
+
+check("C4 선언 resources 와 run_pipeline 인자가 일치한다", not mismatch,
+      "\n       ".join(mismatch))
+check("C4 러너 rc 를 run_pipeline 반환의 진위로 정하지 않는다", not rc_bad,
+      "\n       ".join(rc_bad))
+check("C4 잡을 실제로 훑었다", seen_jobs >= 3, f"run_pipeline 호출 {seen_jobs}곳")
+
+# ══════════════════════════════════════════════════════════════════════
 print("\n=== C3: 경로 추출이 실제로 동작한다 ===\n")
 # 추출기가 조용히 0을 뱉으면 C1 은 항상 초록이 된다 — 검증의 검증.
 check("C3 설정 경로를 충분히 뽑았다(추출이 죽으면 C1 이 공허하다)", total >= 20,
