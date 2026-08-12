@@ -248,6 +248,7 @@ def s_draft(skill: str, job_id: str) -> None:
             rec["founder_email"] = ct.email or ""
             rec["contact_handle"] = ct.handle or ""
             rec["contact_source"] = ct.source
+            rec["contact_verified"] = ct.verified
             rec["page_id"] = c["page_id"]
             rec["name"] = c["name"]
             with open(dpath, "a", encoding="utf-8") as f:      # 후보 단위 커서
@@ -285,7 +286,8 @@ def s_request_approval(skill: str, job_id: str) -> None:
                      "contact_channel": d.get("contact_channel", ""),
                      "founder_email": d.get("founder_email", ""),
                      "contact_handle": d.get("contact_handle", ""),
-                     "contact_source": d.get("contact_source", "")})
+                     "contact_source": d.get("contact_source", ""),
+                     "contact_verified": bool(d.get("contact_verified"))})
 
     job.process_items(skill, job_id, drafts, key=lambda d: d["page_id"],
                       process=_enqueue, stage="request-approval")

@@ -90,16 +90,22 @@ def _card(r: dict) -> str:
     ch = _mrkdwn(p.get("contact_channel") or "")
     line = ""
     if ch == "email" and p.get("founder_email"):
-        line = (f"📧 창업자 메일: {_mask(p['founder_email'])}  "
-                f"({_mrkdwn(p.get('contact_source', ''))})\n")
+        # 검증 여부를 카드가 말한다. "찾았다"와 "그 회사 것이 맞다"는 다른 사실이고,
+        # 섞으면 심사역이 미검증 주소를 검증된 것으로 읽는다.
+        v = "✅ 도메인 확인" if p.get("contact_verified") else "⚠️ **도메인 미검증 — 확인 후 사용**"
+        line = (f"📧 창업자 메일: {_mask(p['founder_email'])}  {v}\n"
+                f"    출처: {_mrkdwn(p.get('contact_source', ''))}\n")
     elif ch in ("linkedin_dm", "threads_dm"):
         where = "링크드인" if ch == "linkedin_dm" else "스레드"
         line = (f"💬 **공개 이메일 없음 → {where} DM 으로 보내야 함**\n"
                 f"    대상: {_mrkdwn(str(p.get('contact_handle') or '-'))}\n")
     elif ch == "ambiguous":
-        # 후보가 여럿이라 코드가 고르지 않았다 — 고르는 것은 사람의 일이다.
-        line = (f"🔎 **이메일 후보가 여럿이라 정하지 않았다** — 사람이 고른다\n"
+        # 코드가 고르지 않았다 — 고르는 것은 사람의 일이다. 다만 **가진 것은 다 준다**:
+        # DM 대상까지 빼앗으면 심사역이 노션으로 되돌아가야 한다.
+        line = (f"🔎 **이메일을 확정하지 못했다 — 사람이 고른다**\n"
                 f"    {_mrkdwn(p.get('contact_source', ''))}\n")
+        if p.get("contact_handle"):
+            line += f"    DM 대상: {_mrkdwn(str(p['contact_handle']))}\n"
     elif ch == "none":
         line = "⚠️ **연락 수단을 못 찾았다** — 사람이 직접 찾아야 한다\n"
 

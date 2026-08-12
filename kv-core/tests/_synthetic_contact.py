@@ -25,6 +25,9 @@
     K8  카드에 나가는 외부 문자열은 슬랙 제어문자를 못 만든다
     K9  크롤은 적대적인 서버를 견딘다 — **실제 HTTP 로 태운다**
     K10 홈페이지 탐색이 루트 기준으로 돌고, 도메인이 다른 주소는 안 쓴다
+    K11 **본문 경로에도** 도메인 대조가 걸린다 (2차 리뷰 H1)
+    K12 공유 호스팅에서는 도메인 일치를 채택 근거로 쓰지 않는다 (2차 리뷰 H2)
+    K13 리다이렉트를 홉마다 재검증하며 따라간다 (2차 리뷰 H3)
 
 실행: KV_DATA=<스크래치> python kv-core/tests/_synthetic_contact.py
 외부 네트워크 0 — K9 만 **루프백 로컬 서버**를 띄운다. 스트리밍 상한·데드라인·
@@ -119,9 +122,8 @@ bad = [u for u in hostile if C._public_host(u)]
 check("K5 사설·루프백·링크로컬·비 http 는 요청 대상이 아니다", not bad, str(bad))
 check("K5 소셜 링크는 크롤하지 않는다(우리가 이미 가진 정보다)",
       C._public_host("https://kr.linkedin.com/in/x") is None)
-check("K5 리다이렉트를 추종하지 않는다(호스트 검사 우회 차단)",
-      "allow_redirects=False" in (_REPO / "skills/net-sourcing/project/core/contact.py")
-      .read_text(encoding="utf-8"))
+# [2차 리뷰 MED-4] 소스 grep 단언은 형태만 맞으면 통과한다 — 실증된 우회가 있었다
+# (`allow_redirects=bool(1),  # 정책: allow_redirects=False`). K9/K13 이 행위로 잡으므로 삭제.
 
 print("\n=== K6: 스크립트·주석의 문자열은 연락처가 아니다 ===\n")
 noise_html = ('<script>Sentry.init({dsn:"https://person-da3b4eebfc61@example.com/1"});</script>'
@@ -206,21 +208,31 @@ class _Hostile(BaseHTTPRequestHandler):
 _srv = HTTPServer(("127.0.0.1", 0), _Hostile)
 threading.Thread(target=_srv.serve_forever, daemon=True).start()
 _base = f"http://127.0.0.1:{_srv.server_port}"
+# [2차 리뷰 H3] `_fetch` 는 이제 **홉마다** `_public_host` 로 재검증한다(리다이렉트 추종을
+# 되살리면서 SSRF 를 막는 방식). 그래서 루프백 서버로 본문 처리를 시험하려면 그 검사만
+# 비켜야 한다 — 검사 자체는 바로 아래 "resolve 는 루프백을 크롤하지 않는다"가 지킨다.
+_saved_host = C._public_host
+_ok_hostport = f"127.0.0.1:{_srv.server_port}"
+# **테스트 서버 포트만** 허용한다. 다른 곳(리다이렉트 목적지)은 진짜 검사를 그대로 탄다 —
+# 그래야 "홉마다 재검증한다"가 실물로 시험된다(전부 허용하면 그 검사가 검증 밖으로 나간다).
+C._public_host = lambda u: "127.0.0.1" if _ok_hostport in str(u) else _saved_host(u)
 try:
     body = C._fetch(f"{_base}/huge")
     check("K9 거대 응답을 상한에서 끊는다(전량 수신 후 자르지 않는다)",
           len(body) <= C._MAX_BYTES + 8192, f"수신 {len(body):,}자 · 상한 {C._MAX_BYTES:,}")
     check("K9 HTML 이 아니면 읽지 않는다", C._fetch(f"{_base}/binary") == "",
           "바이너리에서 이메일 정규식을 돌리지 않는다")
-    check("K9 리다이렉트를 추종하지 않는다(호스트 검사 우회 차단)",
-          C._fetch(f"{_base}/redir") == "")
+    check("K9 리다이렉트가 내부를 가리키면 그 홉에서 멈춘다(추종은 하되 재검증한다)",
+          C._fetch(f"{_base}/redir") == "",
+          "302 → http://127.0.0.1/internal 은 홉 검증에 걸린다")
     check("K9 정상 페이지는 읽는다(K9 가 전부 막는 게 아님을 보인다)",
           "person-ad2ad12c6fa7@example.com" in C._fetch(f"{_base}/ok"))
-    check("K9 그럼에도 resolve 는 루프백을 크롤 대상으로 삼지 않는다",
-          C.resolve({"homepage": f"{_base}/ok"}, crawl=True).channel == "none",
-          "SSRF 차단이 _fetch 앞단에서 걸린다")
 finally:
+    C._public_host = _saved_host
     _srv.shutdown()
+check("K9 그럼에도 resolve 는 루프백을 크롤 대상으로 삼지 않는다",
+      C.resolve({"homepage": f"{_base}/ok"}, crawl=True).channel == "none",
+      "SSRF 차단이 살아 있다 — 위 스텁을 되돌린 뒤 확인한다")
 
 print("\n=== K10: 홈페이지 탐색은 루트 기준 · 도메인이 다르면 안 쓴다 ===\n")
 _seen: list[str] = []
@@ -246,6 +258,73 @@ try:
     check("K10 무엇을 두드렸는지 남긴다(사람이 검증할 수 있게)", len(tried) >= 2, str(tried))
 finally:
     C._fetch, C._public_host = _orig_fetch, _orig_host
+
+print("\n=== K11~K13: 2차 리뷰 — 대조를 한 곳에만 걸었던 것 ===\n")
+# K11 본문 경로. 여기가 이메일의 **주 공급원**인데 검사가 없었다.
+r = C.resolve({"raw_text": "제작 문의: person-094ed0b9b649@example.com",
+               "homepage": "https://acme.io", "linkedin_url": "https://linkedin.com/in/x"},
+              crawl=False)
+check("K11 회사 도메인과 다른 원문 주소는 채택하지 않는다",
+      r.channel == "ambiguous" and not r.email, f"{r.channel} / {r.email}")
+check("K11 그래도 DM 대상은 남긴다(가진 것을 빼앗지 않는다)", bool(r.handle), str(r.handle))
+ok1 = C.resolve({"raw_text": "연락: person-ad2ad12c6fa7@example.com", "homepage": "https://acme.io"}, crawl=False)
+check("K11 같은 도메인이면 채택하고 verified 로 표시한다",
+      ok1.channel == "email" and ok1.verified, f"{ok1.channel} verified={ok1.verified}")
+nov = C.resolve({"raw_text": "연락: person-ad2ad12c6fa7@example.com"}, crawl=False)
+check("K11 대조할 홈페이지가 없으면 채택하되 **미검증**으로 표시한다",
+      nov.channel == "email" and not nov.verified and "미검증" in nov.source, nov.source)
+
+# K12 공유 호스팅 — 대조가 가장 필요한 표본에서 무너지던 지점
+check("K12 공유 호스팅은 도메인 일치를 근거로 쓰지 않는다",
+      C._same_org("person-07216f15a293@example.com", "https://acme.github.io") is None
+      and C._same_org("person-282a619106c6@example.com", "https://blog.naver.com/acme") is None)
+check("K12 자체 도메인은 정상 대조된다",
+      C._same_org("person-85199c8ed3d4@example.com", "https://acme.io") is True
+      and C._same_org("person-689a9aaeef35@example.com", "https://acme.io") is False)
+sh = C.resolve({"raw_text": "연락: person-07216f15a293@example.com",
+                "homepage": "https://acme.github.io"}, crawl=False)
+check("K12 공유 호스팅에서 온 주소는 verified 가 아니다", not sh.verified, sh.source)
+
+# K13 리다이렉트 — 실제 HTTP 로 확인한다
+class _Redir(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        if self.path == "/start":
+            self.send_response(301)
+            self.send_header("Location", "/final")     # 상대 Location
+            self.end_headers()
+        elif self.path == "/final":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write("<p>대표 person-ad2ad12c6fa7@example.com</p>".encode())
+        elif self.path == "/loop":
+            self.send_response(302)
+            self.send_header("Location", "/loop")      # 무한 루프
+            self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+_s2 = HTTPServer(("127.0.0.1", 0), _Redir)
+threading.Thread(target=_s2.serve_forever, daemon=True).start()
+_b2 = f"http://127.0.0.1:{_s2.server_port}"
+_orig_host = C._public_host
+C._public_host = lambda u: "127.0.0.1"                 # 홉 검증은 통과시키고 추종만 시험
+try:
+    check("K13 301 을 따라가 최종 페이지를 읽는다",
+          "person-ad2ad12c6fa7@example.com" in C._fetch(f"{_b2}/start"),
+          "http:// 홈페이지 2,778건(30%)이 이것 때문에 죽고 있었다")
+    check("K13 리다이렉트 루프에서 멈춘다(홉 상한)", C._fetch(f"{_b2}/loop") == "")
+finally:
+    C._public_host = _orig_host
+    _s2.shutdown()
+check("K13 홉마다 호스트를 재검증한다(최초 URL 만 보지 않는다)",
+      "_public_host(url)" in (_REPO / "skills/net-sourcing/project/core/contact.py")
+      .read_text(encoding="utf-8").split("for _ in range(_MAX_HOPS)")[1][:200])
 
 # ══════════════════════════════════════════════════════════════════════
 print()
