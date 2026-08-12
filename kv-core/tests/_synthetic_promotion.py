@@ -13,6 +13,15 @@
     G5  둘 다 충족해야 자격 — 그리고 **이 모듈은 켜지 않는다**(재서 보고만)
     G6  보낸 기록을 못 찾은 건은 '무수정'으로 세지 않는다(침묵을 성공으로 오독 금지)
 
+적대 리뷰(2026-08-11)가 뚫은 구멍들 — 전부 "게이트가 **열리는** 쪽"으로 틀렸다:
+
+    G7  하나의 발송이 여러 초안의 짝이 될 수 없다(1:1 소비)
+    G8  본문을 못 얻은 건은 무수정이 아니라 **측정 불가**다
+    G9  날짜·금액·부정 전환은 유사도가 높아도 수정이다
+    G10 보낸편지함 조회가 잘렸으면 측정 자체가 무효다
+    G11 초안 생성 **이전**에 나간 메일은 짝이 아니다
+    G12 자격은 경로별로 본다 — 템플릿 경로 하나로 전체 자격이 생기지 않는다
+
 실행: KV_DATA=<스크래치> python kv-core/tests/_synthetic_promotion.py
 외부 호출 0 — records·sent 를 주입한다(네트워크·시간 의존 없음).
 """
@@ -44,13 +53,16 @@ BODY = ("안녕하세요, 대표님. 카카오벤처스입니다. 저희가 신�
         "인상적으로 접하게 되어 연락드렸습니다. 미팅을 요청드립니다. 감사합니다.")
 
 
-def rec(i: int, body: str = BODY) -> dict:
-    return {"key": f"k{i}", "kind": "mail", "draft_id": "d", "executed_at": "2026-08-10",
-            "payload": {"subject": f"[카카오벤처스] 팀{i} 미팅 요청의 건", "body": body}}
+def rec(i: int, body: str = BODY, task: str = "meeting-mail") -> dict:
+    return {"key": f"k{i}", "kind": "mail", "draft_id": "d", "task": task,
+            "decision": "approved", "executed_at": "2026-08-10",
+            "payload": {"subject": f"[카카오벤처스] 팀{i} 미팅 요청의 건", "body": body,
+                        "founder_email": "person-093bbe143bc9@example.com"}}
 
 
 def msg(i: int, body: str) -> dict:
-    return {"id": str(i), "to": "person-093bbe143bc9@example.com", "date": "",
+    return {"id": str(i), "to": "person-093bbe143bc9@example.com", "date": "Tue, 11 Aug 2026 09:00:00 +0900",
+            "body_ok": True,
             "subject": f"[카카오벤처스] 팀{i} 미팅 요청의 건", "body": body}
 
 
@@ -114,6 +126,59 @@ v6 = P.measure(records=[rec(i) for i in range(6)],
 check("G6 못 찾은 건은 대조 모수에서 빠진다", v6.n == 4, f"n={v6.n} (4 기대)")
 check("G6 못 찾은 건을 별도로 보고한다", len(v6.unmatched) == 2, str(v6.unmatched))
 check("G6 그래서 표본 부족으로 자격 없음", not v6.eligible)
+
+print("\n=== G7~G12: 게이트가 **열리는 쪽**으로 틀리지 않는다 ===\n")
+
+# G7 같은 제목·수신자로 5건 초안, 실제로 그대로 나간 건 1건뿐
+same = [{**rec(0), "key": f"k{i}"} for i in range(5)]
+g7 = P.measure(records=same,
+               sent=[msg(0, BODY)] + [{**msg(0, "전혀 다른 본문을 새로 썼습니다."), "id": str(i)}
+                                      for i in range(1, 5)])
+check("G7 발송 1건이 초안 5건의 짝이 되지 않는다", g7.unmodified <= 1,
+      f"무수정 {g7.unmodified} (≤1 기대)")
+check("G7 짝짓기가 모호하면 자격을 주지 않는다", not g7.eligible and g7.ambiguous_n > 0,
+      f"모호 {g7.ambiguous_n}")
+
+# G8 본문이 비었거나 디코드 실패
+g8 = P.measure(records=[rec(0, "")] + [rec(i) for i in range(1, 6)],
+               sent=[{**msg(0, ""), "body_ok": False}] + [msg(i, BODY) for i in range(1, 6)])
+check("G8 빈 본문은 무수정으로 세지 않는다", g8.n == 5 and len(g8.invalid) == 1,
+      f"n={g8.n} 측정불가={g8.invalid}")
+
+# G9 유사도는 높은데 의미 토큰이 바뀐 경우 — 사람이 고치는 것 대부분이 이 형태다
+SEM = BODY + " 8월 20일 오후 2시, 5억 규모로 논의드리면 좋겠습니다."
+sems = [SEM.replace("8월 20일", "8월 27일"), SEM.replace("5억", "50억"),
+        SEM.replace("좋겠습니다", "어렵겠습니다"),
+        SEM.replace("오후 2시", "오전 10시"), SEM + " 참고 부탁드립니다."]
+g9 = P.measure(records=[rec(i, SEM) for i in range(5)],
+               sent=[msg(i, b) for i, b in enumerate(sems)])
+check("G9 날짜·금액·부정 전환은 유사도가 높아도 수정이다",
+      sum(1 for x in g9.pairs if x.modified) >= 4,
+      f"수정 {sum(1 for x in g9.pairs if x.modified)}/5 · "
+      f"유사도 {[round(x.similarity, 2) for x in g9.pairs]}")
+
+# G10 조회가 상한에서 잘림
+g10 = P.measure(records=[rec(i) for i in range(6)],
+                sent=[msg(i, BODY) for i in range(6)], truncated=True)
+check("G10 조회가 잘리면 rate 100% 여도 자격 없음", g10.rate == 1.0 and not g10.eligible)
+check("G10 잘림을 표본 부족이 아니라 **측정 무효**로 보고한다",
+      "측정 무효" in g10.report())
+
+# G11 초안 생성보다 **앞선** 발송 — 같은 창업자에게 전에 보낸 다른 메일이 짝이 될 수 없다
+g11 = P.measure(records=[rec(i) for i in range(5)],
+                sent=[{**msg(i, BODY), "date": "Mon, 03 Aug 2026 09:00:00 +0900"}
+                      for i in range(5)])
+check("G11 초안 이전에 나간 메일은 짝이 아니다", g11.n == 0 and len(g11.unmatched) == 5,
+      f"n={g11.n}")
+
+# G12 템플릿 경로(비플랜 드랍)는 구조적으로 무수정 100% — 그걸로 전체 자격이 생기면 안 된다
+g12 = P.measure(
+    records=[rec(i, task="bplan-drop") for i in range(6)]
+            + [rec(i + 100, task="meeting-mail") for i in range(2)],
+    sent=[msg(i, BODY) for i in range(6)] + [msg(i + 100, BODY) for i in range(2)])
+check("G12 경로별로 본다 — 쉬운 경로 하나로 전체 자격이 생기지 않는다", not g12.eligible,
+      f"by_task={g12.by_task}")
+check("G12 경로별 내역을 보여준다", len(g12.by_task) == 2, str(g12.by_task))
 
 # ══════════════════════════════════════════════════════════════════════
 print()

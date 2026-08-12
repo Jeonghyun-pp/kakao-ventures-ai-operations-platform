@@ -40,52 +40,121 @@ def get_draft(draft_id: str, *, svc=None) -> dict | None:
         return None
 
 
-def sent_messages(*, days: int = 30, query: str = "", svc=None) -> list[dict]:
-    """보낸 메일 목록(헤더 + 본문) — **읽기 전용.** [W10 무수정률 측정]
+def sent_messages(*, days: int = 30, query: str = "", svc=None,
+                  max_messages: int = 2000) -> tuple[list[dict], bool]:
+    """보낸 메일 목록(헤더 + 본문) — **읽기 전용.** 반환: (메시지들, 잘렸나).
 
-    W10 승격 게이트가 "심사역이 초안을 고치지 않고 그대로 보냈나"를 재려면 실제로 나간
-    메일을 읽어야 한다. `gmail.modify` 스코프가 이미 읽기를 포함하므로 권한 추가는 없다.
+    [W10 무수정률 측정] 승격 게이트가 "심사역이 초안을 고치지 않고 그대로 보냈나"를 재려면
+    실제로 나간 메일을 읽어야 한다. `gmail.modify` 스코프가 이미 읽기를 포함한다.
 
-    ⚠️ 이 함수는 **읽기만 한다.** AST 무발송 검사가 이 모듈에 `.send()` 가 0건임을 매 커밋
-    확인하고, 이 함수도 그 검사 아래 있다.
+    [적대리뷰 MED-3] 예전엔 `maxResults=200` 한 번만 부르고 페이지네이션이 없었다.
+    21일치가 200건을 넘는 건 hello@ 에서 흔한데, 잘린 건은 측정에서 `unmatched` 로 빠져
+    **n 이 줄고 게이트가 안 열린다** — 그리고 리포트는 그걸 "아직 안 보냈나 보다"로
+    **틀리게 설명했다**. 이제 끝까지 읽고, 상한에 걸리면 **잘렸다는 사실을 반환**한다.
+    측정 쪽은 잘린 결과로 자격을 판정하면 안 된다.
+
+    ⚠️ 읽기만 한다. AST 무발송 검사가 이 모듈에 `.send()` 0건임을 매 커밋 확인한다.
     """
     svc = svc or service()
     q = f"in:sent newer_than:{int(days)}d" + (f" {query}" if query else "")
-    out: list[dict] = []
-    try:
-        page = svc.users().messages().list(userId="me", q=q, maxResults=200).execute()
-    except Exception as e:                        # noqa: BLE001
-        print(f"⚠️  gmail.sent_messages 목록 실패: {type(e).__name__}: {e}")
-        return out
-    for m in page.get("messages", []) or []:
+    ids: list[str] = []
+    token = None
+    truncated = False
+    while True:
         try:
-            full = svc.users().messages().get(userId="me", id=m["id"], format="full").execute()
+            page = svc.users().messages().list(
+                userId="me", q=q, maxResults=500,
+                **({"pageToken": token} if token else {})).execute()
+        except Exception as e:                    # noqa: BLE001
+            print(f"⚠️  gmail.sent_messages 목록 실패: {type(e).__name__}: {e}")
+            return [], True                       # 못 읽었으면 '잘림'으로 본다(측정 무효)
+        ids += [m["id"] for m in (page.get("messages") or [])]
+        token = page.get("nextPageToken")
+        if not token:
+            break
+        if len(ids) >= max_messages:
+            truncated = True
+            break
+
+    out: list[dict] = []
+    for mid in ids[:max_messages]:
+        try:
+            full = svc.users().messages().get(userId="me", id=mid, format="full").execute()
         except Exception:                         # noqa: BLE001  한 건 실패가 측정을 죽이지 않는다
             continue
-        hdr = {h["name"].lower(): h["value"]
-               for h in (full.get("payload", {}).get("headers") or [])}
-        out.append({"id": m["id"], "to": hdr.get("to", ""), "subject": hdr.get("subject", ""),
-                    "date": hdr.get("date", ""), "body": _plain_body(full.get("payload", {}))})
-    return out
+        payload = full.get("payload", {}) or {}
+        hdr = {h["name"].lower(): h["value"] for h in (payload.get("headers") or [])}
+        body, ok = _plain_body(payload)
+        out.append({"id": mid, "to": hdr.get("to", ""), "subject": hdr.get("subject", ""),
+                    "date": hdr.get("date", ""), "body": body, "body_ok": ok})
+    return out, truncated
 
 
-def _plain_body(payload: dict) -> str:
-    """MIME 트리에서 text/plain 을 꺼낸다(없으면 첫 텍스트 파트)."""
+_TAG = __import__("re").compile(r"<[^>]+>")
+_BR = __import__("re").compile(r"<br\s*/?>|</p>|</div>", __import__("re").I)
+
+
+def _charset(part: dict) -> str:
+    for h in part.get("headers") or []:
+        if h.get("name", "").lower() == "content-type":
+            m = __import__("re").search(r'charset="?([\w-]+)"?', h.get("value", ""), __import__("re").I)
+            if m:
+                return m.group(1)
+    return "utf-8"
+
+
+def _decode_part(part: dict) -> str | None:
+    """파트 본문 디코드. 실패는 **None** — 조용한 빈 문자열은 측정을 오염시킨다.
+
+    [적대리뷰 HIGH-3/MED-2] 예전엔 실패 시 `""` 를 돌려줬다. 빈 문자열 둘의 유사도는
+    difflib 에서 **1.0** 이라 "무수정"이 공짜로 적립됐다. 그리고 charset 을 안 읽어
+    euc-kr 한국어가 통째로 깨져 '거짓 수정'이 됐다.
+    """
     import base64 as _b64
-
-    def _decode(d):
+    data = (part.get("body") or {}).get("data")
+    if not data:
+        return None
+    try:
+        raw = _b64.urlsafe_b64decode(data + "==")   # 패딩 관대
+    except Exception:                             # noqa: BLE001
+        return None
+    for enc in (_charset(part), "utf-8", "cp949"):
         try:
-            return _b64.urlsafe_b64decode(d.encode()).decode("utf-8", "replace")
-        except Exception:                         # noqa: BLE001
-            return ""
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return None
 
-    if payload.get("mimeType") == "text/plain":
-        return _decode((payload.get("body") or {}).get("data") or "")
-    for part in payload.get("parts") or []:
-        got = _plain_body(part)
-        if got:
-            return got
-    return _decode((payload.get("body") or {}).get("data") or "")
+
+def _plain_body(payload: dict) -> tuple[str, bool]:
+    """MIME 트리 → (본문, 신뢰 가능한가).
+
+    [적대리뷰 MED-1] 예전 폴백은 mimeType 검사 없이 `data` 만 있으면 본문으로 삼았다 —
+    HTML 은 물론 **인라인 이미지의 바이너리**까지 본문이 됐다(프로브로 재현됨).
+    이제 ①트리 전체에서 text/plain 을 먼저 찾고 ②없으면 text/html 을 태그 제거해 쓰고
+    ③그 외에는 **본문 없음**으로 보고한다(빈 문자열을 조용히 흘리지 않는다).
+    """
+    def walk(node, want):
+        if (node.get("mimeType") or "").startswith(want):
+            got = _decode_part(node)
+            if got:
+                return got
+        for part in node.get("parts") or []:
+            got = walk(part, want)
+            if got:
+                return got
+        return None
+
+    plain = walk(payload, "text/plain")
+    if plain:
+        return plain, True
+    html = walk(payload, "text/html")
+    if html:
+        import html as _h
+        t = _BR.sub("\n", html)
+        t = _TAG.sub("", t)
+        return _h.unescape(t), True
+    return "", False                              # 본문을 못 얻었다 — 측정에서 제외해야 한다
 
 
 def create_draft(to, subject: str, body_text: str, *, svc=None) -> str:
