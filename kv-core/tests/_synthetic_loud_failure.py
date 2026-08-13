@@ -161,6 +161,49 @@ check("L4 실제로 돌았는데 due 가 없으면 []", _r2 == [], f"got {_r2!r}
 check("L4 두 값이 서로 다르다(같으면 호출부가 구분할 수 없다)", _r is not _r2)
 
 # ══════════════════════════════════════════════════════════════════════
+print("\n=== L5: 트리아지 처리이력 — 자기가 피하겠다던 결함을 안 갖는다 ===\n")
+# 🔴 [W12] `triage/core/state.py` 의 독스트링은 *"bplan 의 알려진 결함(비원자적 쓰기 →
+#    재실행 시 중복 생성)을 되풀이하지 않는다"* 였는데, 실제로는 형태만 바꿔 셋 다 있었다:
+#      ① `except Exception: return {}`  손상을 조용히 삼킨다 → **전 메일이 미처리로 보인다**
+#      ② `write_text()`                 원자적이 아니다 → 반쪽 파일 → ①이 `{}` 로 만든다
+#      ③ 락 없는 read-merge-write       두 프로세스가 겹치면 한쪽 기록이 사라진다
+#    `mail-triage` 는 매일 무인으로 돈다. 컷오버 후엔 초안까지 가므로 그때 중복이 나간다.
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+
+sys.path.insert(0, str(_REPO / "skills/mail-harness/project/triage"))
+from core import state as _st  # noqa: E402
+
+_st.STORE.parent.mkdir(parents=True, exist_ok=True)
+_st.STORE.unlink(missing_ok=True)
+_st._CACHE = None
+_st.mark("m1", "c", "a")
+check("L5 기본 동작 — 기록·조회", _st.seen("m1") and not _st.seen("m9"))
+
+_st.STORE.write_text("{{{깨짐", encoding="utf-8")
+_loaded = _st.load(refresh=True)
+_bak = list(_st.STORE.parent.glob("*.corrupt-*"))
+check("L5 손상은 원본을 보존하고 시끄럽게 알린다(조용히 {} 를 주지 않는다)",
+      _loaded == {} and len(_bak) == 1, f"보존 {[b.name for b in _bak]}")
+
+# 동시 쓰기 — **진짜 프로세스** 5개. 스레드로는 이 결함이 재현되지 않는다.
+_st.STORE.unlink(missing_ok=True)
+_st._CACHE = None
+_code = ('import sys;sys.path.insert(0,"kv-core");'
+         'sys.path.insert(0,"skills/mail-harness/project/triage")\n'
+         'from core import state\nstate.mark(sys.argv[1],"c","a")\n')
+_f = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False)
+_f.write(_code)
+_f.close()
+_ps = [subprocess.Popen([".venv/bin/python", _f.name, f"msg{i}"],
+                        cwd=str(_REPO), env={**os.environ}) for i in range(5)]
+for _p in _ps:
+    _p.wait()
+_final = _st.load(refresh=True)
+check("L5 동시 기록 5개가 전부 살아남는다(lost update 없음)", len(_final) == 5,
+      f"{len(_final)}/5 — 락이 없으면 1~2개만 남는다")
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 침묵 폴백 계약 실패 {len(FAIL)}건: {', '.join(FAIL)}")

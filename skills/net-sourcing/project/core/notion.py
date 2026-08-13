@@ -1201,7 +1201,16 @@ def land(cfg: dict, candidates: list[dict], run_id: str) -> tuple[int, int]:
                         except Exception as e:       # 로그 실패가 착지를 막으면 안 된다
                             print(f"  · 이벤트 기록 실패(무시): {e}")
                     if "재검토 사유" in row_props:
-                        patch_props["재검토 사유"] = {"select": {"name": "프로필변화"}}
+                        # 🔴 [W12 · 리뷰 B-F7] 이 한 줄만 `_known_options_only` 를 **안 거쳤다.**
+                        #    노션은 모르는 select 값을 받으면 옵션을 조용히 새로 만들거나
+                        #    버리면서 **200 을 준다** — 로그는 성공, 칸은 빈칸이다.
+                        #    지금은 '프로필변화' 가 3개 DB 에 실재해 무해하지만(실측),
+                        #    사람이 옵션 이름을 바꾸는 순간 조용히 죽는다.
+                        #    같은 파일의 다른 select 는 전부 이 검사를 거친다 — 여기만 빠져 있었다.
+                        _rp = row_props.get("재검토 사유") or {}
+                        _v = _known_options_only("재검토 사유", _rp, "프로필변화")
+                        if _v:
+                            patch_props["재검토 사유"] = {"select": {"name": _v}}
             # ═══ 그 행에 실제로 있는 칸만 남긴다 ═════════════════════════════════
             # 위에서 `row_props` 를 확정했다(모르면 이미 continue 했다). 코드가 이 데이터를
             # 줄곧 손에 들고 있었는데 4칸에만 썼다 — 나머지에도 쓴다.
