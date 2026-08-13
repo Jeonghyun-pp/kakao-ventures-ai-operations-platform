@@ -131,10 +131,15 @@ def phase1(c: dict, rec: dict, dry_run: bool) -> bool:
                               "note": "selfcheck 실패 — 상태 오염 방지를 위해 전체 중단"})
         return False
 
-    sync_cmd = [PY, PROJ / "bplan" / "main.py", "sync",
-                "--label", c["bplan"]["gmail_label"], "--tag", c["bplan"]["notion_tag"]]
-    if dry_run:
-        sync_cmd.append("--dry-run")
+    # 🔴 [2026-08-13 W12 재빌드] 구 `bplan/main.py sync` → 새 `jobs/bplan_sync_job.py`.
+    #    바뀐 것: 멱등키가 시트 행 서수 → **접수키(이메일|타임스탬프)** · 커서가 시트 A1 →
+    #    바닥선 + 노션 upsert · 장부가 500건 절삭 json → events.jsonl · 락 0개 → resources.
+    #    ⚠️ 새 잡은 **메일을 안 본다**(라벨·아카이빙 없음). 회사명이 공란이면 남의 메일을
+    #       건드리던 경로(C-F-B15)를 통째로 뺐다. 라벨링은 컷오버 후 별도 결정이다 —
+    #       그래서 `--label`·`--tag` 인자가 없어졌다.
+    sync_cmd = [PY, PROJ / "jobs" / "bplan_sync_job.py", "--limit", "0"]
+    if not dry_run:
+        sync_cmd.append("--apply")
     st = _run_stage("bplan_sync", sync_cmd)
     rec["stages"].append(st)
     rec["bplan_sync"] = st.get("result")
@@ -159,11 +164,14 @@ def phase2(c: dict, rec: dict, dry_run: bool):
             rec["stages"].append({"name": "metrics_watch", "status": "ok",
                                   "note": f"측정 대기열 등록 {watched}건"})
 
-    drop_cmd = [PY, PROJ / "bplan" / "main.py", "drop", "--label", c["bplan"]["gmail_label"]]
-    for name in c["bplan"].get("drop_ignore", []):
-        drop_cmd += ["--ignore", name]
-    if dry_run:
-        drop_cmd.append("--dry-run")
+    # 🔴 [W12 재빌드] 구 `bplan/main.py drop` → 새 `jobs/bplan_drop_job.py`.
+    #    바뀐 것: 멱등 단위가 노션 page_id → **이메일 + 1주일**(같은 사람이 여러 번 접수해도
+    #    한 통). 실측 23명/54행이 중복이었고 18명이 실제로 2통 이상 받았다.
+    #    ⚠️ 이 잡은 컷오버 전 **실행 자체를 거부**한다(SKILL.md HARD-GATE #1).
+    #       그 가드는 사람이 명시적으로 연다 — harness 가 우회하지 않는다.
+    drop_cmd = [PY, PROJ / "jobs" / "bplan_drop_job.py", "--limit", "0"]
+    if not dry_run:
+        drop_cmd.append("--apply")
     st = _run_stage("bplan_drop", drop_cmd)
     rec["stages"].append(st)
     rec["bplan_drop"] = st.get("result")

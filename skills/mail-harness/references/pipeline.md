@@ -27,7 +27,7 @@ phase2:  apply → bplan_drop → metrics → digest
 ## 실패 대응 (다이제스트에 ❌/⛔가 있을 때)
 
 - `selfcheck ❌ 토큰`: 해당 포크 디렉터리에서 사람이 reauth 실행(브라우저 필요).
-  bplan은 `project/bplan/reauth.py`, triage는 원본 hello-mail과 동일 토큰 계열.
+  bplan은 `project/bplan_reauth.py`, triage는 원본 hello-mail과 동일 토큰 계열.
 - `bplan_sync ⛔ 노션 등록 통신 오류(생성 여부 불명)`: 유일하게 sync 루프를 멈추는
   케이스. 노션 DB에서 해당 기업 페이지 존재를 눈으로 확인 → 있으면
   `bplan/data/sync_ledger.json`에 해당 순번이 기록됐는지 확인 후 재실행(레저가 중복을

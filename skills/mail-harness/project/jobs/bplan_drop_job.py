@@ -51,6 +51,7 @@ r"""[W12 재빌드] 비플랜 드랍 메일 초안 — `To Drop` 행 → Gmail *
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -185,6 +186,113 @@ def pick_thread(msgs: list[dict], company: str) -> tuple[dict | None, str]:
     return msgs[0], ""
 
 
+# ─────────────────────────── Gmail 초안 ───────────────────────────
+# 🔴 템플릿 문구는 **사람이 쓴 것**이라 옛 `bplan/main.py` 에서 그대로 옮겼다. 한 글자도
+#    안 고쳤다 — 거절 메일 문안은 코드 판단이 아니다.
+#    MIME 구조(plain + html div 블록)도 그대로다: Gmail 초안 에디터가 긴 text/plain 을
+#    중간에서 wrap 하고 문단 빈 줄을 접는 현상을 피하려고 수동 작성 구조를 모방한 것이다.
+
+_DROP_MAIL_TEMPLATE = """\
+안녕하세요 {ceo_name} 대표님,
+카카오벤처스입니다.
+
+먼저 카카오벤처스에 관심을 가지고 연락 주셔서 감사드립니다.
+
+보내주신 이메일을 바탕으로 내부 검토 과정을 거쳤으나, 아쉽게도 본 투자 건에 대한 추가 검토 진행은 힘들 것으로 결론나게 되었습니다. 가능하면 대표님 한 분 한 분을 찾아 뵙고 미팅을 가지고 싶지만, 저희 역시 여러 한계와 어려움 속에서 일 하다 보니 안타깝게도 만나 뵙지 못하는 분들이 많아 죄송스런 마음입니다.
+
+투자 결정에 있어서 다양한 요소가 작용하는 만큼 추가 검토가 어려운 이유를 꼭 집어서 말씀드리기 어려운 점 또한 양해 부탁드립니다. 저희 또한 다양한 투자사 중 하나에 불과하기 때문에 판단이 틀릴 때가 있음을 고려하셔서 처음 가지셨던 믿음과 의지로 사업을 해 나가시길 바랍니다. 멀리서나마 사업 번창하시고, 건승하시기를 바라겠습니다.
+
+감사합니다.
+카카오벤처스 드림"""
+
+_DROP_MAIL_TEMPLATE_EN = """\
+Hello {ceo_name},
+Thank you for reaching out to Kakao Ventures and sending your deck.
+
+We wanted to let you know that we've finished performing an internal review of your business proposal, but unfortunately, decided not to advance it further. The reasons why we cannot proceed further are subjective, and considering that we are simply one investor among many, there are many times in which we make mistakes. As such, we hope that you continue persevering to see the realization of your business, and if possible, please let us know how it goes. We would love to learn from our mistakes.
+
+We wish you success in all your future endeavors.
+
+Best regards,
+Kakao Ventures"""
+
+
+def _html_escape(s: str) -> str:
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _to_gmail_html(text: str) -> str:
+    """템플릿 텍스트를 Gmail 수동 reply 와 같은 <div> 블록 구조로."""
+    parts = []
+    for line in (text or "").split("\n"):
+        parts.append("<div><br></div>" if line == "" else f"<div>{_html_escape(line)}</div>")
+    return "".join(parts) or "<div><br></div>"
+
+
+def build_mime(to_email: str, subject: str, ceo_name: str, lang: str, in_reply_to: str | None):
+    """드랍메일 초안용 multipart/alternative. **발송이 아니라 초안용이다.**"""
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    template = _DROP_MAIL_TEMPLATE if lang == "ko" else _DROP_MAIL_TEMPLATE_EN
+    plain = template.format(ceo_name=ceo_name)
+    mime = MIMEMultipart("alternative")
+    mime["To"] = to_email
+    mime["Subject"] = subject if subject.startswith("Re: ") else f"Re: {subject}"
+    if in_reply_to:
+        mime["In-Reply-To"] = in_reply_to
+        mime["References"] = in_reply_to
+    mime.attach(MIMEText(plain, "plain", "utf-8"))
+    mime.attach(MIMEText(_to_gmail_html(plain), "html", "utf-8"))
+    return mime
+
+
+def _gmail():
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    return build("gmail", "v1", cache_discovery=False,
+                 credentials=Credentials.from_authorized_user_file(
+                     str(secrets.credential_path("google/token.json"))))
+
+
+def find_original(svc, company: str, label: str) -> tuple[dict | None, str]:
+    """접수메일 원본 1건. **애매하면 안 고른다**(`pick_thread` 가 판정).
+
+    🔴 옛 코드는 `messages[0]` 을 무검증 채택했다 — `pick_thread` 독스트링 참조.
+    """
+    q = f'label:"{label}" subject:"[카카오벤처스] {company} 로부터 접수된 사업계획서"'
+    msgs = svc.users().messages().list(userId="me", q=q).execute().get("messages", [])
+    picked, why = pick_thread(msgs, company)
+    if not picked:
+        return None, why
+    full = svc.users().messages().get(userId="me", id=picked["id"], format="full").execute()
+    hdr = {h["name"]: h["value"] for h in full.get("payload", {}).get("headers", [])}
+    return {"thread_id": full.get("threadId"), "message_id": hdr.get("Message-ID"),
+            "subject": hdr.get("Subject", ""), "body": _body_text(full.get("payload", {}))}, ""
+
+
+def _body_text(payload: dict) -> str:
+    """본문 텍스트만 뽑는다 — 언어 판정의 입력이다."""
+    import base64
+    out = []
+    stack = [payload]
+    while stack:
+        p = stack.pop()
+        if p.get("mimeType") == "text/plain":
+            data = (p.get("body") or {}).get("data")
+            if data:
+                out.append(base64.urlsafe_b64decode(data).decode("utf-8", "replace"))
+        stack.extend(p.get("parts") or [])
+    return "\n".join(out)
+
+
+def mark_done(tok: str, page_id: str) -> None:
+    """노션 `드랍메일` 체크 — 이 잡이 쓰는 **유일한 노션 칸**이다."""
+    r = notion.write("PATCH", f"{notion.API}/pages/{page_id}", tok,
+                     {"properties": {"드랍메일": {"checkbox": True}}})
+    if r.status_code != 200:
+        raise RuntimeError(f"체크박스 실패 {r.status_code}: {r.text[:200]}")
+
+
 # ─────────────────────────── stages ───────────────────────────
 
 def s_collect(skill: str, job_id: str) -> None:
@@ -252,6 +360,66 @@ def plan(rows: list[dict], sent: dict[str, str], today: date) -> tuple[list[dict
             claimed.add(em)
             draft.append(r)
     return draft, mark_only
+
+
+def s_draft(skill: str, job_id: str, *, limit: int, dry: bool, label: str) -> None:
+    """초안 생성 — 사람 하나에 한 통. 나머지 행은 체크박스만 켠다.
+
+    순서가 결정 C 그대로다: **부작용(초안 생성) → 노션 체크 → 발송장부 → item_done.**
+    중간에 죽으면 `item_done` 이 없어 다음 실행이 재시도하고, 발송장부(이메일+1주일)가
+    중복을 흡수한다.
+    """
+    q = json.loads((job.job_dir(SKILL, job_id) / "artifacts" / "queue.json").read_text(encoding="utf-8"))
+    rows = q.get("rows") or []
+    today = date.today()
+    draft, mark_only = plan(rows, _recent_sent(today), today)
+    print(f"· 초안 대상 {len(draft)}명 · 체크만 {len(mark_only)}행(같은 사람의 다른 행)")
+
+    if limit and len(draft) > limit:
+        print(f"· 상한 {limit}명 — 잔여 {len(draft) - limit}명은 다음 실행")
+        draft = draft[:limit]
+
+    tok = _cfg()["token"]
+    svc = None if dry else _gmail()
+
+    def _one(r: dict) -> None:
+        why = check_recipient(r)
+        if why:
+            # 초안을 만들지 않고 **사실로 보고**한다. 옛 코드는 `안녕하세요  대표님,` 을 그대로 냈다.
+            print(f"  ⏭️  건너뜀 [{r['company'][:20]}] — {why}")
+            return
+        if dry:
+            lang, w = decide_language("", r["ceo_name"], r["company"])
+            print(f"  [dry] {norm_email(r['email']):32} {r['company'][:20]} · {lang} ({w})")
+            return
+        orig, why2 = find_original(svc, r["company"], label)
+        if not orig:
+            print(f"  ⏭️  건너뜀 [{r['company'][:20]}] — {why2}")
+            return
+        lang, w = decide_language(orig["body"], r["ceo_name"], r["company"])
+        mime = build_mime(r["email"], orig["subject"], r["ceo_name"], lang, orig["message_id"])
+        raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+        svc.users().drafts().create(
+            userId="me", body={"message": {"raw": raw, "threadId": orig["thread_id"]}}).execute()
+        mark_done(tok, r["page_id"])
+        _record_sent(r["email"], r["page_id"], today)      # 부작용 뒤에 장부
+        print(f"  ✅ {norm_email(r['email']):32} {r['company'][:20]} · {lang} ({w})")
+
+    job.process_items(SKILL, job_id, draft, key=lambda r: norm_email(r["email"]),
+                      process=_one, stage="draft")
+
+    # 같은 사람의 나머지 행 — 초안 없이 체크만. 안 하면 다음 실행에 또 후보로 올라온다.
+    for r in mark_only:
+        if dry:
+            print(f"  [dry-mark] {r['company'][:20]} — {r['_why']}")
+            continue
+        mark_done(tok, r["page_id"])
+        print(f"  · 체크만 {r['company'][:20]} — {r['_why']}")
+
+
+def _stages(limit: int, dry: bool, label: str) -> list[Stage]:
+    return [Stage("collect", s_collect),
+            Stage("draft", lambda sk, ji: s_draft(sk, ji, limit=limit, dry=dry, label=label))]
 
 
 def _synthetic() -> int:

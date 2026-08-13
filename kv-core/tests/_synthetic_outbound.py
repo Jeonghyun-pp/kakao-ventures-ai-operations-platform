@@ -165,9 +165,19 @@ print("\n=== O3: 자동화 잡이 노션 위험 칸을 쓰지 않는다 ===\n")
 # 문자열 등장이 아니라 **dict 키로 쓰였는지**를 본다 — 주석·독스트링에 언급하는 건 정상이다
 # (그렇게 안 하면 이 검사가 자기 설명문에 걸린다. 실제로 그 실수를 한 번 했다).
 danger = []
+# 🔴 [W12] `bplan_drop_job.py` 는 `드랍메일` 체크가 **임무**다 — 그 잡이 존재하는 이유다.
+#    그래서 이 파일만 예외로 둔다. 다만 예외를 두는 순간 그 파일이 안전 경계 **밖**이 되므로,
+#    그 대가로 아래 두 가지를 대신 단언한다:
+#      ① 그 잡은 컷오버 전 **실행 자체가 거부**된다(--synthetic 외 진입점 없음)
+#      ② `To do` 를 쓰지 않는다 — 체크박스만 켜고 상태는 사람이 옮긴다
+#    "예외를 뒀다"로 끝내면 그 파일이 조용히 아무거나 쓰게 된다.
+_DROP_JOB = "skills/mail-harness/project/jobs/bplan_drop_job.py"
+
 for glob in _JOB_GLOBS:
     for p in _REPO.glob(glob):
         rel = str(p.relative_to(_REPO))
+        if rel == _DROP_JOB:
+            continue
         try:
             tree = ast.parse(p.read_text(encoding="utf-8"))
         except SyntaxError:
@@ -189,6 +199,18 @@ for glob in _JOB_GLOBS:
                 danger.append(f"{rel}:{k.lineno} — {k.value!r}")
 check("O3 잡이 `To do`(Newly Added 외)·`드랍메일` 을 dict 키로 쓰지 않는다", not danger,
       "\n       ".join(danger) or "드랍 메일 경로는 사람이 연다")
+
+# 예외를 둔 파일에 대한 대체 단언 — 예외가 무한정 넓어지지 않게 한다.
+_dj = (_REPO / _DROP_JOB).read_text(encoding="utf-8")
+_dt = ast.parse(_dj)
+check("O3 드랍 잡은 컷오버 전 실행이 거부된다(--synthetic 외 진입점 없음)",
+      "HARD-GATE" in _dj and "raise SystemExit" in _dj,
+      "예외를 뒀으므로 이 가드가 그 자리를 대신한다")
+_todo_keys = [k.lineno for n in ast.walk(_dt) if isinstance(n, ast.Dict)
+              for k in n.keys
+              if isinstance(k, ast.Constant) and k.value == "To do"]
+check("O3 드랍 잡은 `To do` 를 쓰지 않는다(체크박스만 켜고 상태는 사람이 옮긴다)",
+      not _todo_keys, f"줄 {_todo_keys}")
 
 print("\n=== O4: 자율성 설정이 발송을 끈 상태다 ===\n")
 import yaml  # noqa: E402
@@ -218,7 +240,13 @@ print("\n=== O5: 컷오버 전 HARD-GATE — 스케줄러가 부작용 명령을
 #
 # 게이트가 해제되면(컷오버 완료) 이 검사의 허용 목록을 넓히고 그 커밋에 근거를 남긴다.
 _GATED_SUBCOMMANDS = {"run", "apply", "sync", "drop"}
-_GATED_SCRIPTS = ("triage/main.py", "bplan/main.py", "harness.py")
+# [W12 9-4] `bplan/main.py` 은퇴 → `jobs/bplan_*_job.py` 로 대체(_archive 이관).
+# 게이트 대상은 **실행 주체**다 — 새 잡 이름으로 갱신한다. 옛 이름을 남겨두면
+# "게이트가 걸려 있다"고 믿으면서 실제로는 없는 파일을 지키게 된다.
+_GATED_SCRIPTS = ("triage/main.py", "jobs/bplan_sync_job.py",
+                  "jobs/bplan_drop_job.py", "harness.py")
+# 새 잡의 "실제로 쓴다" 스위치. 하위명령과 **같은 무게**로 본다.
+_GATED_FLAGS = ("--apply",)
 
 import ast as _a  # noqa: E402
 
@@ -233,8 +261,13 @@ for n in _a.walk(_a.parse(_wsrc)):
         continue
     parts = [x.value for x in arg.elts if isinstance(x, _a.Constant)]
     script = next((p for p in parts if any(g in str(p) for g in _GATED_SCRIPTS)), None)
-    if script and any(str(p) in _GATED_SUBCOMMANDS for p in parts):
-        bad = [p for p in parts if str(p) in _GATED_SUBCOMMANDS]
+    # 🔴 [W12 9-4] 재빌드로 **인터페이스가 바뀌었다** — 옛 잡은 하위명령(`main.py drop`),
+    #    새 잡은 플래그(`bplan_drop_job.py --apply`)다. 하위명령만 보던 이 검사는
+    #    `--apply` 를 **못 잡았다**(변이 시험에서 생존). 게이트가 지키는 대상이 바뀌었는데
+    #    게이트의 어휘가 안 따라가면 "걸려 있다고 믿지만 없는" 상태가 된다 — 이번 감사
+    #    내내 나온 그 형태다(ADR 0002: 발동하지 않는 가드는 없는 가드보다 나쁘다).
+    bad = [p for p in parts if str(p) in _GATED_SUBCOMMANDS or str(p) in _GATED_FLAGS]
+    if script and bad:
         violations.append(f"workers.py:{n.lineno} — {script} {bad}")
 
 check("O5 스케줄러가 컷오버 게이트 대상 명령을 부르지 않는다", not violations,

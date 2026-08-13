@@ -104,7 +104,8 @@ claude -p "reply with exactly: OK"     # 로그인 안 돼 있으면 여기서 �
 
 ### 2-3. Gmail OAuth
 
-`~/kv-config/` 에 토큰이 있다. 만료되면 `skills/mail-harness/project/bplan/reauth.py`.
+`~/kv-config/` 에 토큰이 있다. 만료되면 `skills/mail-harness/project/bplan_reauth.py`.
+(2026-08-13 W12: 구 `bplan/` 이 은퇴하면서 이 파일만 살려 위로 옮겼다 — 대체물이 없다.)
 
 ### 2-4. launchd
 

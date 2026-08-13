@@ -122,7 +122,7 @@
   notes: |
     🔴 **안전선: `점수`·`포워드 이유`·`fwd to whom?` 만 쓴다. `To do` 를 안 건드린다.**
     드랍 메일 초안은 `To do == To Drop AND 드랍메일 == False` 인 행에만 생기므로
-    (bplan/main.py:query_to_drop_pages), 판정이 틀려도 하류가 한 칸도 안 움직인다.
+    (jobs/bplan_drop_job.py:s_collect 의 To Drop 필터), 판정이 틀려도 하류가 한 칸도 안 움직인다.
     `_assert_safe_patch()` 가 기입 직전에 강제하고 --synthetic 이 회귀를 잠근다.
     정확도가 전량-Red 기준선(73%)을 못 넘은 상태다(tools/bplan_backtest.py) — 그래서
     돌리되 하류는 사람이 연다. 매일 산출물이 보여야 기준을 깎을 재료가 생긴다.
