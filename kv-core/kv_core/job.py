@@ -580,12 +580,36 @@ def run_pipeline(
     if d.state == "requested":
         transition(skill, job_id, "queued")
 
+    # 🔴 [2026-08-13 W12 · 리뷰 E-F7] 잡 락은 **자원 이름 기준**이라 "같은 잡의 이중 실행"을
+    #    막는 장치가 아니었다. `resources` 를 안 넘긴 잡은 **어떤 배타 락도 없어서** 같은
+    #    job_id 를 두 프로세스가 동시에 돌릴 수 있었다. 실측(진짜 프로세스 2개):
+    #    부작용이 겹쳐 실행되고 `events.jsonl` 에 `completed` **뒤에** `stage_done` 이 붙었다 —
+    #    상태머신상 불가능한 순서인데 `rebuild` 는 그걸 접어도 completed 를 내므로
+    #    **재생으로도 이상이 안 드러난다.**
+    #
+    #    실환경의 두 주체는 10분 launchd 틱과 사람의 CLI 다(정본 4-1 R4). 운영자가 런북대로
+    #    손으로 잡을 돌리는 동안 스케줄러 틱이 겹치면 노션 기입·초안이 중복으로 나간다.
+    #
+    #    **잡 이중 실행은 자원 겹침과 다른 축이다.** job_id 자체를 락으로 잡는다.
+    #    자원 락보다 **먼저** 잡는다 — 순서를 뒤집으면 자원을 쥔 채 잡 락을 기다려 데드락이 난다.
+    job_lock = heavy_slot(f"job-{skill}-{job_id}")
+    try:
+        job_lock.__enter__()
+    except SlotBusy:
+        # ⚠️ 여기서 `append_event` 를 부르지 **않는다.** 그 잡의 events 는 지금 다른
+        #    프로세스가 쓰는 중이고, `append_event` 는 쓰기 전에 `_repair_torn_tail` 로
+        #    파일 끝을 truncate 한다 — 상대가 쓰는 도중이면 그 줄을 자를 수 있다.
+        #    **장부는 실행 중인 인스턴스의 것이다.** 물러나는 쪽은 화면으로만 말한다.
+        print(f"⚠️  {skill}/{job_id} 이 이미 실행 중이다 — 이번 호출은 물러난다(이중 실행 방지).")
+        return rebuild(skill, job_id)
+
     lock_cm = resource_slots(resources) if resources else _null_ctx()
     try:
         lock_cm.__enter__()
     except SlotBusy:
         append_event(skill, job_id, "queued_wait", reason="자원 락 점유 중",
                      resources=sorted({n for n in (resources or []) if n}))
+        job_lock.__exit__()
         return rebuild(skill, job_id)
 
     try:
@@ -608,7 +632,10 @@ def run_pipeline(
         transition(skill, job_id, "failed", error=repr(e))
         return rebuild(skill, job_id)
     finally:
+        # 잡은 순서의 **역순**으로 푼다(자원 → 잡). 잡 락을 먼저 풀면 그 틈에 다른
+        # 프로세스가 잡 락을 얻고 자원 락에서 막혀, 아무도 못 도는 창이 생긴다.
         lock_cm.__exit__(None, None, None)
+        job_lock.__exit__()
 
 
 # ─────────────────────────── 유틸 ───────────────────────────

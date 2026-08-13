@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import time as _time
 from dataclasses import dataclass
@@ -87,7 +88,51 @@ def read_watermark(task: Task) -> dict:
 
 
 def write_watermark(task: Task, wm: dict) -> None:
+    """워터마크를 통째로 덮어쓴다. **경합이 있는 곳에서는 `update_watermark` 를 써라.**"""
     job.atomic_write(_wm_path(task), json.dumps(wm, ensure_ascii=False, indent=2))
+
+
+def update_watermark(task: Task, **fields) -> dict:
+    """읽기-병합-쓰기를 **flock 안에서** 한다. 반환: 병합된 워터마크.
+
+    🔴 [2026-08-13 W12 · 리뷰 E-F6] `run_due` 가 `read_watermark` → 러너 실행(최대 3시간)
+       → `write_watermark(wm)` 를 하는데, 그 사이의 다른 쓰기가 **통째로 사라졌다**(lost update).
+       실측(진짜 프로세스 2개): `fieldA` 를 쓴 쪽이 증발하고 `fieldB` 만 남았다.
+
+       평소엔 `heavy_slot("scheduler")` 가 막아준다. 그런데 **그 락이 뚫리는 경로가 있었다** —
+       6시간 초과 회수 뒤 원 소유자가 회수자의 락을 지우는 결함(E-F1). 그건 이번에 flock 으로
+       닫았지만, "상위 락이 있으니 여기는 안전하다"는 가정 자체가 위태롭다.
+       정본 4-2 가 이미 그렇게 적었다 — *"정말 락이 필요한 자리(`update()` 의 read-merge-write)
+       에서는 `fcntl.flock`."* `approval.update()` 는 그때 그렇게 고쳤는데 워터마크는 안 고쳤다.
+
+    ⚠️ 값 하나를 조건부로 올려야 하면(예: last_success 는 전진만) 호출부가 아니라
+       **여기 안에서** 판단해야 한다 — 밖에서 읽고 비교하면 그 사이가 다시 창이 된다.
+       그래서 `_ADVANCE_ONLY` 필드는 이 함수가 직접 max 를 취한다.
+    """
+    p = _wm_path(task)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lock = p.with_suffix(".lock")
+    with open(lock, "a+") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)     # 프로세스가 죽으면 커널이 푼다
+        try:
+            wm = read_watermark(task)
+            for k, v in fields.items():
+                if k in _ADVANCE_ONLY and wm.get(k):
+                    wm[k] = max(str(wm[k]), str(v))  # 뒤로 가지 않는다
+                elif k in _KEEP_FIRST:
+                    wm.setdefault(k, v)
+                else:
+                    wm[k] = v
+            job.atomic_write(p, json.dumps(wm, ensure_ascii=False, indent=2))
+            return wm
+        finally:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
+# 전진만 하는 값 — 되감기면 이미 한 일을 다시 하거나(중복) 알림 시계가 리셋된다.
+_ADVANCE_ONLY = {"last_success", "last_attempt"}
+# 최초 1회만 기록하고 보존 — R1 의 "배선 후 경과일" 앵커다.
+_KEEP_FIRST = {"first_attempt"}
 
 
 def _last_run(task: Task, wm: dict) -> str | None:
@@ -181,16 +226,20 @@ def run_due(tasks: list[Task], runner: Runner, *, now: date | None = None) -> li
                         ok = runner(t, period)
                     except Exception as e:         # noqa: BLE001  러너 실패 = 이 실행 실패(다음에 재시도)
                         print(f"🔴 {t.name} {period} 실행 예외: {e!r}")
-                    wm = read_watermark(t)
                     # [W9 점검] first_attempt 는 **최초 1회만** 기록하고 이후 보존한다.
                     # 이게 없으면 alerts 의 never-succeeded 판정이 last_attempt 로 폴백하는데,
                     # 그 값은 매일 갱신되므로 "배선 후 경과일"이 영원히 0 이 되어
                     # **한 번도 성공 못 한 task 가 영영 알림에 안 걸린다**(실환경에서 실증됨).
-                    wm.setdefault("first_attempt", period.isoformat())
-                    wm["last_attempt"] = period.isoformat()
+                    #
+                    # 🔴 [W12 · E-F6] 예전엔 `read → 러너 실행(최대 3시간) → write` 였다.
+                    #    그 사이의 다른 쓰기가 통째로 사라졌다(lost update, 진짜 프로세스로 실증).
+                    #    이제 읽기-병합-쓰기를 **flock 안에서** 한다. 전진/보존 규칙도
+                    #    그 안에서 판단한다 — 밖에서 비교하면 그 사이가 다시 창이 된다.
+                    fields = {"first_attempt": period.isoformat(),
+                              "last_attempt": period.isoformat()}
                     if ok:
-                        wm["last_success"] = period.isoformat()
-                    write_watermark(t, wm)
+                        fields["last_success"] = period.isoformat()
+                    update_watermark(t, **fields)
                     report.append({"task": t.name, "period": period.isoformat(), "ok": ok})
                     if not ok:
                         # 순차 드레인: 실패 주기 이후는 다음 기동에서 여기부터 재시도된다.

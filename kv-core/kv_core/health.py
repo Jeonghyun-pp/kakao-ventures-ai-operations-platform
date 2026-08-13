@@ -32,11 +32,16 @@ from __future__ import annotations
 
 import json
 import re
+import time as _time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from . import cadence, paths, registry, scheduler
+from . import cadence, job, paths, registry, scheduler
+
+# 비종단 잡이 이만큼 멈춰 있으면 **막힌 것**으로 본다. heavy 잡 최장(judge 3시간)보다 위.
+# 이 판정이 없으면 running 으로 굳은 잡은 실패 목록에도 성공에도 안 뜨고 그냥 사라진다.
+_STUCK_SEC = 6 * 3600
 
 try:
     from . import workers
@@ -348,7 +353,7 @@ def _read_watermark(t) -> dict:
 # ─────────────────────────── 실패 해결 판정 (단일 지점) ───────────────────────────
 
 def _failures(now: date, tasks, *, days: int = 7, unresolved_cap: int = 50,
-              resolved_cap: int = 10) -> list[FailureState]:
+              resolved_cap: int = 10, now_ts: float | None = None) -> list[FailureState]:
     """최근 실패 잡 + **해결 여부**. 판정 규칙은 여기에만 있다.
 
     두 갈래로 해결을 판정한다.
@@ -372,6 +377,32 @@ def _failures(now: date, tasks, *, days: int = 7, unresolved_cap: int = 50,
                 continue
             st = json.loads(sp.read_text(encoding="utf-8"))
             state, ts = st.get("state"), str(st.get("updated", ""))
+            # 🔴 [2026-08-13 W12 · 리뷰 E-F4] 여기는 **캐시**를 읽는다. 정본 1-4 는
+            #    *"events 가 진실, state·cursor 는 그 재생물"* 인데 관측자 경계에서 뒤집혔다.
+            #
+            #    `transition` 은 `append_event` → `_materialize` 2단계다. 그 사이에 죽으면
+            #    events 는 `failed` 인데 state.json 은 `running` 으로 남는다(실측 재현).
+            #    그러면 `_failures` 는 completed|failed 만 세므로 **그 잡이 실패 목록에
+            #    영원히 안 뜬다.** `run()` 의 예외 경로가 전이를 안 하는 것도 같은 결과다
+            #    (잡 단위 재시도가 계약이라 의도된 것인데, 관측에서는 실종이 된다).
+            #
+            #    종단 상태(completed·failed)는 믿어도 된다 — materialize 가 append **뒤**라
+            #    state.json 이 종단이면 events 도 종단이다. **비종단일 때만** 진실을 확인한다
+            #    (전량 rebuild 는 비싸다 — 필요한 곳만 낸다).
+            if state not in ("completed", "failed"):
+                try:
+                    truth = job.rebuild(skill, jid).state
+                except Exception:                    # noqa: BLE001 — 관측이 죽으면 안 된다
+                    truth = state
+                if truth != state:
+                    print(f"⚠️  {skill}/{jid}: state.json='{state}' 인데 events='{truth}' — "
+                          f"진실(events)을 따른다. 전이 중 크래시로 캐시가 갈라졌다.")
+                    state = truth
+                elif sp.stat().st_mtime < (now_ts or _time.time()) - _STUCK_SEC:
+                    # 비종단인데 오래 멈춰 있다 — 예전엔 이 상태를 **아무도 안 봤다.**
+                    rows.append({"skill": skill, "job": jid, "ts": ts, "broken": False,
+                                 "stuck": True})
+                    continue
             if state == "completed":
                 k = (skill, _job_base(jid))
                 cur = (_attempt_no(jid), ts)
@@ -411,6 +442,12 @@ def _failures(now: date, tasks, *, days: int = 7, unresolved_cap: int = 50,
             l_d = _as_date(ls) if ls else None
             if f_d and l_d and l_d > f_d:        # [C-H2] 엄격히 나중 날짜만
                 resolved, reason = True, f"이후 성공(last_success={ls})"
+        if r.get("stuck"):
+            # [W12 · E-F4] 멈춘 잡은 "실패"가 아니라 **비종단 고착**이다. 새 필드를 더하면
+            # 렌더러·알림까지 번지므로 기존 `reason` 으로 사실만 말한다.
+            # 나중 attempt 성공으로 해결될 수 있으므로 위의 resolved 판정은 그대로 둔다.
+            reason = (reason + " · " if reason else "") + \
+                     f"비종단 상태로 {_STUCK_SEC // 3600}시간+ 멈춤(events 도 같음)"
         out.append(FailureState(skill=r["skill"], job=r["job"], ts=r["ts"],
                                 resolved=resolved, broken=r["broken"], reason=reason))
 
