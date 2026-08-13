@@ -67,14 +67,11 @@ _SYS = ("JSON 배열만 출력하라. 각 원소는 "
 
 def _rows(token: str, db: str) -> list[dict]:
     """정답이 있는 행만. **읽기 전용.**"""
-    import requests
+    # [W12 · B-F1] 노션 전송 규율의 정본은 kv_core 다(백오프·페이싱·재시도).
+    from kv_core import notion as _kv
     out, payload = [], {"page_size": 100}
     while True:
-        r = requests.post(f"https://api.notion.com/v1/databases/{db}/query",
-                          headers={"Authorization": f"Bearer {token}",
-                                   "Notion-Version": "2022-06-28",
-                                   "Content-Type": "application/json"},
-                          json=payload, timeout=30)
+        r = _kv.write("POST", f"{_kv.API}/databases/{db}/query", token, payload)
         if r.status_code != 200:
             raise RuntimeError(f"노션 조회 실패 {r.status_code} {r.text[:200]}")
         d = r.json()

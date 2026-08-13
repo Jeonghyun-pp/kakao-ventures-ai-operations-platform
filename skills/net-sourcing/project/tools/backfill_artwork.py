@@ -18,6 +18,9 @@ from pathlib import Path
 
 import requests
 
+# [W12 · B-F1] 노션 전송 규율(백오프·페이싱·재시도)의 정본은 kv_core 다.
+from kv_core import notion as _kv
+
 PROJ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ))
 
@@ -53,8 +56,7 @@ def main() -> int:
                       "filter": {"property": "Channel", "select": {"equals": "App Store"}}}
         if cursor:
             body["start_cursor"] = cursor
-        j = requests.post(f"{API}/databases/{db}/query", headers=_headers(token),
-                          json=body, timeout=30).json()
+        j = _kv.write("POST", f"{API}/databases/{db}/query", token, body).json()
         rows += j["results"]
         if not j.get("has_more"):
             break
@@ -93,8 +95,8 @@ def main() -> int:
 
     ok = fail = 0
     for app_id, url in art.items():
-        r = requests.patch(f"{API}/pages/{todo[app_id]}", headers=_headers(token),
-                           json={"properties": {"Artwork": {"url": url}}}, timeout=30)
+        r = _kv.write("PATCH", f"{API}/pages/{todo[app_id]}", token,
+                      {"properties": {"Artwork": {"url": url}}})
         if r.status_code == 200:
             ok += 1
         else:

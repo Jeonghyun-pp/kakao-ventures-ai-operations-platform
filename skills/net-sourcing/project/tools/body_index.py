@@ -35,7 +35,10 @@ import time
 import unicodedata
 from pathlib import Path
 
-import requests
+import requests  # noqa: F401 — 예외 타입 참조용
+
+# [W12 · B-F1] 노션 전송 규율의 정본은 kv_core 다.
+from kv_core import notion as _kv
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -70,23 +73,16 @@ def norm(s: str) -> str:
 
 
 def _req(method: str, url: str, token: str, **kw):
-    """429/5xx·네트워크 오류 백오프. 본문 인덱싱은 요청이 1만 건대라 재시도가 필수다."""
-    delay = 1.0
-    for attempt in range(5):
-        try:
-            r = requests.request(method, url, headers=_headers(token), timeout=30, **kw)
-        except (requests.Timeout, requests.ConnectionError):
-            if attempt == 4:
-                raise
-            time.sleep(15.0 * (2 ** attempt))       # 절전 해제 DNS 경쟁 대비(core/notion과 같은 정책)
-            continue
-        if r.status_code in (429, 500, 502, 503, 504):
-            wait = float(r.headers.get("Retry-After") or delay)
-            time.sleep(wait)
-            delay *= 2
-            continue
-        return r
-    return r
+    """노션 요청 — `kv_core.notion` 에 위임(정본).
+
+    🔴 [W12 · B-F1] 여기엔 5회 백오프 루프가 **한 벌 더** 있었다. kv_core 와 거의 같지만
+       두 가지가 달랐다 — 성공 시 `RATE_SLEEP` 페이싱이 **없었고**(본문 인덱싱은 요청이
+       1만 건대라 이게 곧 한도 초과다), `ChunkedEncodingError` 를 안 잡았다.
+       복제본은 원본이 고쳐질 때 같이 안 고쳐진다. 그게 이 통합의 이유다.
+    """
+    if method.upper() == "GET":
+        return _kv.read(url, token, kw.get("params"))
+    return _kv.write(method.upper(), url, token, kw.get("json") or {})
 
 
 def _page_body(pid: str, token: str, depth: int = 0) -> str:

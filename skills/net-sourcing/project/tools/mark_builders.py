@@ -25,6 +25,9 @@ from pathlib import Path
 
 import requests
 
+# [W12 · B-F1] 노션 전송 규율(백오프·페이싱·재시도)의 정본은 kv_core 다.
+from kv_core import notion as _kv
+
 PROJ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ))
 
@@ -49,8 +52,7 @@ def _threads_rows(db_id: str, token: str) -> list[dict]:
                       "filter": {"property": "Channel", "select": {"equals": "Threads"}}}
         if cursor:
             body["start_cursor"] = cursor
-        r = requests.post(f"{API}/databases/{db_id}/query", headers=_headers(token),
-                          json=body, timeout=30)
+        r = _kv.write("POST", f"{API}/databases/{db_id}/query", token, body)
         r.raise_for_status()
         j = r.json()
         rows += j["results"]
@@ -72,7 +74,7 @@ def main() -> int:
     db_id, token = cfg["notion"]["db_id"], os.environ["NOTION_TOKEN"]
 
     # 🔴 스키마 확인 먼저 — `빌더`가 없으면 PATCH는 **200을 주고 값은 버려진다.**
-    r = requests.get(f"{API}/databases/{db_id}", headers=_headers(token), timeout=30)
+    r = _kv.read(f"{API}/databases/{db_id}", token)
     r.raise_for_status()
     if "빌더" not in r.json()["properties"]:
         print("🔴 노션에 `빌더`(checkbox) property가 없다 — tools/notion_migrate.py --apply 를 먼저 돌려라")
@@ -120,8 +122,8 @@ def main() -> int:
     fail = 0
     for page_id, user in [(p, u) for p, u in to_check] + [(p, u) for p, u in to_uncheck]:
         val = any(page_id == p for p, _ in to_check)
-        r = requests.patch(f"{API}/pages/{page_id}", headers=_headers(token),
-                           json={"properties": {"빌더": {"checkbox": val}}}, timeout=30)
+        r = _kv.write("PATCH", f"{API}/pages/{page_id}", token,
+                      {"properties": {"빌더": {"checkbox": val}}})
         if r.status_code != 200:
             print(f"  🔴 {user}: {r.status_code} {r.text[:120]}")
             fail += 1

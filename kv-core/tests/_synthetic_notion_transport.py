@@ -72,16 +72,24 @@ def _direct_calls(p: Path) -> int:
 
 
 def _notion_modules() -> list[Path]:
+    """노션을 만지는 모듈.
+
+    🔴 [W12 배치 9] 처음엔 `"api.notion.com" in src` 하나로 찾았다. 그런데 도구들을
+       `kv_core` 로 옮기자 URL 리터럴이 `_kv.API` 로 바뀌면서 **모집단에서 사라졌고**,
+       "실제로 훑었나" 단언이 빨간불이 됐다. 즉 **고칠수록 탐지기가 눈이 머는** 형태였다.
+       옮긴 파일도 계속 세야 하므로 `kv_core.notion` 임포트도 함께 본다.
+    """
     out = []
     for p in sorted(_REPO.rglob("*.py")):
         s = str(p)
         if "/.venv/" in s or "_archive" in s or "/tests/" in s or p.resolve() == _SELF:
             continue
         try:
-            if "api.notion.com" in p.read_text(encoding="utf-8"):
-                out.append(p)
+            src = p.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        if "api.notion.com" in src or "kv_core import notion" in src or "kv_core.notion" in src:
+            out.append(p)
     return out
 
 
@@ -134,7 +142,13 @@ print("\n=== T4: 아직 안 옮긴 모듈이 목록으로 보인다 ===\n")
 # 이 배치는 **살아있는 경로만** 옮겼다. 사람이 손으로 돌리는 도구 9본은 남아 있고,
 # 그 사실을 숫자로 고정한다 — 목록이 줄면 이 숫자를 내리고, **늘면 실패한다**
 # (새 파일이 옛 방식으로 태어나는 것을 막는 게 이 단언의 목적이다).
-_DEBT_MAX = 10
+# 🔴 [W12 배치 8 → 9] 도구 9본을 kv_core 로 옮기면서 10 → 2 로 내렸다.
+# 남은 둘은 이유가 있다:
+#   · bplan/main.py            — 재빌드로 대체될 파일(9-4 에서 삭제). 지금 고치면 두 번 한다.
+#   · backfill_artwork.py 의 1건 — **iTunes 조회다**(노션 아님). 이 파일이 목록에 뜨는 건
+#                                 `api.notion.com` 문자열을 담고 있어서일 뿐이다.
+# 숫자는 **줄면 내리고 늘면 실패**한다 — 새 파일이 옛 방식으로 태어나는 것을 막는 게 목적이다.
+_DEBT_MAX = 2
 _debt = sorted((str(p.relative_to(_REPO)), _direct_calls(p)) for p in _MODS
                if _direct_calls(p) > 0 and str(p.relative_to(_REPO)) not in _LIVE)
 check("T4 전송 정본을 안 쓰는 모듈이 늘지 않았다", len(_debt) <= _DEBT_MAX,

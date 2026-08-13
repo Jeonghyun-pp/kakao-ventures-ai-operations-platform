@@ -22,6 +22,9 @@ from pathlib import Path
 
 import requests
 
+# [W12 · B-F1] 노션 전송 규율의 정본은 kv_core 다(백오프·페이싱·재시도).
+from kv_core import notion as _kv
+
 PROJ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ))
 
@@ -53,7 +56,7 @@ def main() -> int:
     cfg = yaml.safe_load((PROJ / "config.yaml").read_text(encoding="utf-8"))
     db, token = cfg["notion"]["db_id"], os.environ["NOTION_TOKEN"]
 
-    schema = requests.get(f"{API}/databases/{db}", headers=_h(token), timeout=30).json()["properties"]
+    schema = _kv.read(f"{API}/databases/{db}", token).json()["properties"]
     if "Seed" not in schema:
         print("🔴 `Seed`(multi_select)가 없다 — tools/notion_migrate.py --apply 를 먼저 돌려라")
         return 1
@@ -64,7 +67,7 @@ def main() -> int:
                       "filter": {"property": "Channel", "select": {"equals": "Threads"}}}
         if cursor:
             body["start_cursor"] = cursor
-        j = requests.post(f"{API}/databases/{db}/query", headers=_h(token), json=body, timeout=30).json()
+        j = _kv.write("POST", f"{API}/databases/{db}/query", token, body).json()
         rows += j["results"]
         if not j.get("has_more"):
             break
@@ -106,7 +109,7 @@ def main() -> int:
         return 0
 
     if missing:
-        r = requests.patch(f"{API}/databases/{db}", headers=_h(token), json={"properties": {
+        r = _kv.write("PATCH", f"{API}/databases/{db}", token, {"properties": {
             "Seed": {"multi_select": {"options": [{"name": n} for n in sorted(have | set(found))]}}}},
             timeout=30)
         print(f"  옵션 추가 PATCH {r.status_code}")
@@ -116,7 +119,7 @@ def main() -> int:
 
     ok = fail = 0
     for page_id, seeds in todo:
-        r = requests.patch(f"{API}/pages/{page_id}", headers=_h(token), json={
+        r = _kv.write("PATCH", f"{API}/pages/{page_id}", token, {
             "properties": {"Seed": {"multi_select": [{"name": s} for s in seeds]}}}, timeout=30)
         if r.status_code == 200:
             ok += 1
@@ -136,8 +139,7 @@ def main() -> int:
                     "filter": {"property": "Seed", "multi_select": {"is_not_empty": True}}}
             if cursor:
                 body["start_cursor"] = cursor
-            j = requests.post(f"{API}/databases/{db}/query", headers=_h(token), json=body,
-                              timeout=30).json()
+            j = _kv.write("POST", f"{API}/databases/{db}/query", token, body).json()
             n += len(j["results"])
             if not j.get("has_more"):
                 break

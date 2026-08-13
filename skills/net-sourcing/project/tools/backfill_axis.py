@@ -21,6 +21,9 @@ from pathlib import Path
 
 import requests
 
+# [W12 · B-F1] 노션 전송 규율의 정본은 kv_core 다.
+from kv_core import notion as _kv
+
 PROJ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ))
 API = "https://api.notion.com/v1"
@@ -43,7 +46,7 @@ def _query(db: str, tok: str, flt: dict) -> list[dict]:
         body: dict = {"page_size": 100, "filter": flt}
         if cur:
             body["start_cursor"] = cur
-        j = requests.post(f"{API}/databases/{db}/query", headers=_h(tok), json=body, timeout=30).json()
+        j = _kv.write("POST", f"{API}/databases/{db}/query", tok, body).json()
         rows += j["results"]
         if not j.get("has_more"):
             return rows
@@ -61,7 +64,7 @@ def main() -> int:
     cfg = yaml.safe_load((PROJ / "config.yaml").read_text(encoding="utf-8"))
     db, tok = cfg["notion"]["db_id"], os.environ["NOTION_TOKEN"]
 
-    schema = requests.get(f"{API}/databases/{db}", headers=_h(tok), timeout=30).json()["properties"]
+    schema = _kv.read(f"{API}/databases/{db}", tok).json()["properties"]
     if "Axis" not in schema:
         print("🔴 `Axis`(multi_select)가 없다 — tools/notion_migrate.py --apply 를 먼저 돌려라")
         return 1
@@ -97,7 +100,7 @@ def main() -> int:
         return 0
 
     if missing:
-        r = requests.patch(f"{API}/databases/{db}", headers=_h(tok), json={"properties": {
+        r = _kv.write("PATCH", f"{API}/databases/{db}", tok, {"properties": {
             "Axis": {"multi_select": {"options": [{"name": n} for n in sorted(have | set(found))]}}}},
             timeout=30)
         print(f"  옵션 추가 PATCH {r.status_code}")
@@ -107,7 +110,7 @@ def main() -> int:
 
     ok = fail = 0
     for pid, axes in todo:
-        r = requests.patch(f"{API}/pages/{pid}", headers=_h(tok), json={
+        r = _kv.write("PATCH", f"{API}/pages/{pid}", tok, {
             "properties": {"Axis": {"multi_select": [{"name": a} for a in axes]}}}, timeout=30)
         if r.status_code == 200:
             ok += 1

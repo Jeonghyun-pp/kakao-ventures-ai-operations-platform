@@ -258,7 +258,8 @@ def _run(do_land: bool) -> int:
 
     # ── 6. 대표 행 실착지 → 확인 → 아카이브
     print("\n▶ 실착지 테스트 (채널별 1행씩, 확인 후 아카이브)")
-    import requests
+    # [W12 · B-F1] 노션 전송 규율의 정본은 kv_core 다(백오프·페이싱·재시도).
+    from kv_core import notion as _kv
     picks = []
     for src in ("스레드", "링크드인", "앱스토어"):
         r = [c for c in people if c.get("source") == src]
@@ -276,7 +277,7 @@ def _run(do_land: bool) -> int:
         if not pid:
             print(f"  🔴 {c['name']}: 착지 안 됨")
             continue
-        pr = requests.get(f"https://api.notion.com/v1/pages/{pid}", headers=H).json()["properties"]
+        pr = _kv.read(f"{_kv.API}/pages/{pid}", token).json()["properties"]
         filled = [k for k, v in pr.items()
                   if v.get(v["type"]) not in (None, "", [], {})]
         body = notion.existing_post_urls(token, pid)

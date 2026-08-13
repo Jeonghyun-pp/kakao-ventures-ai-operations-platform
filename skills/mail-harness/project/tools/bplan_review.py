@@ -94,14 +94,11 @@ def _machine_verdicts(days: int) -> dict[str, dict]:
 
 def _live(token: str, db: str) -> dict[str, dict]:
     """노션 라이브 — DB 한 번 스캔. **단건 GET 폭주 금지**(그물망에서 5,600콜을 쳤다)."""
-    import requests
+    # [W12 · B-F1] 노션 전송 규율의 정본은 kv_core 다(백오프·페이싱·재시도).
+    from kv_core import notion as _kv
     out, payload = {}, {"page_size": 100}
     while True:
-        r = requests.post(f"https://api.notion.com/v1/databases/{db}/query",
-                          headers={"Authorization": f"Bearer {token}",
-                                   "Notion-Version": "2022-06-28",
-                                   "Content-Type": "application/json"},
-                          json=payload, timeout=30)
+        r = _kv.write("POST", f"{_kv.API}/databases/{db}/query", token, payload)
         if r.status_code != 200:
             raise RuntimeError(f"노션 조회 실패 {r.status_code} {r.text[:200]}")
         d = r.json()

@@ -43,6 +43,9 @@ from pathlib import Path
 
 import requests
 
+# [W12 · B-F1] 노션 전송 규율의 정본은 kv_core 다(백오프·페이싱·재시도).
+from kv_core import notion as _kv
+
 PROJ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ))
 
@@ -88,7 +91,7 @@ def _migrate_db(db_id: str, label: str, kws: dict, token: str, apply: bool,
      예외적으로 생성 — 둘 다 "기능이 그 DB를 쓴다"가 근거다)."""
     print(f"\n━━ {label} ({db_id[:8]}…) — 생성 {'허용' if allow_create else '금지(옵션 동기화만)'}")
 
-    r = requests.get(f"{API}/databases/{db_id}", headers=_headers(token), timeout=30)
+    r = _kv.read(f"{API}/databases/{db_id}", token)
     if r.status_code != 200:
         print(f"🔴 스키마 조회 실패 {r.status_code}: {r.text[:200]}")
         return 1
@@ -135,9 +138,9 @@ def _migrate_db(db_id: str, label: str, kws: dict, token: str, apply: bool,
         if set(have) == set(TIER_OPTIONS):
             print(f"  = Tier: 이미 {'|'.join(TIER_OPTIONS)}")
         else:
-            q = requests.post(f"{API}/databases/{db_id}/query", headers=_headers(token),
-                              json={"filter": {"property": "Tier", "select": {"is_not_empty": True}},
-                                    "page_size": 1}, timeout=30)
+            q = _kv.write("POST", f"{API}/databases/{db_id}/query", token,
+                          {"filter": {"property": "Tier", "select": {"is_not_empty": True}},
+                           "page_size": 1})
             filled = len(q.json().get("results", [])) if q.status_code == 200 else -1
             if filled > 0:
                 print(f"  🔴 Tier에 값이 채워진 행이 있다 — 옵션 교체를 건너뛴다(데이터 손실 방지).")
@@ -311,14 +314,13 @@ def _migrate_db(db_id: str, label: str, kws: dict, token: str, apply: bool,
         print(f"  [dry-run] --apply 를 붙이면 위 {len(patch)}개를 실제로 반영한다.")
         return 0
 
-    r = requests.patch(f"{API}/databases/{db_id}", headers=_headers(token),
-                       json={"properties": patch}, timeout=30)
+    r = _kv.write("PATCH", f"{API}/databases/{db_id}", token, {"properties": patch})
     if r.status_code != 200:
         print(f"  🔴 마이그레이션 실패 {r.status_code}: {r.text[:400]}")
         return 1
 
     # 검증 — 재조회해서 실제로 들어갔는지 본다(200을 믿지 않는다)
-    r2 = requests.get(f"{API}/databases/{db_id}", headers=_headers(token), timeout=30)
+    r2 = _kv.read(f"{API}/databases/{db_id}", token)
     after = r2.json()["properties"]
     ok = True
     for name in patch:
