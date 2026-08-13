@@ -186,30 +186,73 @@ def test_scheduler_double_start() -> None:
         check("두 번째 인스턴스는 실행 0·빈 리포트", rep == [], f"report={rep}")
 
 
-# ── D4: stale 락 회수가 안전한가 (죽은 pid 회수 + 산 락 존중) ────────────────
+# ── D4: 슬롯 배타성 (2026-08-13 W12 에 flock 으로 재작성) ────────────────────
 
 def test_d4_stale_lock() -> None:
-    print("[D4] stale 락 회수 + 산 락 SlotBusy")
+    """슬롯이 **동시 1개**를 실제로 지키는가.
+
+    🔴 [W12 E-F1] 이 테스트는 원래 "파일에 pid 를 쓰면 점유"라는 전제로 짜여 있었다.
+       `heavy_slot` 이 `fcntl.flock` 으로 바뀌면서 그 전제가 사라졌다 —
+       파일에 pid 를 적는 것은 이제 **진단 정보**일 뿐 소유권이 아니다.
+
+       전제만 바뀐 게 아니라 **테스트가 덮던 범위가 좁았다.** 옛 D4 는
+         ① 죽은 pid 회수(회수 대상이 죽었으니 `__exit__` 이 영영 안 돈다)
+         ② 산 pid 존중(회수 자체가 없다)
+       두 가지만 봤고, `MAX_HOLD_SEC` 분기를 **한 번도 실행하지 않았다**(mtime 을 안 건드림).
+       그래서 "회수된 쪽이 살아 있고 나중에 정상 종료한다"는 조합이 사각으로 남았고,
+       그게 정확히 동시 1개 계약을 깨던 경로였다. 이번엔 그 조합을 직접 넣는다.
+    """
+    print("[D4] 슬롯 배타성 — 실제 점유·자동해제·오래된 락")
     kind = "d4-test-slot"
     p = job._slot_path(kind)
-
-    # 죽은 pid(99999999 — 존재 불가)의 락 → 회수돼야 함
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("99999999")
-    try:
-        with job.heavy_slot(kind):
-            check("죽은 pid 락 회수 성공", True)
-    except job.SlotBusy:
-        check("죽은 pid 락 회수 성공", False, "SlotBusy")
 
-    # 산 프로세스(내 pid)의 락 → SlotBusy 로 존중돼야 함
-    p.write_text(str(os.getpid()))
+    # ① 아무도 안 쥔 락 파일(pid 만 적혀 있음) → 획득돼야 한다.
+    #    죽은 프로세스가 남긴 상태가 정확히 이것이다 — 커널이 이미 풀었다.
+    p.write_text("99999999 0")
     try:
         with job.heavy_slot(kind):
-            check("산 락은 SlotBusy", False, "뚫고 들어감")
+            check("아무도 안 쥔 락은 획득된다(죽은 프로세스 = 커널이 이미 해제)", True)
     except job.SlotBusy:
-        check("산 락은 SlotBusy", True)
-    p.unlink(missing_ok=True)
+        check("아무도 안 쥔 락은 획득된다(죽은 프로세스 = 커널이 이미 해제)", False, "SlotBusy")
+
+    # ② **실제로 flock 을 쥐고 있으면** SlotBusy.
+    #    flock 은 open file description 단위라 같은 프로세스의 다른 fd 와도 배타적이다.
+    import fcntl
+    import time
+    with open(p, "a+") as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            with job.heavy_slot(kind):
+                check("실제 점유 중이면 SlotBusy", False, "뚫고 들어감")
+        except job.SlotBusy:
+            check("실제 점유 중이면 SlotBusy", True)
+
+        # ③ **6시간을 넘겨도 회수하지 않는다.** 옛 구현은 여기서 회수했고, 그 회수가
+        #    "원소유자가 나중에 정상 종료하며 회수자의 락을 지운다"를 만들었다.
+        old = time.time() - 7 * 3600
+        os.utime(p, (old, old))
+        try:
+            with job.heavy_slot(kind):
+                check("7시간 된 락도 회수하지 않는다(살아있는 소유자 존중)", False,
+                      "회수함 — 동시 1개 계약이 깨진다")
+        except job.SlotBusy:
+            check("7시간 된 락도 회수하지 않는다(살아있는 소유자 존중)", True)
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+
+    # ④ 소유자가 놓으면 다시 잡힌다(영구 정지가 아니다 — A-H3 의 반대 방향 회귀 가드).
+    try:
+        with job.heavy_slot(kind):
+            check("소유자가 놓으면 다시 잡힌다", True)
+    except job.SlotBusy:
+        check("소유자가 놓으면 다시 잡힌다", False, "영구 정지")
+
+    # ⑤ **__exit__ 이 남의 락을 지우지 않는다** — 이번 결함의 본체.
+    a = job.heavy_slot(kind)
+    a.__enter__()
+    a.__exit__()
+    check("정상 종료 후에도 락 파일이 남는다(파일이 곧 락 대상)", p.exists(),
+          "지우면 그 사이 남이 만든 파일을 지우게 된다")
 
 
 # ── W5-med: validate.py 경계 5종 (리뷰 프로브의 상설화) ─────────────────────

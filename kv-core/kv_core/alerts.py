@@ -516,7 +516,7 @@ def dispatch(state=None, *, today: date | None = None, send_cap: int = 20) -> li
     `alerts.yaml` 값 오타 하나로 dispatch 가 통째로 죽어 **그 틱의 전 알림이 미발송**됐다.
     더 나쁜 것은 `_try` 가 **순회 중인 리스트에 append** 했다는 점이다 — `_should_send` 가
     전역적으로 실패하면 후보가 무한 증식해 루프가 끝나지 않고, 그러면 `heavy_slot("approvals")`
-    을 쥔 채 프로세스가 살아 있어(= stale 회수 대상이 아니어서) **이후 모든 틱이 SlotBusy 로
+    을 쥔 채 프로세스가 살아 있어(flock 은 산 프로세스의 락을 절대 뺏지 않는다) **이후 모든 틱이 SlotBusy 로
     물러나 승인 리컨실러가 영구 정지**한다. 지금은 새 후보를 `extra` 에 모아 루프 밖에서 처리한다.
     """
     today = today or _utc_today()

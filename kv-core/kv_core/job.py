@@ -61,6 +61,7 @@
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
@@ -296,7 +297,36 @@ def _slot_path(kind: str) -> Path:
 class heavy_slot:
     """heavy 배타 슬롯. `with heavy_slot():` 로 감싼다. 못 잡으면 SlotBusy.
 
-    죽은 프로세스가 남긴 락은 pid 생존 확인으로 회수한다(stale lock reaping).
+    ## 🔴 [2026-08-13 W12 · 리뷰 E-F1] pid 파일 락 → `fcntl.flock`
+
+    옛 구현은 "락 파일이 존재하면 점유"였고, 죽은 프로세스의 락은 pid 생존 확인 +
+    `MAX_HOLD_SEC` 나이로 **회수**했다. 그 회수 경로에 동시 1개 계약을 깨는 구멍이 있었다:
+
+        A 획득 → 맥이 6시간 자다 깸(A 는 아직 살아 있다) → B 가 유령 락으로 보고 회수
+        → B 가 같은 경로에 자기 락 생성 → **A 가 정상 종료하며 `path.unlink()`**
+        → 그 경로는 이미 B 의 락이다 → 슬롯이 무주공산 → C·D·… 무제한 진입
+
+    실측 재현(2026-08-13): A 획득 → mtime 을 7시간 전으로 → B 회수 성공 → `A.__exit__()`
+    → 락 파일 사라짐 → C 진입 성공. **B 와 C 가 동시 보유.**
+    스케줄러 락에서도 같았다 — 같은 task 를 N 개 스케줄러가 동시에 돌린다.
+
+    `__exit__` 이 소유권을 확인하고 지우게 하는 것으로는 못 닫는다: 파일을 읽고 unlink
+    하는 사이가 원자적이지 않고, POSIX 에 "inode 가 일치하면 unlink" 가 없다.
+
+    **그래서 커널에 맡긴다.** `flock` 은 fd(정확히는 open file description)에 붙으므로
+    프로세스가 죽으면 자동 해제된다 — 회수(stale reaping)라는 개념 자체가 필요 없어지고,
+    위 시나리오가 **표현 불가능**해진다. `approval.py:222` 가 A-H3 때 이미 도달한 결론인데
+    `job.heavy_slot` 만 옛 방식에 남아 있었다.
+
+    ## 무엇이 달라지나
+
+    · 락 파일을 **지우지 않는다.** 파일이 곧 락의 대상이고, 존재 여부는 점유와 무관하다.
+      (`_locks/*.lock` 이 남지만 0바이트급이고, `approval` 도 같은 방식이다.)
+    · pid 재사용·유령 락 문제가 사라진다 — 커널이 안다.
+    · **오래 잡고 있는 락은 회수하지 않고 경고만 한다.** 회수가 위 결함의 원인이었고,
+      회수가 필요했던 이유(죽은 프로세스 판별 불가)는 flock 이 없앴다. 남는 경우는
+      "살아 있는데 멈춘 프로세스"뿐인데, 그건 회수해서 이중 실행을 만드는 것보다
+      **시끄럽게 알리고 사람이 죽이는 편**이 맞다(불변규칙 06).
     """
 
     def __init__(self, kind: str = "heavy"):
@@ -304,75 +334,66 @@ class heavy_slot:
         self.fd: int | None = None
 
     def __enter__(self):
+        fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o644)
         try:
-            self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            if not self._stale():
-                raise SlotBusy(f"heavy 슬롯 점유 중: {self.path}")
-            # stale 회수 — unlink 로 경쟁하면 두 프로세스가 서로의 새 락을 지워 둘 다 진입할 수
-            # 있다(리뷰 D4). rename 은 원자적이라 **한 프로세스만** 소유권을 선점한다.
-            claim = self.path.with_suffix(f".reap-{os.getpid()}")
-            try:
-                os.rename(self.path, claim)
-            except FileNotFoundError:
-                raise SlotBusy(f"heavy 슬롯 회수 경쟁 중 — 물러난다: {self.path}")
-            claim.unlink(missing_ok=True)
-            try:
-                self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError:
-                # 회수 직후 제3자가 정당하게 선점 — SlotBusy 로 변환해 조용한 크래시를 막는다.
-                raise SlotBusy(f"heavy 슬롯 점유 중(회수 직후 선점됨): {self.path}")
-        os.write(self.fd, str(os.getpid()).encode())
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:                      # BlockingIOError 포함 — 다른 fd 가 쥐고 있다
+            held = self._held_info()
+            os.close(fd)
+            self._warn_if_long(held)
+            raise SlotBusy(f"heavy 슬롯 점유 중: {self.path.name}{held}")
+        self.fd = fd
+        # 락은 커널이 쥔다. 파일 내용은 **사람이 읽을 진단 정보**일 뿐이다 —
+        # 이 값으로 소유권을 판정하지 않는다(그게 옛 결함의 뿌리였다).
+        try:
+            os.ftruncate(fd, 0)
+            os.write(fd, f"{os.getpid()} {time.time():.0f}".encode())
+        except OSError:
+            pass                             # 진단 정보 기록 실패가 락을 막으면 안 된다
         return self
 
     def __exit__(self, *exc):
-        if self.fd is not None:
+        if self.fd is None:
+            return
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_UN)
+        finally:
             os.close(self.fd)
-        self.path.unlink(missing_ok=True)
+            self.fd = None
+        # 🔴 **unlink 하지 않는다.** 파일이 곧 락의 대상이다. 지우면 그 사이 다른
+        #    프로세스가 만든 파일을 지우게 되고, 그게 정확히 이 클래스가 앓던 결함이다.
 
-    # 락이 이 시간을 넘기면 pid 가 살아 있어도 회수한다. [W9 A-L13]
-    # heavy 잡의 최장 런타임(judge 3시간)보다 넉넉히 위. 유령 락으로 시스템이 영구
-    # 정지하는 것보다, 아주 드물게 이중 실행을 감수하는 편이 낫다 — 이중 실행은
-    # 멱등 설계가 흡수하지만 영구 정지는 아무도 모른다(A-H3·A-H4 가 그 실증이었다).
+    # 이만큼 잡고 있으면 **경고한다**(회수하지 않는다). heavy 잡의 최장 런타임
+    # (judge 3시간)보다 넉넉히 위. 회수가 옛 결함의 원인이었고, 회수가 필요했던 이유
+    # (죽은 프로세스를 판별 못 함)는 flock 이 없앴다.
     MAX_HOLD_SEC = 6 * 3600
 
-    def _stale(self) -> bool:
-        """회수 가능한 락인가 — pid 생존 **그리고** 나이를 함께 본다.
+    def _held_info(self) -> str:
+        """점유자 진단 정보 — 로그에 붙일 문자열. 판정에는 쓰지 않는다."""
+        try:
+            raw = self.path.read_text().strip().split()
+            age = time.time() - self.path.stat().st_mtime
+        except OSError:
+            return ""
+        pid = raw[0] if raw else "?"
+        return f" (pid={pid} · {age / 3600:.1f}시간째)"
 
-        [W9 A-L13] pid 만 보면 두 가지가 샌다.
-          ① 빈 락파일(O_EXCL 성공 후 write 전 찰나)을 제3자가 보면 `int("")` → 0 → stale
-             로 판정해 **정당한 락을 뺏는다**. 생성 직후 몇 초는 보호한다.
-          ② 맥 슬립·SIGKILL 로 죽은 뒤 그 pid 가 **재사용**되면 영원히 not-stale 이다.
-             그러면 모든 진입이 SlotBusy 로 조용히 물러난다(A-H3 실증: decide 영구 no-op).
+    def _warn_if_long(self, held: str) -> None:
+        """오래 잡힌 락은 시끄럽게 알린다 — 회수는 하지 않는다.
+
+        옛 구현은 `MAX_HOLD_SEC` 를 넘으면 **회수**했고, 그 회수가 동시 1개 계약을 깼다.
+        지금은 두 가지가 다르다: ① 죽은 프로세스는 커널이 이미 풀었으므로 여기 안 온다
+        ② 여기 오는 건 "살아 있는데 오래 잡고 있다"뿐이고, 그건 사람이 볼 일이다.
         """
         try:
             age = time.time() - self.path.stat().st_mtime
         except OSError:
-            return True
-        try:
-            raw = self.path.read_text().strip()
-        except OSError:
-            return True
-        if not raw:
-            # ① 쓰기 전 찰나 — 아주 최근이면 정당한 락으로 본다.
-            return age > 5
-        try:
-            pid = int(raw)
-        except ValueError:
-            return True
-        if pid <= 0:
-            return True
+            return
         if age > self.MAX_HOLD_SEC:
-            # ② pid 재사용 방어 — 이만큼 오래 잡고 있는 정상 잡은 없다.
-            print(f"⚠️  락 {self.path.name} 이 {age/3600:.1f}시간째 — 유령 락으로 보고 회수한다")
-            return True
-        try:
-            os.kill(pid, 0)      # 신호 0 = 존재 확인만
-            return False         # 살아 있음
-        except ProcessLookupError:
-            return True          # 죽었음 → stale
-        except PermissionError:
-            return False         # 남의 프로세스지만 살아 있음
+            print(f"🔴 락 {self.path.name} 이 {age / 3600:.1f}시간째 잡혀 있다{held}.\n"
+                  f"   프로세스가 살아 있다는 뜻이다(죽었으면 커널이 풀었다) — 멈춰 있는지\n"
+                  f"   확인하고 필요하면 죽여라. **자동 회수하지 않는다**: 회수는 같은 슬롯에\n"
+                  f"   두 잡을 동시에 넣는 경로였다(W12 E-F1).")
 
 
 class resource_slots:
@@ -383,7 +404,8 @@ class resource_slots:
     여러 락을 제각각 순서로 잡으면 교착(잡1: A→B, 잡2: B→A). 그래서 **항상 이름 정렬 순**으로.
     하나라도 못 잡으면 이미 잡은 것을 전부 풀고 SlotBusy — 부분 점유를 남기지 않는다.
 
-    자원명으로 키잉된 배타 락은 heavy_slot 을 그대로 재사용한다(O_EXCL·stale reaping 검증됨).
+    자원명으로 키잉된 배타 락은 heavy_slot 을 그대로 재사용한다
+    (2026-08-13 W12 부터 `fcntl.flock` — 프로세스가 죽으면 커널이 푼다. 회수 없음).
     """
 
     def __init__(self, names: Iterable[str]):
