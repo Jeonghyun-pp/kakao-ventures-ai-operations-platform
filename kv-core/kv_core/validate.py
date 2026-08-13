@@ -210,13 +210,62 @@ def validate_text(
 
 # ─────────────────────────── 선언적 계약 로딩 ───────────────────────────
 
+# 계약 스펙에 쓸 수 있는 키 — **미지 키를 거부**하기 위한 어휘표다.
+# ⚠️ 여기 있는 것만 실제로 존중된다. `check_record` 가 읽는 키와 반드시 같아야 한다
+#    (다르면 "선언했는데 안 도는 계약"이 생기고, 그게 이 결함의 형태다).
+_SPEC_KEYS = {"schema", "on_invalid", "min_records"}
+_FIELD_KEYS = {"type", "required", "enum", "nonempty"}
+
+
 def load_contracts(path: str | Path) -> dict[str, Contract]:
-    """config/contracts.yaml → {stage: Contract}. 정본은 파일 한 곳(하드코딩 0)."""
+    """config/contracts.yaml → {stage: Contract}. 정본은 파일 한 곳(하드코딩 0).
+
+    ## 🔴 [2026-08-13 W12 · 리뷰 E-F5] 오타를 조용히 삼키고 있었다
+
+    `spec.get("schema") or {}` 는 `shema:` 라고 한 글자 틀리면 **빈 스키마로 로드된다.**
+    경고도 예외도 없다. 그 계약이 `on_invalid: halt` 를 선언하고 있어도 스키마가 비면
+    **모든 쓰레기가 halt 없이 통과해 노션에 기입된다** — 실측: 쓰레기 3건 → 통과 3·위반 0.
+
+    ADR 0003 결정 ④ 는 *"claude 출력은 권고(soft) → 되읽기 검증 필수. validating 스테이지를
+    옵션에서 **생명줄**로 승격"* 이라 정했다. 그 생명줄이 한 글자로 꺼졌다.
+    `min_records` 오타는 진공 통과 방지(규칙 05)를 동시에 끈다 — 0건 성공이 성공이 된다.
+    `type: integer`(정답은 `int`)처럼 모르는 타입 이름도 검사를 조용히 건너뛰었다.
+
+    같은 리포의 다른 로더들은 정반대다 — `registry.load` 는 미지 필드에 raise 하고,
+    `cadence.py:7` 은 *"조용한 폴백을 만들지 마라 — 이 파일의 존재 이유다"* 라고 적었다.
+    **그 원칙이 옆 모듈로 전개되지 않았다.** 여기서 전개한다.
+    (`on_invalid` 값 검증만 이미 fail-loud 였다 — 나머지를 거기 수준으로 올린다.)
+    """
     import yaml
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     out: dict[str, Contract] = {}
     for stage, spec in raw.items():
-        out[stage] = Contract(schema=spec.get("schema") or {},
+        if not isinstance(spec, dict):
+            raise ValueError(f"계약 '{stage}': 스펙이 매핑이 아니다({type(spec).__name__})")
+        unknown = sorted(set(spec) - _SPEC_KEYS)
+        if unknown:
+            raise ValueError(
+                f"계약 '{stage}': 알 수 없는 키 {unknown} — 오타면 그 설정이 **조용히 무시된다**. "
+                f"쓸 수 있는 키: {sorted(_SPEC_KEYS)}")
+        schema = spec.get("schema") or {}
+        if not schema:
+            raise ValueError(
+                f"계약 '{stage}': schema 가 비었다 — 빈 스키마는 **모든 레코드를 통과시킨다**. "
+                f"검증할 게 없으면 계약을 지워라(있는데 안 도는 것이 가장 나쁘다).")
+        for fname, fspec in schema.items():
+            if not isinstance(fspec, dict):
+                raise ValueError(f"계약 '{stage}.{fname}': 필드 스펙이 매핑이 아니다")
+            fbad = sorted(set(fspec) - _FIELD_KEYS)
+            if fbad:
+                raise ValueError(f"계약 '{stage}.{fname}': 알 수 없는 키 {fbad} — "
+                                 f"쓸 수 있는 키: {sorted(_FIELD_KEYS)}")
+            want = fspec.get("type")
+            if want is not None and want not in _TYPES:
+                raise ValueError(
+                    f"계약 '{stage}.{fname}': 알 수 없는 type '{want}' — 모르는 타입은 "
+                    f"**검사를 건너뛴다**(선언했는데 안 도는 계약이 된다). "
+                    f"쓸 수 있는 값: {sorted(_TYPES)}")
+        out[stage] = Contract(schema=schema,
                               on_invalid=spec.get("on_invalid", "halt"),
                               min_records=int(spec.get("min_records", 0)))
     return out

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import time as _time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -43,13 +44,46 @@ def _wm_path(task: Task) -> Path:
 
 
 def read_watermark(task: Task) -> dict:
+    """워터마크를 읽는다. **부재와 손상을 구분한다.**
+
+    🔴 [2026-08-13 W12 · 리뷰 E-F8] 여기가 `except (JSONDecodeError, OSError): return {}`
+       한 줄이었다. 부재도 손상도 마운트 실패도 전부 `{}` — "한 번도 안 돌았음"이 된다.
+
+       그 자체도 페일오픈이지만(quarterly task 가 손상 하나로 즉시 due 가 된다),
+       **더 나쁜 건 `first_attempt` 가 오늘 날짜로 다시 심긴다는 것이다.**
+       정본 4-1 R1 이 낳은 실제 사고가 정확히 그것 — *"`first_attempt` 가 없으면
+       `last_attempt` 로 폴백했는데 그 값은 매일 갱신되므로 '배선 후 경과일'이 영원히
+       0 이 되어 **알림이 영구 침묵**했다."* 처방으로 아래 `setdefault("first_attempt")`
+       를 넣었는데, 판독이 한 번만 실패하면 그 앵커가 오늘로 되감긴다.
+       `health._read_watermark` 도 같은 함수를 부르므로 관측까지 똑같이 속는다.
+
+       그래서 세 상태를 가른다:
+         · 파일 없음      → `{}`  (정상. 첫 실행이다)
+         · 파싱 실패      → 🔴 크게 알리고 `.corrupt-<ts>` 로 **보존** 후 `{}`
+                            (원본을 지우지 않는다 — 사람이 복구할 유일한 근거다)
+         · OSError        → 🔴 크게 알린다. 마운트·권한 사고면 전 task 가 동시에 샌다
+    """
     p = _wm_path(task)
     if not p.exists():
-        return {}
+        return {}                                  # 부재 = 첫 실행. 이건 정상이다.
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}                                  # 못 읽으면 빈 상태(= 한 번은 돈다)
+    except json.JSONDecodeError as e:
+        bak = p.with_suffix(f".corrupt-{int(_time.time())}")
+        try:
+            p.rename(bak)                          # 지우지 않는다 — 복구의 유일한 근거
+        except OSError:
+            bak = None
+        print(f"🔴 워터마크 손상 — {task.name}: {e}\n"
+              f"   이 task 는 '한 번도 안 돌았음'으로 취급되어 **즉시 due** 가 되고, "
+              f"first_attempt 앵커가 오늘로 되감긴다(알림 영구 침묵의 경로다 — R1).\n"
+              f"   원본 보존: {bak if bak else '보존 실패'}")
+        return {}
+    except OSError as e:
+        print(f"🔴 워터마크를 못 읽는다 — {task.name}: {e}\n"
+              f"   파일은 있는데 읽기가 실패했다. 마운트·권한 사고면 **전 task 가 동시에** "
+              f"'한 번도 안 돌았음'이 되어 일제히 due 로 뜬다. ~/kv-data 를 확인하라.")
+        return {}
 
 
 def write_watermark(task: Task, wm: dict) -> None:
@@ -110,8 +144,12 @@ def due_tasks(tasks: list[Task], *, now: date | None = None) -> list[Due]:
 Runner = Callable[[Task, date], bool]
 
 
-def run_due(tasks: list[Task], runner: Runner, *, now: date | None = None) -> list[dict]:
-    """due task 들을 실행하고 워터마크를 갱신한다. 반환: 실행 리포트.
+def run_due(tasks: list[Task], runner: Runner, *, now: date | None = None) -> list[dict] | None:
+    """due task 들을 실행하고 워터마크를 갱신한다.
+
+    반환: 실행 리포트. **`None` 은 "물러났다"**(다른 인스턴스가 도는 중) —
+    `[]`("돌았는데 due 가 없었다")와 다른 사실이다. 둘을 같은 값으로 돌려주면
+    호출부가 구분할 수 없고, 실제로 후퇴 직후 "전부 최신"이라는 거짓 로그가 나갔다(E-F10).
 
     last_attempt 는 시도할 때마다 전진. last_success 는 성공했을 때만 전진(결정 B).
     한 task 의 주기 실행 중 실패하면 **그 task 의 이후 주기를 진행하지 않는다** — 나중 주기의
@@ -124,7 +162,14 @@ def run_due(tasks: list[Task], runner: Runner, *, now: date | None = None) -> li
         slot.__enter__()
     except job.SlotBusy:
         print("⚠️  다른 스케줄러 인스턴스가 실행 중 — 이번 기동은 물러난다(이중 발화 방지, 규칙 08).")
-        return []
+        # 🔴 [2026-08-13 W12 · 리뷰 E-F10] 여기서 `[]` 를 돌려주면 호출부가 후퇴와
+        #    "due 없음"을 **구분할 수 없다.** 실제로 물러난 직후 로그에
+        #    `[날짜] 실행할 배선 task 없음(전부 최신).` 이라는 **거짓 문장**이 찍혔다.
+        #    나중에 로그를 읽는 사람(정본 A4 가 "타임라인 재구성용"이라 적은 그 로그)은
+        #    낙관적인 두 번째 줄을 믿는다 — 정본 R2 의 *"사람은 두 답이 다르면 낙관적인
+        #    쪽을 믿는다"* 가 같은 파일 안에서 재현됐다.
+        #    `None` = 후퇴, `[]` = 돌았는데 due 가 없었다.
+        return None
     try:
         report: list[dict] = []
         for due in due_tasks(tasks, now=now):
@@ -206,10 +251,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"🔕 {d.task.name}: due 이나 러너 미배선 — 건너뜀(워터마크 불변). "
               f"배선하려면 kv_core/workers.py WIRED 에 추가.")
     report = run_due(wired, workers.dispatch, now=now)
+    # 🔴 [W12 · E-F10] `None`(후퇴)과 `[]`(돌았는데 due 없음)을 **구분해서 말한다.**
+    #    예전엔 둘 다 `[]` 라 후퇴 직후에도 "전부 최신"이라는 거짓 문장이 찍혔다.
+    #    ⚠️ 아래 다이제스트 로직은 건드리지 않는다 — 그건 이 finding 의 범위가 아니고,
+    #       "부재 경보(🔴)의 전달이 로컬 실행 여부와 분리돼야 한다"는 별도 결정이 있다.
+    retreated = report is None
+    report = report or []
     n_ok = sum(1 for r in report if r["ok"])
     for r in report:
         print(f"  {'✅' if r['ok'] else '🔴'} {r['task']} {r['period']}")
-    if not report:
+    if retreated:
+        print(f"[{now}] 이번 기동은 물러났다 — **아무것도 판정하지 않았다.** "
+              f"'전부 최신'이 아니다. 다른 인스턴스의 결과를 보라.")
+    elif not report:
         print(f"[{now}] 실행할 배선 task 없음(전부 최신).")
 
     # [W7·중간점검 A3+D7] 다이제스트 발송 규칙: (성공 1건 이상) or (🔴 존재) 일 때만 —

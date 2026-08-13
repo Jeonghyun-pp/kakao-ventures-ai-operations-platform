@@ -183,7 +183,16 @@ def test_scheduler_double_start() -> None:
 
     with job.heavy_slot("scheduler"):               # 첫 인스턴스가 락 보유 중이라고 가정
         rep = scheduler.run_due([], lambda t, p: True, now=date(2026, 8, 4))
-        check("두 번째 인스턴스는 실행 0·빈 리포트", rep == [], f"report={rep}")
+        # 🔴 [W12 · E-F10] 예전엔 `[]` 를 기대했다. 그런데 `[]` 는 "돌았는데 due 가 없었다"
+        #    이기도 해서 호출부가 후퇴와 구분할 수 없었고, 실제로 물러난 직후 로그에
+        #    "실행할 배선 task 없음(전부 최신)" 이라는 거짓 문장이 찍혔다.
+        #    이제 후퇴는 `None` 이다 — **두 사실이 두 값이어야 한다.**
+        check("두 번째 인스턴스는 물러난다(None — '실행 0'과 구분됨)", rep is None,
+              f"report={rep!r}")
+
+    # 락이 풀린 뒤엔 정상적으로 돌고, due 가 없으면 `[]` 를 준다(후퇴와 다른 값).
+    rep2 = scheduler.run_due([], lambda t, p: True, now=date(2026, 8, 4))
+    check("락이 풀리면 실제로 돌고 due 없음은 [] 로 답한다", rep2 == [], f"report={rep2!r}")
 
 
 # ── D4: 슬롯 배타성 (2026-08-13 W12 에 flock 으로 재작성) ────────────────────

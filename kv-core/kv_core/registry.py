@@ -23,6 +23,14 @@ _CATCHUP = {"coalesce", "backfill"}
 _WATERMARK = {"last_success", "last_attempt"}
 _ORIGIN = {"system", "partner"}
 _RUNNERS = {"local", "github-actions", "launchd-direct"}
+# [2026-08-13 W12 · E-F9] 아래 둘은 어휘표조차 없어 오타가 조용히 통과했다.
+# `cadence` 오타는 fail-loud 인데 **한 필드 옆 `resources` 는 무검증**이었다 —
+# 같은 파일 안에서 규율이 비대칭이었고, 하필 조용히 새는 쪽이 무검증이었다.
+_STATUS = {"done", "partial", "slot"}
+# 자원 이름은 곧 락 파일 이름이다(`_locks/<name>.lock`). 오타 하나면 **별도 락**을 잡아
+# 직렬화가 갈라지고, 두 잡이 동시에 claude 세션을 띄운다(ADR 0003 대가 ③).
+# 새 자원을 늘릴 땐 config/resources.yaml 과 함께 고친다.
+_RESOURCES = {"claude", "notion", "notion-bplan", "apify", "gmail-inbox", "sheet-a1"}
 # local=우리 스케줄러가 실행 · github-actions=GH cron · launchd-direct=개별 plist 가 직접 실행(카탈로그 등재만).
 # local 이 아닌 task 는 스케줄러가 건드리지 않는다(이중실행 방지, 규칙 01) — 단 shadow=true 면 검증용 병행 실행.
 
@@ -34,7 +42,12 @@ class Task:
     kind: str = "routine"
     cadence: str | None = None
     catch_up: str = "coalesce"
-    watermark: str = "last_attempt"
+    # 🔴 [2026-08-13 W12 · E-F9] 기본값이 `last_attempt` 였다 — **페일오픈 쪽이 기본**이다.
+    #    ADR 0004 는 *"의심스러우면 False — 재시도는 싸고 유실은 비싸다"* 인데 반대였다.
+    #    실측: watermark 미선언 + weekly task 가 러너 예외로 폭발 → last_attempt 만 전진 →
+    #    **다음 주까지 재시도 없음**. 지금 13개 task 는 전부 명시 선언이라 안 물렸고,
+    #    새 task 하나가 이 줄을 빠뜨리는 순간 물린다. 보수적인 쪽으로 뒤집는다.
+    watermark: str = "last_success"
     resources: list[str] = field(default_factory=list)
     stages: list[str] = field(default_factory=list)
     origin: str = "system"
@@ -90,6 +103,28 @@ def load(path: Path | None = None) -> list[Task]:
         if t.scheduled and t.cadence not in cadence.DAYS:
             # 오타(dayly 등)가 런타임 weekly 폴백으로 조용히 굳지 않게 load 시점에 잡는다(fail-loud).
             raise ValueError(f"task '{t.name}': cadence 는 {sorted(cadence.DAYS)} (got '{t.cadence}')")
+
+        # ── [2026-08-13 W12 · 리뷰 E-F9] 아래 넷은 검증이 아예 없었다 ──────────────
+        if t.status not in _STATUS:
+            raise ValueError(f"task '{t.name}': status 는 {sorted(_STATUS)} (got '{t.status}')")
+        bad_res = sorted(set(t.resources or []) - _RESOURCES)
+        if bad_res:
+            raise ValueError(
+                f"task '{t.name}': 알 수 없는 자원 {bad_res} — 오타면 `_locks/<오타>.lock` 이라는 "
+                f"**별도 락**을 잡아 직렬화가 조용히 갈라진다. 쓸 수 있는 값: {sorted(_RESOURCES)}\n"
+                f"   (새 자원은 registry._RESOURCES 와 config/resources.yaml 을 함께 고쳐라.)")
+        if t.kind == "routine" and not t.cadence:
+            # `scheduled` 가 False 가 되어 due_tasks 에도, 스케줄러의 unwired loud 스킵
+            # 목록에도 안 뜬다. **완전 침묵** — mail-triage 미실행 사고는 최소한 로그가
+            # 있었는데 이 변형은 그것조차 없다.
+            raise ValueError(
+                f"task '{t.name}': kind=routine 인데 cadence 가 없다 — 이 상태는 due 목록에도 "
+                f"미배선 목록에도 안 떠서 **아무 로그 없이 사라진다**. "
+                f"온디맨드면 kind: ondemand 라고 적어라.")
+        if t.status != "slot" and not (paths.repo_root() / "skills" / t.skill).is_dir():
+            # status: slot = 아직 안 만든 자리(설계상 정상). 그 외에는 실재해야 한다.
+            raise ValueError(f"task '{t.name}': skill '{t.skill}' 디렉토리가 없다 "
+                             f"(미구현 자리면 status: slot 으로 적어라)")
         out.append(t)
     _assert_unique_names(out)
     return out
