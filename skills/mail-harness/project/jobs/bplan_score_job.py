@@ -126,10 +126,9 @@ def _score_options(token: str, db: str) -> list[str]:
     문서나 코드에 값을 박지 않는다. 그물망에서 문서 어휘표가 라벨 하나를 빠뜨려
     348건이 종단 라벨로 쏠린 것이 정확히 이 지점의 사고였다.
     """
-    import requests
-    r = requests.get(f"https://api.notion.com/v1/databases/{db}",
-                     headers={"Authorization": f"Bearer {token}",
-                              "Notion-Version": "2022-06-28"}, timeout=30)
+    # [W12 · B-F1] 전송 규율은 kv_core.notion 이 정본이다(백오프·페이싱·재시도).
+    from kv_core import notion
+    r = notion.read(f"{notion.API}/databases/{db}", token)
     if r.status_code != 200:
         raise RuntimeError(f"DB 스키마 조회 실패 {r.status_code} {r.text[:200]}")
     prop = (r.json().get("properties") or {}).get("점수") or {}
@@ -138,7 +137,7 @@ def _score_options(token: str, db: str) -> list[str]:
 
 def s_export(skill: str, job_id: str) -> None:
     """`점수` 빈칸 행을 큐로. **읽기 전용.**"""
-    import requests
+    from kv_core import notion
     c = _cfg()
     token, db = c["token"], c["db"]
     if not token or not db:
@@ -150,11 +149,8 @@ def s_export(skill: str, job_id: str) -> None:
     rows, payload = [], {"page_size": 100,
                          "filter": {"property": "점수", "select": {"is_empty": True}}}
     while True:
-        r = requests.post(f"https://api.notion.com/v1/databases/{db}/query",
-                          headers={"Authorization": f"Bearer {token}",
-                                   "Notion-Version": "2022-06-28",
-                                   "Content-Type": "application/json"},
-                          json=payload, timeout=30)
+        # [W12 · B-F1] 페이지네이션 루프 — 백오프 없이 돌던 구간.
+        r = notion.write("POST", f"{notion.API}/databases/{db}/query", token, payload)
         if r.status_code != 200:
             raise RuntimeError(f"노션 조회 실패 {r.status_code} {r.text[:200]}")
         d = r.json()
@@ -199,38 +195,55 @@ def _batches(rows: list[dict], max_rows: int, char_budget: int, max_field: int):
         yield cur
 
 
-def _apply(token: str, verdicts: list[dict], allowed: list[str], dry: bool) -> int:
+def _apply(token: str, verdicts: list[dict], allowed: list[str], dry: bool) -> list[str]:
     """노션 기입 — **전량 사전 검증 후** 쓴다. 하나라도 어긋나면 아무것도 안 쓴다.
+
+    반환: **실제로 200 을 받은 page_id 목록.** 개수가 아니라 목록인 이유는 호출부가
+    적용 원장에 그것만 적어야 하기 때문이다(아래 B-F8 참조).
 
     노션은 모르는 select 값을 **조용히 버리고 PATCH 는 200 을 준다** — 로그엔 "적용 완료",
     실제 칸은 빈칸. 그래서 쓰기 전에 전량 대조한다(그물망 judge_cli.apply 와 같은 규율).
+
+    ## 🔴 [2026-08-13 W12] 여기서 셋을 함께 고쳤다
+
+    **B-F2 전송 규율 0줄.** `requests.patch` 를 직접 불렀다 — 백오프·페이싱·재시도가 전부
+    없었다. 노션 한도는 평균 3 req/s 인데 로컬 PATCH 루프는 초당 5~15회가 나온다.
+    2026-07-11 에 415행을 무지연 POST 해서 한도를 때린 것과 **같은 코드 모양**이고,
+    이 파일은 그 사고 **이후에** 쓰였다. `kv_core.notion.write` 로 보낸다.
+
+    **B-F8 실패한 행이 '적용됨'으로 기록됐다.** 429 로 이 행의 `점수` 가 빈칸으로 남아도
+    호출부가 `ok` 전량을 적용 원장에 적었고, 잡 내 재시도는 그 행을 **영구 스킵**했다
+    (다음 날 빈칸 필터가 구제하지만 그날의 판정은 "완료"로 보고된다).
+    불변규칙 05 — 반환값을 믿지 않고 상태를 관측한다. 성공한 것만 돌려준다.
+
+    **`[:2000]` 은 안전하지 않다.** 노션은 UTF-16 코드유닛을 세므로 이모지가 있으면
+    2000 자가 2003 유닛이 된다 — 2026-07-27 에 링크드인 495건 중 7건이 그렇게 통째로
+    착지 실패했다. `notion.clip16` 을 쓴다(이 규율의 **세 번째** 위반이었다).
     """
-    import requests
+    from kv_core import notion
     bad = [v for v in verdicts if v.get("score") not in allowed]
     if bad:
         raise RuntimeError(f"🔴 허용값 밖 {len(bad)}건 — 기입 0건으로 중단. 예: "
                            f"{[v.get('score') for v in bad[:3]]}")
-    n = 0
+    done: list[str] = []
     for v in verdicts:
         props = {"점수": {"select": {"name": v["score"]}}}
         if (v.get("reason") or "").strip():
-            props["포워드 이유"] = {"rich_text": [{"text": {"content": v["reason"][:2000]}}]}
+            props["포워드 이유"] = {"rich_text": [
+                {"text": {"content": notion.clip16(v["reason"])}}]}
         if (v.get("fwd") or "").strip():
             props["fwd to whom?"] = {"select": {"name": v["fwd"]}}
         _assert_safe_patch(props)                 # 🔴 To do 를 절대 못 쓴다
         if dry:
-            n += 1
+            done.append(str(v.get("page_id", "")))
             continue
-        r = requests.patch(f"https://api.notion.com/v1/pages/{v['page_id']}",
-                           headers={"Authorization": f"Bearer {token}",
-                                    "Notion-Version": "2022-06-28",
-                                    "Content-Type": "application/json"},
-                           json={"properties": props}, timeout=30)
+        r = notion.write("PATCH", f"{notion.API}/pages/{v['page_id']}", token,
+                         {"properties": props})
         if r.status_code != 200:
             print(f"⚠️  기입 실패 {v['page_id'][:8]}: {r.status_code} {r.text[:120]}")
             continue
-        n += 1
-    return n
+        done.append(str(v["page_id"]))
+    return done
 
 
 def s_score_apply(skill: str, job_id: str) -> None:
@@ -315,11 +328,15 @@ def s_score_apply(skill: str, job_id: str) -> None:
             # 0 부터 다시 시작해 앞 attempt 의 원장을 덮어쓴다(그물망 실측 결함).
             vf = paths.data(SKILL) / f"bplan_verdicts_{date.today().isoformat()}_{job_id}_{done:02d}.json"
             vf.write_text(json.dumps(ok, ensure_ascii=False, indent=2), encoding="utf-8")
-            n = _apply(token, ok, allowed, dry)
-            applied += n
+            # 🔴 [W12 · B-F8] 예전엔 `_apply` 가 개수를 돌려주고, 원장에는 `ok` **전량**을
+            #    적었다 — 429 로 기입에 실패한 행도 "적용됨"으로 박히고 잡 내 재시도에서
+            #    **영구 스킵**된다(다음 날 빈칸 필터가 구제하지만 그날 판정은 완료로 보고된다).
+            #    불변규칙 05: 반환값이 아니라 **실제로 200 을 받은 것**만 기록한다.
+            applied_ids = _apply(token, ok, allowed, dry)
+            applied += len(applied_ids)
             with open(ap, "a", encoding="utf-8") as f:
-                for r in ok:
-                    f.write(str(r.get("page_id", "")) + "\n")
+                for pid in applied_ids:
+                    f.write(pid + "\n")
             print(f"  · 배치 {done}: {n}건 기입" + ("(dry)" if dry else ""))
 
     _digest(skill, job_id, all_ok, len(rows), skipped, dry)

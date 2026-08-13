@@ -49,63 +49,34 @@ _MAX_RETRY = 4
 _NET_BACKOFF = 15.0           # 연결/DNS 실패 전용: 15 → 30 → 60s (총 105초, 수집 경로와 동일)
 
 
+# ══════════════════════════════════════════════════════════════════════
+# 전송층 — **kv_core.notion 이 정본이다.** 여기는 얇은 위임뿐.
+# ══════════════════════════════════════════════════════════════════════
+# 🔴 [2026-08-13 W12 · 리뷰 B-F1] 이 두 함수는 `kv_core/notion.py` 와 **동작이 완전히
+#    동일한 복제본**이었다(로컬 서버로 429/500/Retry-After/연결거부 전 시나리오를 나란히
+#    때려 확인 — 재시도 횟수·간격·총 소요가 전부 같았다).
+#
+#    ⚠️ 감사 브리핑에 내가 "kv_core 쪽은 RATE_SLEEP 0 · MAX_RETRY 0 = 규율 없음"이라고
+#       적어 넘겼는데 **틀렸다.** `kv_core` 는 상수에 언더스코어를 안 쓴다(`RATE_SLEEP`).
+#       `_RATE_SLEEP` 으로 grep 한 인공물이었다. 리뷰가 실측으로 뒤집어 왔다.
+#
+#    진짜 문제는 "어느 쪽이 약한가"가 아니라 **정본이 아무에게도 안 쓰인다**는 것이었다 —
+#    `kv_core.notion` 임포터가 리포 전체에 **0건**이었다. 그래서 노션을 부르는 13개 모듈이
+#    각자 클라이언트를 만들었고 **그중 11본에 백오프가 0줄**이다.
+#    새 파일을 열면 임포트할 정본이 안 보인다 — 검색해도 용례가 안 나오니까.
+#
+#    복제본을 지우고 위임한다. 동작이 같으므로 교체 위험이 0 이고, 앞으로 kv_core 를
+#    고치면 여기도 같이 고쳐진다(방금 `ChunkedEncodingError` 를 그렇게 고쳤다 — B-F6).
 def _write(method: str, url: str, token: str, payload: dict):
-    """노션 쓰기(POST/PATCH) — 429/5xx **와 네트워크 타임아웃**을 백오프 재시도.
-
-    🔴 [2026-07-13] 타임아웃 재시도가 없어서, `requests.ReadTimeout` **한 번**에 904행 착지가
-       통째로 죽었다(예외가 land 밖으로 튀어나가 프로세스 종료). 상태코드만 보고 있었는데,
-       진짜로 자주 터지는 건 **응답이 아예 안 오는 경우**다.
-    """
-    import time
-    delay = 1.0
-    net_delay = _NET_BACKOFF
-    for attempt in range(_MAX_RETRY):
-        try:
-            r = requests.request(method, url, headers=_headers(token), json=payload, timeout=30)
-        except (requests.Timeout, requests.ConnectionError) as e:
-            if attempt == _MAX_RETRY - 1:
-                raise
-            print(f"  · 노션 네트워크 오류({type(e).__name__}) — {net_delay:.1f}s 후 재시도 "
-                  f"({attempt + 1}/{_MAX_RETRY - 1}) · 절전 해제 직후면 망이 곧 올라온다")
-            time.sleep(net_delay)
-            net_delay *= 2
-            continue
-        if r.status_code not in (429, 500, 502, 503, 504):
-            time.sleep(_RATE_SLEEP)               # 성공해도 한도를 지킨다
-            return r
-        wait = float(r.headers.get("Retry-After") or delay)
-        if attempt == _MAX_RETRY - 1:
-            return r
-        print(f"  · 노션 {r.status_code} — {wait:.1f}s 후 재시도 ({attempt + 1}/{_MAX_RETRY - 1})")
-        time.sleep(wait)
-        delay *= 2
-    return r
+    """노션 쓰기 — `kv_core.notion.write` 에 위임(정본). 동작 동일."""
+    from kv_core import notion as _kv
+    return _kv.write(method, url, token, payload)
 
 
 def _read(url: str, token: str, params: dict | None = None):
-    """노션 읽기(GET) — 429/5xx **와 네트워크 타임아웃** 백오프(쓰기와 같은 이유 → `_write` 참조)."""
-    import time
-    delay = 1.0
-    net_delay = _NET_BACKOFF
-    for attempt in range(_MAX_RETRY):
-        try:
-            r = requests.get(url, headers=_headers(token), params=params, timeout=30)
-        except (requests.Timeout, requests.ConnectionError) as e:
-            if attempt == _MAX_RETRY - 1:
-                raise
-            print(f"  · 노션 네트워크 오류({type(e).__name__}) — {net_delay:.1f}s 후 재시도")
-            time.sleep(net_delay)
-            net_delay *= 2
-            continue
-        if r.status_code not in (429, 500, 502, 503, 504):
-            time.sleep(_RATE_SLEEP)
-            return r
-        wait = float(r.headers.get("Retry-After") or delay)
-        if attempt == _MAX_RETRY - 1:
-            return r
-        time.sleep(wait)
-        delay *= 2
-    return r
+    """노션 읽기 — `kv_core.notion.read` 에 위임(정본). 동작 동일. → `_write` 주석 참조."""
+    from kv_core import notion as _kv
+    return _kv.read(url, token, params)
 
 
 # ============================ 페이지 본문 블록 (인물 1행의 핵심) ============================
@@ -361,7 +332,8 @@ def _title_prop_name(schema: dict) -> str:
 
 def _fetch_schema(cfg: dict, token: str) -> dict:
     """GET database → {property_name: {"type": ...}} 매핑."""
-    r = requests.get(f"{API}/databases/{_db_id(cfg)}", headers=_headers(token), timeout=30)
+    # [W12 · B-F3] 자기 파일의 규율(_read)을 우회하고 있었다 — 백오프·페이싱 0.
+    r = _read(f"{API}/databases/{_db_id(cfg)}", token)
     if r.status_code != 200:
         raise RuntimeError(
             f"Notion DB 조회 실패 status={r.status_code} body={r.text[:300]}\n"
@@ -409,7 +381,9 @@ def weekly_url_keys(cfg: dict) -> set[str]:
         payload: dict = {"page_size": 100}
         n0 = len(keys)
         while True:
-            r = requests.post(url, headers=_headers(token), json=payload, timeout=30)
+            # [W12 · B-F3] 이 while 루프가 이 스킬에서 **노션 요청 수가 가장 많은 구간**이다
+            #   (착지 DB 4개 전수 × 100행 페이지). 그런데 백오프가 0줄이었다.
+            r = _write("POST", url, token, payload)
             if r.status_code != 200:
                 # 🔴 조용히 넘기면 그 DB의 앱/사람이 **전부 다시 착지한다.** 소리를 낸다.
                 print(f"🔴 착지 DB {wid[:8]} query 실패 status={r.status_code} — "
@@ -520,7 +494,7 @@ def _title_keys(db: str, token: str, label: str, name_props: list[str] | None = 
       착지 행의 제목은 **사람 이름**(97/97 실측)인데 대조 DB의 제목은 **회사명**이라
       축이 아예 다르다. Bplan DB의 '대표명' 같은 rich_text를 읽어야 비로소 대조가 성립한다.
     """
-    r = requests.get(f"{API}/databases/{db}", headers=_headers(token), timeout=30)
+    r = _read(f"{API}/databases/{db}", token)          # [W12 · B-F3]
     if r.status_code != 200:
         print(f"⚠️  대조 DB '{label}' 조회 실패 status={r.status_code} — ②단 dedup에서 제외")
         return None          # ★ None=조회 실패 / set()=정상인데 0건. 호출부가 이 둘을 구분한다.
@@ -543,8 +517,8 @@ def _title_keys(db: str, token: str, label: str, name_props: list[str] | None = 
     n_title = n_person = 0
     payload: dict = {"page_size": 100}
     while True:
-        q = requests.post(f"{API}/databases/{db}/query",
-                          headers=_headers(token), json=payload, timeout=30)
+        # [W12 · B-F3] 레거시 대조 DB 4개 전수 페이지네이션 — 두 번째로 요청이 많은 구간.
+        q = _write("POST", f"{API}/databases/{db}/query", token, payload)
         if q.status_code != 200:
             print(f"⚠️  대조 DB '{label}' query 실패 status={q.status_code} — 부분 결과로 진행")
             return keys

@@ -71,6 +71,25 @@ def headers(tok: str) -> dict:
     }
 
 
+# 🔴 [2026-08-13 W12 · 리뷰 B-F6] `ChunkedEncodingError` 는 **`ConnectionError` 의 서브클래스가
+#    아니다** — 응답 헤더는 왔는데 **본문 도중 연결이 끊긴** 경우다. 노션 query 응답
+#    (100행 × 수십 속성 = 수백 KB)에서 가장 흔한 형태인데 두 구현 모두 안 잡고 있었다.
+#
+#    2026-07-13 에 "`requests.ReadTimeout` 한 번에 904행 착지가 통째로 죽었다(예외가 land 밖으로
+#    튐)"를 고쳤는데, 그때 넓힌 것은 `Timeout`·`ConnectionError` 둘뿐이었다. **모양이 같고
+#    예외 클래스만 다른 사고가 그대로 남아 있었다.**
+#
+#    ⚠️ `RequestException` 을 통째로 잡으면 안 된다 — `MissingSchema`·`InvalidURL` 같은
+#       **프로그래밍 오류**까지 105초를 기다렸다 재시도한다(고쳐야 할 것을 숨긴다).
+#       망 계열만 재시도하고 나머지는 즉시 올린다.
+_NET_ERRORS = (
+    requests.Timeout,
+    requests.ConnectionError,           # SSLError·ProxyError 포함
+    requests.exceptions.ChunkedEncodingError,
+    requests.exceptions.ContentDecodingError,
+)
+
+
 def write(method: str, url: str, tok: str, payload: dict):
     """노션 쓰기(POST/PATCH) — 429/5xx **와 네트워크 타임아웃**을 백오프 재시도.
 
@@ -87,7 +106,7 @@ def write(method: str, url: str, tok: str, payload: dict):
     for attempt in range(MAX_RETRY):
         try:
             r = requests.request(method, url, headers=headers(tok), json=payload, timeout=30)
-        except (requests.Timeout, requests.ConnectionError) as e:
+        except _NET_ERRORS as e:
             if attempt == MAX_RETRY - 1:
                 raise
             print(f"  · 노션 네트워크 오류({type(e).__name__}) — {net_delay:.1f}s 후 재시도 "
@@ -115,7 +134,7 @@ def read(url: str, tok: str, params: dict | None = None):
     for attempt in range(MAX_RETRY):
         try:
             r = requests.get(url, headers=headers(tok), params=params, timeout=30)
-        except (requests.Timeout, requests.ConnectionError) as e:
+        except _NET_ERRORS as e:
             if attempt == MAX_RETRY - 1:
                 raise
             print(f"  · 노션 네트워크 오류({type(e).__name__}) — {net_delay:.1f}s 후 재시도")
