@@ -68,9 +68,22 @@ def jobstate(jid: str, state: str, ts: str) -> None:
     (d / "state.json").write_text(json.dumps({"state": state, "updated": ts}), encoding="utf-8")
 
 
+# [W12 · A-F8] 헬스 파일이 채널별로 쪼개졌다. `launchd-direct` task 는 어느 채널의
+# 건강을 읽을지 **선언해야** 하고(없으면 판정 보류), 테스트 task 도 같은 계약을 진다.
+HCH = "appstore"
+
+
+def _hpath() -> Path:
+    d = _SCRATCH / SK / "last_run_health"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{HCH}.json"
+
+
 def T(name: str, **kw) -> Task:
     base = dict(name=name, skill=SK, kind="routine", cadence="daily",
                 catch_up="coalesce", watermark="last_success")
+    if kw.get("runner") == "launchd-direct":
+        base["health_channel"] = HCH
     base.update(kw)
     return Task(**base)
 
@@ -112,7 +125,7 @@ print("\n=== H3 · C-M2: launchd-direct 도 선언을 따르고 알림 대상이
 # alerts._task_failures 는 launchd-direct 를 통째로 제외해 알림 커버리지가 0이었다.
 reset()
 (_SCRATCH / SK).mkdir(parents=True, exist_ok=True)
-(_SCRATCH / SK / "last_run_health.json").write_text(
+_hpath().write_text(
     json.dumps({"ok": True, "ts": "2026-08-05T09:00:00"}), encoding="utf-8")  # naive KST
 t_ld = T("t3", runner="launchd-direct", freshness_days=2)
 st = health.compute(now=TODAY, tasks=[t_ld])
@@ -218,7 +231,7 @@ seq = []
 for off in (0, 15, 30):
     d = TODAY + timedelta(days=off)
     # 실패가 계속돼도 last_ok_ts 는 8/1 에 멈춰 있다(= writer 규율)
-    (_SCRATCH / SK / "last_run_health.json").write_text(
+    _hpath().write_text(
         json.dumps({"ok": False, "ts": f"{d.isoformat()}T09:00:00",
                     "last_ok_ts": "2026-08-01T09:00:00",
                     "first_ts": "2026-07-20T09:00:00"}), encoding="utf-8")
@@ -231,7 +244,7 @@ check("H11 첫날부터 알림 대상(stale — local 과 같은 어휘)",
 check("H11 30일 뒤에도 알림 대상", seq[-1][2] is True, str(seq))
 
 # 성공 기록이 아예 없으면 local 의 never/never_bad 사다리를 그대로 탄다
-(_SCRATCH / SK / "last_run_health.json").write_text(
+_hpath().write_text(
     json.dumps({"ok": False, "ts": f"{TODAY.isoformat()}T09:00:00",
                 "first_ts": f"{(TODAY - timedelta(days=20)).isoformat()}T09:00:00"}),
     encoding="utf-8")
@@ -240,7 +253,7 @@ check("H11 성공 기록 0 이면 never_bad(local 과 같은 사다리)",
       s_never.status == "never_bad" and s_never.alertable, f"{s_never.status} · {s_never.note}")
 
 # 정상 경로는 과잉 경보를 만들지 않는다
-(_SCRATCH / SK / "last_run_health.json").write_text(
+_hpath().write_text(
     json.dumps({"ok": True, "ts": f"{TODAY.isoformat()}T09:00:00",
                 "last_ok_ts": f"{TODAY.isoformat()}T09:00:00",
                 "first_ts": "2026-07-20T09:00:00"}), encoding="utf-8")
@@ -290,3 +303,48 @@ if FAIL:
     print(f"🔴 health 계약 실패 {len(FAIL)}건: {', '.join(FAIL)}")
     raise SystemExit(1)
 print("✅ health 계약 전부 통과")
+
+# ══════════════════════════════════════════════════════════════════════
+print("\n=== W12/A-F8: 채널별 헬스 — 남의 실행이 내 판정을 덮지 않는다 ===\n")
+# 🔴 예전엔 `<skill>/last_run_health.json` **파일 하나**였고 `health.compute` 가
+#    `channel` 필드를 안 봤다. 사람이 `collect --channel linkedin` 을 한 번만 수동 실행하면
+#    그날 앱스토어 크론이 76요청 전멸했어도 **✅ 로 덮였다**(실측 재현).
+#    파일 1개가 채널 N개의 건강을 공유한 것 — 계열 ②(단위 불일치)다.
+import json as _json  # noqa: E402
+
+_hroot = Path(os.environ["KV_DATA"]) / "net-sourcing" / "last_run_health"
+_hroot.mkdir(parents=True, exist_ok=True)
+
+
+def _hfile(ch, ok, ts, last_ok):
+    (_hroot / f"{ch}.json").write_text(_json.dumps(
+        {"ts": ts, "channel": ch, "ok": ok, "degraded": [] if ok else [f"{ch}: 전부 실패"],
+         "counts": {ch: 100 if ok else 0}, "last_ok_ts": last_ok,
+         "first_ts": "2026-07-01T07:00:00"}), encoding="utf-8")
+
+
+def _appstore_status():
+    st = health.compute(with_network=False, now=date(2026, 8, 13))
+    return next(x for x in st.tasks if x.name == "appstore-sourcing").status
+
+
+_hfile("appstore", False, "2026-08-13T07:00:00", "2026-08-05T07:00:00")
+check("A-F8 앱스토어 전멸이 🔴 로 보인다", _appstore_status() == "stale", _appstore_status())
+
+_hfile("linkedin_harvestapi", True, "2026-08-13T15:16:00", "2026-08-13T15:16:00")
+check("A-F8 링크드인 수동 성공이 앱스토어 판정을 **안 덮는다**",
+      _appstore_status() == "stale",
+      f"{_appstore_status()} — 옛날엔 여기서 ✅ 로 뒤집혔다")
+
+_hfile("appstore", True, "2026-08-13T07:00:00", "2026-08-13T07:00:00")
+check("A-F8 앱스토어가 실제로 복구되면 ✅", _appstore_status() == "ok", _appstore_status())
+
+from kv_core import registry as _reg
+_t = next(x for x in _reg.load() if x.name == "appstore-sourcing")
+check("A-F8 task 가 health_channel 을 선언한다(없으면 판정 보류)",
+      _t.health_channel == "appstore", str(_t.health_channel))
+
+
+if FAIL:
+    print(f"\n🔴 채널별 헬스 실패 {len(FAIL)}건")
+    raise SystemExit(1)

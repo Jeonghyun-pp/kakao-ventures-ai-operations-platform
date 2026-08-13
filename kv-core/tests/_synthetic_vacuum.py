@@ -171,6 +171,29 @@ check("V1 이 수정 이후에는 조용하다", "2026-08-13" not in _warn_days,
 check("V3 실데이터를 실제로 읽었다", len(_files) >= 10, f"{len(_files)}일치")
 
 # ══════════════════════════════════════════════════════════════════════
+print("\n=== V4: 착지 실패의 폭발 반경이 채널을 안 넘는다 ===\n")
+# 🔴 [리뷰 B-F9] `failed` 를 채널 넘어 합산해서, **링크드인 1건 실패가 앱스토어 200건의
+#    커밋까지 막았다.** `_COMMIT_HOOKS` 는 채널별로 분리 정의돼 있는데 게이트만 하나였다.
+#    앱스토어 차트 스냅샷 기준선이 동결되면 "신규 진입" 판정이 무의미해진다(Δ 는 어제와
+#    비교하는 값이라 하루 놓치면 못 되돌린다).
+from core.pipeline import _COMMIT_HOOKS, _failed_adapters  # noqa: E402
+
+check("V4 링크드인만 실패 → 링크드인 커밋만 보류",
+      _failed_adapters({"링크드인": 3, "앱스토어": 0}) == {"linkedin_harvestapi"})
+check("V4 앱스토어만 실패 → 앱스토어만 보류",
+      _failed_adapters({"링크드인": 0, "앱스토어": 2}) == {"appstore"})
+check("V4 실패가 없으면 아무것도 안 막는다",
+      _failed_adapters({"링크드인": 0, "앱스토어": 0}) == set())
+
+# ⚠️ 이 검사의 존재 이유 — 처음 수정은 **no-op 이었다.** `failed_by` 의 키는 한국어
+#    `source`(앱스토어·링크드인)인데 `_COMMIT_HOOKS` 키는 어댑터 등록명(appstore·
+#    linkedin_harvestapi)이라 스킵이 한 번도 안 걸렸다. 두 어휘가 갈라지면 이 방어가
+#    조용히 죽으므로 **매핑이 실제로 성립하는지**를 매번 확인한다.
+check("V4 훅 이름이 어댑터 source 로 실제 변환된다(어휘가 갈라지면 방어가 죽는다)",
+      all(_failed_adapters({src: 1}) for src in ("앱스토어", "스레드", "링크드인")),
+      f"훅 {sorted(_COMMIT_HOOKS)}")
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 진공/결손 계약 실패 {len(FAIL)}건: {', '.join(FAIL)}")

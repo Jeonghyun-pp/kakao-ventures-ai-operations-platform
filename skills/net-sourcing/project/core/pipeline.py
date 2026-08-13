@@ -165,9 +165,30 @@ def _write_health(channel: str, degraded: list[str], counts: dict) -> None:
     ⚠️ 이건 **알림이 아니다.** 사람이 봐야 보인다. 진짜 푸시(슬랙 웹훅 등)는 별건 —
        웹훅 URL이 필요해서 아직 안 만들었다(2026-07-21 아침 결정 대기).
     """
+    # 🔴 [2026-08-13 W12 · 리뷰 A-F8] 예전엔 **파일 하나**에 썼다(`last_run_health.json`).
+    #    그런데 `health.compute` 는 `launchd-direct` task(=appstore-sourcing)의 건강을
+    #    그 파일로 판정하면서 **`channel` 필드를 안 봤다.** 그래서 사람이
+    #    `main.py collect --channel linkedin` 을 한 번만 수동 실행하면, 그날 앱스토어
+    #    크론이 무슨 짓을 했든 그 결과가 덮여 **✅ 로 보고된다.**
+    #    실측(스크래치 재현): 앱스토어 76요청 전멸 기록 → 링크드인 수동 수집 →
+    #    `appstore-sourcing: ok · 0일 전 정상`.
+    #
+    #    **파일 1개가 채널 N개의 건강을 공유**한 것이 결함이다(계열 ②, 단위 불일치).
+    #    채널별로 쪼갠다. 판정 정본(health.compute)은 하나지만 **그 입력이 오염돼 있었다.**
+    for _ch, _n in (counts or {}).items():
+        _deg = [d for d in degraded if d.startswith(f"{_ch}:")]
+        _write_health_one(_ch, _deg, {_ch: _n})
+    # 어느 어댑터도 안 돌았으면(전 채널 예외 등) 요청 채널 이름으로라도 사실을 남긴다.
+    if not counts:
+        _write_health_one(channel, degraded, {})
+
+
+def _write_health_one(channel: str, degraded: list[str], counts: dict) -> None:
+    """채널 하나의 건강을 `data/last_run_health/<채널>.json` 에 남긴다."""
     try:
-        (PROJ / "data").mkdir(parents=True, exist_ok=True)
-        hp = PROJ / "data" / "last_run_health.json"
+        d = PROJ / "data" / "last_run_health"
+        d.mkdir(parents=True, exist_ok=True)
+        hp = d / f"{channel}.json"
         # [W9 재설계] **마지막 성공 시각을 보존한다.**
         # 예전엔 `ts` 만 남겼는데 그 값은 **실패해도 매 실행 갱신**된다. 그래서 읽는 쪽이
         # "며칠째 성공이 없나"를 셀 방법이 없었고, 매일 돌며 매일 실패해도 관측은 늘
@@ -437,6 +458,12 @@ def land(cfg: dict, channel: str, dry_run: bool = False) -> None:
     for c in cands:
         groups.setdefault(c.get("source", ""), []).append(c)
     n = failed = 0
+    # 🔴 [2026-08-13 W12 · 리뷰 B-F9] `failed` 를 **채널 넘어 합산**하고 있었다.
+    #    `_COMMIT_HOOKS` 는 채널별로 **분리 정의**돼 있는데(linkedin/appstore/threads)
+    #    게이트만 하나라, 링크드인 1건 실패가 앱스토어 200건 성공의 커밋까지 막았다.
+    #    앱스토어 차트 스냅샷 기준선이 동결되면 "신규 진입" 판정이 무의미해진다.
+    #    커밋 단위가 채널이면 **실패 단위도 채널**이어야 한다(계열 ②).
+    failed_by: dict[str, int] = {}
     try:
         for src, group in groups.items():
             db = notion.db_for(cfg, src)
@@ -448,6 +475,7 @@ def land(cfg: dict, channel: str, dry_run: bool = False) -> None:
             gn, gf = notion.land(cfg2, group, run_id)
             n += gn
             failed += gf
+            failed_by[src] = failed_by.get(src, 0) + gf
     except RuntimeError as e:            # 토큰 없음/DB 404 등 전제 미충족 — 깔끔히 안내
         print(f"⚠️  착지 중단: {e}")
         print("   → HARD-GATE: 통합을 착지 DB에 공유했는지, 토큰이 있는지 확인.")
@@ -456,10 +484,14 @@ def land(cfg: dict, channel: str, dry_run: bool = False) -> None:
     # ★ **행 하나라도 착지에 실패했으면 상태를 확정하지 않는다.**
     #   확정하면 그 사람은 seen-store에 '봤음'으로 박혀 다음 실행에 안 잡힌다 = 조용한 영구 유실.
     #   재수집(돈 조금 더)이 유실(영영 못 만남)보다 항상 낫다 — 이 스킬의 기본 방향이다.
-    if failed:
-        print(f"· seen-store/스냅샷 미확정 — 실패 {failed}건이 다음 실행에 다시 후보로 올라온다")
-        return
-    _commit_hooks(cfg, channel)           # [2단계 커밋] 성공했을 때만 adapter 상태 확정
+    # 실패한 **채널만** 커밋을 보류한다. 성공한 채널은 확정한다 — 남의 실패로 내 기준선이
+    # 동결되면, 그 손실(앱스토어 Δ 는 어제와 비교하는 값이라 하루 놓치면 못 되돌린다)이
+    # 유실 방지 이득보다 크다.
+    _bad = _failed_adapters(failed_by)
+    if _bad:
+        print(f"· seen-store/스냅샷 미확정 [{', '.join(sorted(_bad))}] — "
+              f"실패 {failed}건이 다음 실행에 다시 후보로 올라온다")
+    _commit_hooks(cfg, channel, skip=_bad)   # [2단계 커밋] 성공한 채널만 확정
     _enrich_bio(cfg, channel)             # bio가 없으면 judge가 판단할 근거가 없다
 
 
@@ -495,11 +527,49 @@ _COMMIT_HOOKS = {
 }
 
 
-def _commit_hooks(cfg: dict, channel: str) -> None:
+def _failed_adapters(failed_by: dict[str, int]) -> set[str]:
+    """착지 실패 `source`(한국어) → 그 소스를 내는 **어댑터 등록명** 집합.
+
+    🔴 [W12 · B-F9] 이 변환이 이 수정의 핵심이다. 처음엔 `failed_by` 의 키를 그대로
+       `skip` 으로 넘겼는데, **어휘가 다르다**:
+
+           _COMMIT_HOOKS 키 : appstore · threads · linkedin_harvestapi   (어댑터 등록명)
+           착지 그룹 키      : 앱스토어 · 스레드 · 링크드인              (Candidate.source)
+
+       그래서 스킵이 **한 번도 안 걸리는 no-op** 이었다. 내가 바로 위 독스트링에
+       "어휘가 같아야 한다"고 적어놓고 그대로 걸렸다 — 그래서 손으로 적지 않고
+       **어댑터 클래스의 `source` 에서 유도**한다. 매핑을 손으로 적으면 어댑터가 하나
+       늘 때마다 조용히 썩는다.
+
+       ⚠️ 링크드인은 어댑터가 둘인데(harvestapi·listly) `source` 가 같다. 그 채널의
+          착지가 실패하면 **둘 다** 보류한다 — 어느 어댑터가 만든 행이 실패했는지
+          `source` 만으로는 모르고, 보수적인 쪽이 유실을 막는다.
+    """
     import importlib
+    bad_srcs = {s for s, f in failed_by.items() if f}
+    out: set[str] = set()
+    for name, (mod, cls, _) in _REGISTRY.items():
+        if name not in _COMMIT_HOOKS:
+            continue
+        try:
+            src = getattr(getattr(importlib.import_module(mod), cls), "source", None)
+        except Exception:                         # noqa: BLE001 — 매핑 실패가 커밋을 막으면 안 된다
+            continue
+        if src and src in bad_srcs:
+            out.add(name)
+    return out
+
+
+def _commit_hooks(cfg: dict, channel: str, skip: set[str] | None = None) -> None:
+    """성공한 채널의 어댑터 상태를 확정한다. `skip`(어댑터 등록명)은 보류한다(B-F9)."""
+    import importlib
+    skip = skip or set()
     for name in _expand(channel):
         hook = _COMMIT_HOOKS.get(name)
         if not hook:
+            continue
+        if name in skip:
+            print(f"· commit 보류 [{name}] — 이 채널에 착지 실패가 있었다")
             continue
         try:
             getattr(importlib.import_module(hook[0]), hook[1])(cfg)

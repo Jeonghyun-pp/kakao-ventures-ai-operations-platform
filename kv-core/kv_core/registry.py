@@ -52,6 +52,11 @@ class Task:
     stages: list[str] = field(default_factory=list)
     origin: str = "system"
     covers: list[str] = field(default_factory=list)
+    # [W12 · A-F8] `launchd-direct` task 의 건강을 어느 **수집 채널** 파일에서 읽을지.
+    # `covers` 는 업무 영역(그물망 등)이지 채널이 아니라 그 역할을 못 한다.
+    # 이 값이 없으면 health 가 채널을 특정할 수 없어 판정을 보류한다(조용히 남의 결과를
+    # 읽는 것보다 낫다 — 그게 이 결함의 본체였다).
+    health_channel: str | None = None
     status: str = "slot"
     notes: str = ""
     runner: str = "local"       # 실행 주체. "local"만 스케줄러가 돌린다 — 카탈로그(무슨 일이 있나)와

@@ -264,9 +264,13 @@ def _task_state(t, now: date) -> TaskState:
     # [C-M2] 예전엔 여기만 `freshness_limit` 을 안 보고 하드코딩 grace 를 썼고, 게다가
     # alerts 는 이 러너를 통째로 제외해 **매일 노션에 138행을 착지시키는 잡이 알림 커버리지 0**이었다.
     if t.runner == "launchd-direct":
-        p = paths.data_root() / t.skill / "last_run_health.json"
+        # [W12 · A-F8] 채널별 파일을 읽는다. 예전엔 스킬당 파일 하나라 **다른 채널의
+        # 수동 실행이 이 task 의 판정을 덮었다**(실측 재현).
+        if not t.health_channel:
+            return mk("unknown", "health_channel 미선언 — 어느 채널의 건강인지 특정 불가")
+        p = paths.data_root() / t.skill / "last_run_health" / f"{t.health_channel}.json"
         if not p.exists():
-            return mk("unknown", "헬스 파일 없음(관측 불가)")
+            return mk("unknown", f"헬스 파일 없음(관측 불가): {t.health_channel}")
         try:
             h = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):

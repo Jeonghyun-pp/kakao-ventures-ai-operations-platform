@@ -102,6 +102,9 @@
   origin: system
   runner: launchd-direct     # 실행체 = ~/Library/LaunchAgents/com.kv.net-sourcing.appstore.plist (07:00 KST)
   covers: [그물망]
+  # [W12 · A-F8] 건강을 읽을 **수집 채널**. 예전엔 파일이 하나라 링크드인 수동 실행이
+  # 앱스토어 크론 전멸을 덮었다. `covers` 는 업무 영역이라 이 역할을 못 한다.
+  health_channel: appstore
   status: done
   notes: main.py run --channel appstore ($0·수집→노션 착지 138행/일). 스케줄러 이관은 appstore-snapshot 컷오버 검증 후 검토.
 
