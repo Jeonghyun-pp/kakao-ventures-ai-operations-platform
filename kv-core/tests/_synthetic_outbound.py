@@ -358,6 +358,88 @@ check("O6 은퇴 대상 경로의 호출부를 파악하고 있다(진짜 은퇴
       len(_callers) >= 1, str(_callers))
 
 # ══════════════════════════════════════════════════════════════════════
+print("\n=== O8: 비플랜 선언 ↔ 잡 파일 ↔ 배선 ↔ 게이트가 한 몸으로 움직인다 ===\n")
+# 🔴 [W12 · F1-1/F1-2] 옛 task `bplan` 은 **존재하지 않는 러너를 선언**하고 있었다.
+#    notes 가 "sync/drop ✅(자체 plist)" 라고 적는 동안 `com.kv.mail-harness` 는 미설치였고
+#    (2026-08-13 `launchctl list` 실측), 관측기는 그 침묵을 정상으로 승인했다.
+#    선언·코드·배선·게이트가 **네 곳에 흩어져 있으면 반드시 어긋난다** — 여기서 묶는다.
+#
+# 이 검사가 허용하는 상태는 둘뿐이고, 그 사이의 어떤 중간 상태도 실패다:
+#     게이트 닫힘(컷오버 전) → 선언 있음 · 잡 파일 있음 · **WIRED 에는 없음**
+#     게이트 열림(컷오버 후) → 두 task 가 **WIRED 에 있음**
+# 반쪽 컷오버(가드만 열고 배선을 잊음 / 배선만 하고 가드를 안 엶)가 조용히 성립하지 않는다.
+import re  # noqa: E402
+
+from kv_core import registry as _reg, workers as _wk  # noqa: E402
+
+_names = {t.name: t for t in _reg.load()}
+
+check("O8 `bplan-sync`·`bplan-drop` 이 선언돼 있다",
+      {"bplan-sync", "bplan-drop"} <= set(_names), sorted(_names))
+check("O8 옛 통합 이름 `bplan` 이 되살아나지 않았다", "bplan" not in _names,
+      "한 이름에 세 스테이지를 묶으면 부분 정지가 관측 불가다(F1-2)")
+
+# 선언이 지목한 잡 파일이 **실재**하는가 — F1-1(없는 러너를 선언)의 직접형.
+_miss = []
+for _n in ("bplan-sync", "bplan-drop"):
+    if (_t := _names.get(_n)) is None:
+        continue
+    _refs = re.findall(r"jobs/bplan_\w+_job\.py", _t.notes)
+    if not _refs:
+        _miss.append(f"{_n} — notes 가 잡 파일을 지목하지 않는다")
+    _miss += [f"{_n} → {r} 없음" for r in _refs
+              if not (_REPO / "skills" / _t.skill / "project" / r).exists()]
+check("O8 선언이 지목한 잡 파일이 실재한다", not _miss,
+      "\n       ".join(_miss) or "없는 러너를 선언하지 않는다")
+
+# 게이트 상태의 **진실원은 코드 한 곳** — 드랍 잡이 아직 비-synthetic 진입점을 거부하는가.
+# 문서 문장을 진실원으로 삼으면 문서만 고치고 코드는 그대로인 상태를 통과시킨다.
+_gate_closed = "raise SystemExit" in _dj and "HARD-GATE" in _dj
+_wired_bp = {"bplan-sync", "bplan-drop"} & set(_wk.WIRED)
+if _gate_closed:
+    check("O8 게이트가 닫힌 동안 두 task 는 배선되지 않는다", not _wired_bp,
+          f"배선됨 {sorted(_wired_bp)} — HARD-GATE #1 은 apply·sync·drop **셋 다** 막는다")
+else:
+    check("O8 게이트가 열렸으면 두 task 가 배선돼 있다",
+          _wired_bp == {"bplan-sync", "bplan-drop"},
+          f"배선됨 {sorted(_wired_bp)} — 가드만 열고 배선을 잊으면 컷오버가 반쪽으로 끝난다")
+
+# F1-1 일반형 — 선언이 주장하는 plist 러너와 실물의 관계. **세 사고를 구분한다:**
+#     유령      주장했는데 리포에도 이 맥에도 없다        → 그 일은 아무도 안 한다(F1-1 본체)
+#     정본 부재  이 맥엔 설치돼 돌지만 리포에 원본이 없다   → 맥이 죽으면 복구 불가
+#     드리프트   리포본과 설치본의 내용이 다르다           → 커밋을 읽고 실제와 다르게 믿는다
+# 셋을 한 검사로 뭉치면 "왜 실패했는지"가 사라진다 — 정본 부재를 유령으로 읽으면 엉뚱한 걸 고친다.
+_claimed = set(re.findall(r"com\.kv\.[\w-]+(?:\.[\w-]+)*?(?=\.plist)",
+                          _reg.tasks_path().read_text(encoding="utf-8")))
+# ⚠️ 글롭을 `com.kv.*.plist*` 로 두면 `.bak`·`.orig`·`.disabled` 사이드카가 정본으로 세어져
+#    "정본 있음"이 거짓으로 참이 된다(변이 시험에서 실제로 생존시켰다). 두 확장자만 정본이다.
+_repo_pl = {p.name.split(".plist")[0]: p for p in _REPO.rglob("com.kv.*.plist")}
+_repo_pl |= {p.name.split(".plist")[0]: p for p in _REPO.rglob("com.kv.*.plist.template")}
+_inst_dir = Path.home() / "Library/LaunchAgents"
+_inst_pl = ({p.name.split(".plist")[0]: p for p in _inst_dir.glob("com.kv.*.plist")}
+            if _inst_dir.is_dir() else {})
+
+_ghost = sorted(c for c in _claimed if c not in _repo_pl and c not in _inst_pl)
+check("O8 선언이 주장하는 plist 러너가 유령이 아니다", not _ghost,
+      f"유령 {_ghost} — 주장 {sorted(_claimed) or '없음'}"
+      if _ghost else f"주장 {sorted(_claimed) or '없음'} 전부 실물 있음")
+
+if _inst_dir.is_dir():
+    _orphan = sorted(n for n in _inst_pl if n not in _repo_pl)
+    check("O8 설치돼 도는 plist 는 전부 리포에 정본이 있다", not _orphan,
+          f"정본 부재 {_orphan} — 이 맥이 죽으면 복구 불가"
+          if _orphan else f"설치 {len(_inst_pl)}본 전부 정본 보유")
+    _drift = sorted(n for n, p in _inst_pl.items()
+                    if n in _repo_pl
+                    and p.read_bytes() != _repo_pl[n].read_bytes())
+    check("O8 리포 정본과 설치본이 일치한다", not _drift,
+          f"드리프트 {_drift} — 커밋을 읽고 실제와 다르게 믿게 된다"
+          if _drift else f"대조 {len(_inst_pl)}본 바이트 동일")
+else:
+    print("  ⏭️  O8 설치본 대조 건너뜀 — ~/Library/LaunchAgents 없음(CI 러너). "
+          "유령 검사는 위에서 이미 돌았다.")
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 외부 발송 경계 실패 {len(FAIL)}건: {', '.join(FAIL)}")

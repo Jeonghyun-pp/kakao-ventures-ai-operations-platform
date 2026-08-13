@@ -4,6 +4,10 @@
 > 이 문서는 그 DB를 코드 세계로 미러링한 것. **노션에 업무가 추가되면 여기 슬롯이 하나 뜬다.**
 > registry는 "무슨 업무가 존재하나"(노션)와 "그게 자동화됐나"(코드 status)를 **분리**해 추적한다.
 > 생성: 2026-08-03 · 결정 1~12 반영.
+> 🔴 **코드 세계의 정본은 `config/tasks.yaml` 이다** — 이 표가 아니다. W12 감사가 이 문서를
+> 사문으로 판정했다(`docs/reviews/W12-정본.md` S3): 실제로 `bplan-score`·`meeting-mail` 이
+> 여기 없었고 `bplan` 의 스테이지 구성도 어긋나 있었다. 두 곳을 다 고치려 들면 반드시 또 어긋난다.
+> 이 문서의 쓸모는 **노션 업무 ↔ 코드 task 의 대응**뿐이고, 실행 상태는 `tasks.yaml` 을 봐라.
 > **구현 상태 (2026-08-03):** W4 플랫폼 골격 빌드 완료 — `kv_core.{cadence,registry,scheduler,approval,gmail}` 신설,
 > `job.py` 3 seam(run_pipeline·resource_slots·watermark_reader). 다단계 kill-9 재개 실증 통과(스테이지 스킵+항목 재개+멱등),
 > 스케줄러 due·catch-up·워터마크 검증, 승인 브릿지 dry(발송 0). 스킬 실 배선(sourcing/bplan/triage)은 유예.
@@ -48,7 +52,9 @@
 | `appstore-snapshot` | net-sourcing/board | 랭킹 스냅샷 | daily | **coalesce**·last_success (W6: 과거 순위 재수집 불가라 backfill 무의미) | 없음($0) | ✅ GH primary + 로컬 shadow(컷오버 검증 중) |
 | `appstore-sourcing` | net-sourcing | collect→land ($0) | daily | coalesce·last_attempt | notion | ✅ launchd-direct(07:00 plist) — 카탈로그 등재 |
 | `mail-triage` | mail-harness | 인박스 sweep→분류→초안→승인브릿지 | daily | coalesce·last_attempt | gmail-inbox | 🔶 컷오버전(W5) |
-| `bplan` | mail-harness | sync(접수·배분·기입)→**scoring(판단)**→드랍초안/후속미팅초안→승인브릿지 | daily | coalesce·last_attempt | gmail·sheet-A1·notion-bplan | 🔶 sync/drop✅·scoring/후속🔴 |
+| `bplan-sync` | mail-harness | 접수 시트→노션 행 생성 (멱등 단위=접수키) | daily | coalesce·last_success | sheet-a1·notion-bplan | 🔶 컷오버전 — 미배선 |
+| `bplan-drop` | mail-harness | `To Drop` 행→Gmail **초안** (멱등 단위=이메일·1주) | daily | coalesce·last_success | gmail-inbox·notion-bplan | 🔶 컷오버전 — 미배선 |
+| ~~`bplan`~~ | — | [2026-08-13 W12·F1-2] 위 둘 + `bplan-score` 셋으로 분리. 한 이름에 세 스테이지를 묶으면 부분 정지가 관측 불가 | | | | 폐기 |
 
 ## B. 온디맨드 task
 

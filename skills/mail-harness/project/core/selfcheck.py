@@ -88,12 +88,19 @@ def run() -> int:
                 errors.append(f"[{name}] Gmail 연결 실패: {e}")
 
     # ── 3. 상태 파일 무결성 ──────────────────────────────────────
-    for f in [paths.data("mail-harness", "triage") / "processed.json",
-              paths.data("mail-harness", "bplan") / "sync_ledger.json",
-              paths.data("mail-harness", "bplan") / "drop_ledger.json",
-              paths.data("mail-harness", "harness") / "sent_watch.jsonl"]:
+    # 🔴 [2026-08-13 W12] 이 목록이 **재빌드 뒤 죽은 파일 둘을 검사하고 있었다.**
+    #    `bplan/{sync,drop}_ledger.json` 은 은퇴한 `bplan/main.py` 의 장부다. 새 잡은
+    #    `bplan_sync_floor.json`·`bplan_drop_sent.jsonl` 을 쓴다. 그런데 옛 파일이
+    #    디스크에 **아직 남아 있어서**(재빌드 전 실행의 잔재) 검사는 매번 통과했다 —
+    #    죽은 파일을 검증하며 초록을 내고, 살아 있는 파일은 한 번도 안 봤다.
+    #    "부재면 continue" 규칙과 맞물려 **영원히 거짓 초록**이 되는 형태다(근원 ④).
+    _live = [paths.data("mail-harness", "triage") / "processed.json",
+             paths.data("mail-harness") / "bplan_sync_floor.json",
+             paths.data("mail-harness") / "bplan_drop_sent.jsonl",
+             paths.data("mail-harness", "harness") / "sent_watch.jsonl"]
+    for f in _live:
         if not f.exists():
-            continue  # 아직 안 생긴 상태 파일은 정상
+            continue  # 아직 안 생긴 상태 파일은 정상(드랍은 컷오버 전이라 없는 게 맞다)
         try:
             if f.suffix == ".jsonl":
                 for line in f.read_text().splitlines():
@@ -103,6 +110,17 @@ def run() -> int:
                 json.loads(f.read_text())
         except Exception as e:
             errors.append(f"상태 파일 손상: {f.name} — {e} (수동 확인 전까지 실행 금지)")
+
+    # 은퇴한 장부가 남아 있으면 알린다 — 지우지는 않는다(사람의 복구 근거일 수 있다).
+    # 남아 있는 동안은 "옛 상태를 현재로 오독할" 위험이 있고, 그게 위 결함의 본체였다.
+    _dead = [p for p in (paths.data("mail-harness", "bplan") / "sync_ledger.json",
+                         paths.data("mail-harness", "bplan") / "drop_ledger.json")
+             if p.exists()]
+    if _dead:
+        warnings.append(
+            "은퇴한 bplan 장부 잔재: " + ", ".join(p.name for p in _dead) +
+            f" ({_dead[0].parent}) — 새 잡은 bplan_sync_floor.json·bplan_drop_sent.jsonl 를 쓴다. "
+            "이 파일들은 현재 상태가 아니다. 보관이 끝났으면 지워라.")
 
     # ── 4. 템플릿 드리프트 (Warning) ─────────────────────────────
     digest = _templates_digest()
