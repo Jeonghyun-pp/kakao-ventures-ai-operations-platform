@@ -247,6 +247,26 @@ def s_score_apply(skill: str, job_id: str) -> None:
     rows = [r for r in rows if r.get("page_id") not in already]
     if not rows:
         print(f"· 판정 대상 0건 (기적용 {len(already)}건 제외) — 정상 종료 (claude 호출 0)")
+        # 🔴 [2026-08-13 W12 · 리뷰 C-F-B3] 예전엔 여기서 그냥 return 했다. 그 결과
+        #    **매일 0건을 처리하고 ✅ 로 끝나며 아무에게도 알리지 않았다** —
+        #    워터마크는 전진하고(`last_success`), health 는 ✅ 를 내고, `_digest` 는
+        #    `if not verdicts: return` 이라 조용하고, 진공 가드는 `done > 0` 일 때만 돈다.
+        #    `contracts.yaml` 의 `min_records: 1` 도 배치가 0이라 **한 번도 호출되지 않는다.**
+        #
+        #    "정당한 0"(전 행이 이미 판정됨)과 "결손"(상류 sync 가 멈춰 새 접수가 안 들어옴)이
+        #    관측적으로 동일하다. 실제로 bplan sync 는 08-02 이후 멈춰 있다 — 즉 지금 보이는
+        #    0 은 정당해 보이지만 상류가 죽어서 그런 것일 수도 있고, 구분할 방법이 없었다.
+        #
+        #    meeting-mail 이 이미 같은 처방을 갖고 있다(meeting_mail_job:183 · W9 R5).
+        #    백오프가 있는 `observe` 를 쓰므로 매일 도배하지 않는다
+        #    (첫 이틀 매일 → 2일마다 → 주 1회).
+        from kv_core import alerts
+        alerts.observe("empty_harvest", "bplan-score-vacuum",
+                       f"⚠️ bplan-score: 판정 대상 0건 (기적용 {len(already)}건). "
+                       f"전 행이 이미 판정됐거나, **상류 bplan sync 가 멈춰 새 접수가 "
+                       f"안 들어오고 있다**(sync 는 2026-08-02 이후 정지 상태). "
+                       f"노션 `점수` 빈칸 수와 sync 워터마크를 함께 확인하라.",
+                       task="bplan-score", candidates=0)
         return
 
     allowed = rows[0].get("allowed") or []

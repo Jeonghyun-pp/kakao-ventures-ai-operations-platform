@@ -508,12 +508,42 @@ def _commit_hooks(cfg: dict, channel: str) -> None:
 
 
 # --- io helpers ---
-def _dump_cut(cut: list[dict]) -> None:
-    """L0 컷 기록 — 사유별 집계 출력 + 원본 보존(복원 가능)."""
+def _dump_cut(cut: list[dict], channels: list[str] | None = None) -> None:
+    """L0 컷 기록 — 사유별 집계 출력 + 원본 보존(복원 가능).
+
+    🔴 [2026-08-13 W12 · 리뷰 A-F2] 예전엔 `Counter(...).most_common()` 만 찍었다.
+       그러면 **0건이 된 사유는 줄 자체가 사라진다** — "대기업컷 0건"과 "대기업 룰이
+       죽었다"가 출력상 같아진다. 실제로 그 상태가 8일간 유지됐고 20본짜리 검증
+       스위트도 못 봤다(그 축을 원리적으로 보지 않았다).
+
+       이제 `judge.CUT_REASONS` 에 선언된 기대 사유를 들고 와서 **0건인 사유를 명시**한다.
+       정본 R5 의 원칙(*"0 이 두 뜻이면 둘을 갈라 본다"*)을 레코드 수가 아니라
+       **사유 분포** 축에 적용한 것이다.
+    """
     from collections import Counter
+    from core import judge
+
     tally = Counter(c["_cut_reason"].split("(")[0] for c in cut)
     for reason, n in tally.most_common():
         print(f"    - {reason}: {n}건")
+
+    # 이번 실행이 다룬 채널의 **룰 계열** 중 한 번도 발화하지 않은 것 — 사실로 말한다.
+    # 단위가 계열인 이유는 judge.CUT_RULES 주석 참조(사유 단위면 매 실행 경고 = 경보 피로).
+    seen_src = {c.get("source") for c in cut} or set(channels or [])
+    silent: list[str] = []
+    for src, rules in judge.CUT_RULES.items():
+        if src not in seen_src:
+            continue                              # 이번에 안 돈 채널은 볼 것 없다
+        for rule, reasons in rules.items():
+            fired = any(any(k.startswith(r.split("{")[0]) for k in tally) for r in reasons)
+            if not fired:
+                silent.append(f"{src} / {rule}")
+    if silent:
+        print(f"    ⚠️  한 번도 발화하지 않은 컷 룰 {len(silent)}개 — "
+              f"진짜 0 인지 룰이 죽었는지 확인하라:")
+        for s in silent:
+            print(f"       · {s}")
+
     path = CAND / f"cut_{date.today().isoformat()}.json"
     path.write_text(json.dumps(cut, ensure_ascii=False, indent=2), encoding="utf-8")
 
