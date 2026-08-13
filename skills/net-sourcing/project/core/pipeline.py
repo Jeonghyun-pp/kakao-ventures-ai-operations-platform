@@ -85,7 +85,13 @@ def collect(cfg: dict, keywords: dict, channel: str) -> None:
 
     # ★ [2026-07-20 결정 12] **월 예산 가드.** 회당 가드는 12번 돌면 12배가 나가는 걸 못 막는다.
     #   결정 #6(수동 실행)이 지금까지 사실상 월 예산 가드였고, 크론이 그 사람을 없앤다.
-    _monthly_gate(cfg, before, est, force=bool(cfg.get("_force_budget")))
+    _force = bool(cfg.get("_force_budget"))
+    # [W12] 가드를 `run_actor`(chokepoint)로 내리면서 **사람 우회로도 같이 내려보낸다.**
+    # 안 그러면 --force-budget 를 승인한 사람이 여기는 통과하고 런 중간에 막힌다 —
+    # 돈은 쓰고 결과는 반쪽. 정확히 이 가드가 막으려던 상태다.
+    if _force:
+        apify.allow_over_budget(True)
+    _monthly_gate(cfg, before, est, force=_force)
 
     degraded: list[str] = []
     counts: dict = {}
@@ -225,14 +231,21 @@ def _monthly_gate(cfg: dict, used: float | None, est: float | None,
     #    중간에 끊어 **돈은 쓰고 결과는 반쪽**이 되는 경로였다.
     from kv_core import gate as _gate
     _v = _gate.check("apify", estimate_usd=est or 0.0, quiet=True)
-    cap = _v.ceiling_usd or float((cfg.get("apify") or {}).get("monthly_budget_usd") or 0)
+    # 🔴 [2026-08-13 W12 · 리뷰 A-F4] 여기엔 `or float(cfg.apify.monthly_budget_usd)` 폴백이
+    #    있었다. **그게 천장의 두 번째 진실이었다** — resources.yaml $29 vs config.yaml $45.
+    #    gate 조회가 한 번 실패하면(독립 HTTP 요청이라 흔하다) 유효 천장이 조용히 $45 로
+    #    올라간다. W2 에서 닫았다고 기록한 바로 그 $29~$45 구간이 다시 열리는 경로다.
+    #    실측(대역 프로브): gate 만 실패시키면 `$37.00 / $45.00` 로 **통과**하고, 같은 출력에
+    #    "사용량 조회 실패" 경고가 나란히 찍힌다 — 사람은 낙관적인 쪽을 믿는다(R2).
+    #    이제 천장의 출처는 `kv_core.gate` 하나다. 못 읽으면 **가드 미작동이라는 사실 하나만**
+    #    남기고 통과한다(두 fail-open 분기를 하나로 합친다).
+    cap = _v.ceiling_usd
     for _w in _v.warnings:
         print(f"⚠️  {_w}")
-    if not cap:
-        return                                    # 미설정 = 가드 없음(구 config 호환)
-    if used is None:
-        print(f"🔴 월 예산 가드: Apify 사용량을 못 읽었다 — 가드를 **건너뛴다**(상한 ${cap:.2f}).\n"
-              f"   회당 가드(budget_usd)만 남는다. 토큰/네트워크를 확인하라.")
+    if not cap or used is None:
+        print("🔴 월 예산 가드: 천장 또는 실사용을 못 읽었다 — **가드가 이번 실행에 없다.**\n"
+              "   회당 차단선(budget_usd)과 액터측 maxTotalChargeUsd 만 남는다.\n"
+              "   (천장의 정본은 config/resources.yaml 의 apify.monthly_budget_usd 다.)")
         return
 
     projected = used + (est or 0.0)
