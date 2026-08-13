@@ -131,6 +131,35 @@ for p in _py_files():
             gsend.append(f"{p.relative_to(_REPO)}:{n.lineno}")
 check("O1 Gmail messages().send 호출이 없다", not gsend, str(gsend))
 
+def _is_newly_added(v: ast.AST) -> bool:
+    """`{"select": {"name": "Newly Added"}}` 리터럴인가 — **값까지 본다.**
+
+    🔴 [2026-08-13 W12 배치 9-2] 이 검사는 원래 `To do` 를 **키로 쓰는 것 자체**를 막았다.
+       그런데 재빌드한 sync 잡이 신규 행을 만들면서 걸렸다 — 접수 행의 **초기 상태**가
+       `Newly Added` 이고, 그건 드랍 경로를 여는 게 아니라 그 반대다(시작점).
+
+       위험한 것은 `To Drop` 이지 `To do` 자체가 아니다. 그래서 값까지 본다:
+       **리터럴 `Newly Added` 만 통과**하고 나머지는 전부 막는다(변수로 넣는 것도 막힌다 —
+       변수면 여기서 값을 알 수 없으므로 통과 못 한다. 그게 맞다).
+       `드랍메일` 은 값과 무관하게 계속 전면 금지다.
+
+       ⚠️ 검사를 좁힐 때 **왜 좁혔는지**를 안 적으면 다음 사람이 "옛날엔 더 엄격했는데"
+          하고 되돌리거나, 반대로 더 넓혀버린다. 좁힌 근거가 곧 경계의 정의다.
+    """
+    if not isinstance(v, ast.Dict):
+        return False
+    for k2, v2 in zip(v.keys, v.values):
+        if not (isinstance(k2, ast.Constant) and k2.value == "select"):
+            continue
+        if not isinstance(v2, ast.Dict):
+            return False
+        for k3, v3 in zip(v2.keys, v2.values):
+            if (isinstance(k3, ast.Constant) and k3.value == "name"
+                    and isinstance(v3, ast.Constant) and v3.value == "Newly Added"):
+                return True
+    return False
+
+
 print("\n=== O3: 자동화 잡이 노션 위험 칸을 쓰지 않는다 ===\n")
 # 잡 파일에서 `{"To do": ...}` 형태로 노션 속성을 구성하는지 본다.
 # 문자열 등장이 아니라 **dict 키로 쓰였는지**를 본다 — 주석·독스트링에 언급하는 건 정상이다
@@ -152,10 +181,13 @@ for glob in _JOB_GLOBS:
         for n in ast.walk(tree):
             if not isinstance(n, ast.Dict) or id(n) in skip:
                 continue
-            for k in n.keys:
-                if isinstance(k, ast.Constant) and k.value in _NOTION_DANGER:
-                    danger.append(f"{rel}:{k.lineno} — {k.value!r}")
-check("O3 잡이 `To do`·`드랍메일` 을 dict 키로 쓰지 않는다", not danger,
+            for k, v in zip(n.keys, n.values):
+                if not (isinstance(k, ast.Constant) and k.value in _NOTION_DANGER):
+                    continue
+                if k.value == "To do" and _is_newly_added(v):
+                    continue                      # 아래 주석 참조 — 생성 시 초기 상태만 허용
+                danger.append(f"{rel}:{k.lineno} — {k.value!r}")
+check("O3 잡이 `To do`(Newly Added 외)·`드랍메일` 을 dict 키로 쓰지 않는다", not danger,
       "\n       ".join(danger) or "드랍 메일 경로는 사람이 연다")
 
 print("\n=== O4: 자율성 설정이 발송을 끈 상태다 ===\n")

@@ -93,6 +93,7 @@ claude -p "reply with exactly: OK"     # 로그인 안 돼 있으면 여기서 �
 | `SLACK_BOT_TOKEN` · `SLACK_APPROVAL_CHANNEL` | 승인 카드가 안 뜬다(= 승인 표면 상실) |
 | `SLACK_WEBHOOK_URL` | 다이제스트·알림 미발송 |
 | `SPREADSHEET_URL` · `WORKSHEET_NAME` | 비플랜 접수(sync) 정지 |
+| `GOOGLE_CREDENTIALS_FILE` | 비플랜 sync 정지 — 시트 읽기용 서비스계정 JSON 경로 |
 | `SLACK_APPROVAL_USER` | 승인 인가 화이트리스트 미설정(거부는 누구나 가능 — 의도된 비대칭) |
 | `KV_DATA` · `KV_CONFIG` | 기본값(`~/kv-data`·`~/kv-config`)으로 동작 |
 | `KV_NO_SEND` | **테스트에서 반드시 1** — 실발송 차단 스위치 |
