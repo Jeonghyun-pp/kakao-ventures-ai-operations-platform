@@ -36,6 +36,9 @@ COLUMN_ALIASES = {
 
 class ListlyAdapter(Adapter):
     source = "링크드인"                      # 채널은 링크드인(극초기 DB '발굴' 값과 일치)
+    # [W12 · A-F6] 사람이 떨군 엑셀을 읽을 뿐 **외부 요청이 없다** — 계측 0건이 정상이다.
+    # 이 선언이 없으면 pipeline 이 "계측이 끊겼다"로 보고 매번 degraded 를 낸다.
+    no_fetch = True
 
     def collect(self) -> list[Candidate]:
         ch = self.cfg["channels"].get("linkedin_listly", {})

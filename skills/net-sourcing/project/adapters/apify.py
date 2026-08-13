@@ -82,6 +82,31 @@ _REPROBE_USD = 1.0
 _FORCE = False
 
 
+# ══════════════════════════════════════════════════════════════════════
+# 수집 건강 계측 — **여기가 유일한 계측 지점이다** (chokepoint)
+# ══════════════════════════════════════════════════════════════════════
+# 🔴 [2026-08-13 W12 · 리뷰 A-F6] `base.py:150-158` 이 계약을 명시했다 —
+#    *"어댑터는 시도/실패를 세고, core/pipeline.py 가 이 수치로 런의 건강을 판정한다."*
+#    착지 4어댑터 중 **appstore 하나만** 그 계약을 지켰다. threads(외부요청 7곳)·
+#    linkedin(4곳)은 `_note_fetch` 를 **한 번도** 부르지 않았다.
+#
+#    귀결: 2026-07-19 앱스토어 사고(76요청 전멸 → `✅ 0건` + 종료코드 0)를 막으려고 만든
+#    장치인데, **정작 그 사고가 재발하면 돈이 나가는 두 채널에서는 발화하지 않는다.**
+#    Apify 쿼터 초과·doc_id 로테이션·429 로 threads 7개 층이 전멸해도 `✅ collect threads:
+#    0건` + exit 0 로 끝나고 `health.compute` 는 ✅ 를 낸다.
+#
+#    F3(예산 관문)과 같은 처방이다 — **어댑터가 "부르는 걸 잊는" 것을 표현 불가능하게** 한다.
+#    `pipeline` 이 어댑터 실행 전후로 이 값을 스냅샷해 그 어댑터의 계수에 더한다
+#    (어댑터는 순차 실행이라 귀속이 정확하다).
+_FETCH_ATT = 0
+_FETCH_FAIL = 0
+
+
+def fetch_stats() -> tuple[int, int]:
+    """(시도, 실패) 누적. pipeline 이 어댑터 전후로 델타를 떠 귀속한다."""
+    return _FETCH_ATT, _FETCH_FAIL
+
+
 def allow_over_budget(on: bool = True) -> None:
     """월 천장 강행 — `--force-budget` 전용. 크론은 절대 부르지 않는다."""
     global _FORCE
@@ -274,7 +299,7 @@ def run_actor(slug: str, payload: dict, timeout: int = 180) -> list[dict]:
     실행 옵션(memory/maxItems/maxTotalChargeUsd)은 **쿼리 파라미터**로 간다 — payload(=액터 입력)가
     아니다. payload에 넣으면 액터가 모르는 키라 무시하고, 가드가 안 걸린 채로 돈이 나간다.
     """
-    global _SPENT
+    global _SPENT, _FETCH_ATT, _FETCH_FAIL
     token = os.environ.get("APIFY_TOKEN")
     if not token:
         raise RuntimeError("APIFY_TOKEN 없음 — .env 확인")
@@ -307,7 +332,26 @@ def run_actor(slug: str, payload: dict, timeout: int = 180) -> list[dict]:
     #    예외가 나도 이 줄은 이미 실행됐기 때문이다(장부가 예외 경로에서도 정확해진다).
     _SPENT += _start_cost(o, params.get("memory"))
 
-    r = requests.post(RUN.format(slug=slug), params=params, json=payload, timeout=timeout + 30)
+    # ── 수집 건강 계측(chokepoint) ────────────────────────────────────
+    # 시도는 **여기서** 센다. 아래 어느 경로로 나가든(예외·4xx·정상) 이미 세어졌다.
+    # 실패는 `finally` 가 마무리한다 — 성공 경로에서만 세면 예외가 계측을 건너뛰고,
+    # 그게 정확히 "전멸했는데 0건으로 보이는" 상태를 만든다.
+    _FETCH_ATT += 1
+    _ok = False
+    try:
+        r = requests.post(RUN.format(slug=slug), params=params, json=payload,
+                          timeout=timeout + 30)
+        _r = _run_actor_body(slug, payload, timeout, o, params, r)
+        _ok = True
+        return _r
+    finally:
+        if not _ok:
+            _FETCH_FAIL += 1
+
+
+def _run_actor_body(slug, payload, timeout, o, params, r):
+    """POST 이후 — 응답 처리. 계측/과금은 `run_actor` 가 이미 했다."""
+    global _SPENT
 
     # 메모리가 액터 최소치보다 낮으면 400. 이걸 그냥 던지면 "액터가 죽었다"로 오진되고
     # 그 채널은 0건이 된다 — 실제 원인은 우리가 넣은 memory 값이다. 한 번 벗고 재시도한다.

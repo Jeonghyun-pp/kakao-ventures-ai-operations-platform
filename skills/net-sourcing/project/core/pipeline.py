@@ -96,17 +96,37 @@ def collect(cfg: dict, keywords: dict, channel: str) -> None:
     degraded: list[str] = []
     counts: dict = {}
     for name, adapter in _adapters(cfg, keywords, channel):
+        # [W12 · A-F6] Apify 계측을 chokepoint(`run_actor`)로 내렸다. 어댑터별 귀속은
+        # 실행 전후 델타로 한다 — 어댑터는 순차 실행이라 이 방식이 정확하다.
+        _fa0, _ff0 = apify.fetch_stats()
         try:
             cands = adapter.collect()
         except Exception as e:                    # 한 채널 실패가 나머지를 막지 않음(자격 누락 등)
             print(f"⚠️  collect {name} 실패: {e}")
             degraded.append(f"{name}: 채널 전체 예외 ({type(e).__name__})")
             continue
+        finally:
+            _fa1, _ff1 = apify.fetch_stats()
+            adapter.fetch_attempts += _fa1 - _fa0
+            adapter.fetch_failures += _ff1 - _ff0
         # ★ [2026-07-20] **'0건'과 '전멸'을 구분한다.** 어댑터는 개별 실패를 격리하므로
         #   전부 실패해도 빈 리스트가 돌아온다 — 그게 2026-07-19에 앱스토어 크론이
         #   `✅ 0건` + 종료코드 0으로 성공 보고한 이유다(전날 10,112건).
         att = getattr(adapter, "fetch_attempts", 0)
         fail = getattr(adapter, "fetch_failures", 0)
+        # 🔴 [W12 · A-F6] `if att and fail:` 은 **계측이 아예 없는 어댑터를 원리적으로 못 봤다.**
+        #    threads·linkedin 이 `_note_fetch` 를 한 번도 안 불렀으므로 att=0 → 이 블록을
+        #    통째로 건너뛰고 `✅ collect threads: 0건` + exit 0. 전멸과 진짜 0건이 같아진다.
+        #    계측 부재 자체를 **결손으로 센다**(정본 R5: 0 이 두 뜻이면 둘을 갈라 본다).
+        #    ⚠️ 현재 `naver`·`producthunt`·`disquiet`·`hackernews`·`velog` 는 apify 를 안 거치고
+        #       직접 `requests` 를 쓰므로 chokepoint 계측 밖이다(전부 config 에서 꺼져 있다).
+        #       켜는 순간 이 줄이 뜬다 — **오탐이 아니라 사실이다.** 그 채널의 0건은 지금도
+        #       전멸과 구분되지 않는다. 켤 때 둘 중 하나를 하라고 메시지가 지시한다.
+        if att == 0 and not getattr(adapter, "no_fetch", False):
+            degraded.append(
+                f"{name}: 외부 요청 계측이 0건 (후보 {len(cands)}건) — 계측 없는 0건은 "
+                f"전멸과 구분되지 않는다. 요청을 apify.run_actor 로 보내 계측에 태우거나, "
+                f"외부 요청이 없는 어댑터면 클래스에 `no_fetch = True` 를 선언하라")
         if att and fail:
             rate = fail / att
             if fail == att:

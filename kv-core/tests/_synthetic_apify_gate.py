@@ -209,6 +209,105 @@ for f in sorted(_REPO.glob("skills/*/project/**/*.py")):
 print(f"     ↳ run_actor 호출부 {_calls}곳 — 전부 위 관문을 지난다(2026-08-13 이전엔 1곳만)")
 
 # ══════════════════════════════════════════════════════════════════════
+print("=== A8: 수집 건강 계측도 같은 관문에 있다 ===\n")
+# 🔴 [리뷰 A-F6] `base.py:150-158` 이 "어댑터는 시도/실패를 세고 pipeline 이 런의 건강을
+#    판정한다"고 계약을 적었는데, 착지 4어댑터 중 **appstore 하나만** 지켰다.
+#    threads(외부요청 7곳)·linkedin(4곳)은 `_note_fetch` 를 한 번도 안 불렀다.
+#    → 2026-07-19 앱스토어 사고(76요청 전멸 → `✅ 0건` + exit 0)를 막으려고 만든 장치가
+#      **정작 돈이 나가는 두 채널에서는 발화하지 않았다.**
+_m = _load(ADAPTERS[0][1])
+
+_posts: list = []
+_reset(_m, 0.0, 100.0)
+_stub(_m, "timeout", _posts)
+_m._FETCH_ATT = _m._FETCH_FAIL = 0
+for _ in range(7):                       # threads 의 7개 층이 전멸하는 형태
+    try:
+        _m.run_actor("slug", {})
+    except Exception:                    # noqa: BLE001 — 어댑터가 층별 실패를 격리하는 형태
+        pass
+_att, _fail = _m.fetch_stats()
+check("A8 예외 경로에서도 시도·실패가 세어진다(전멸이 전멸로 보인다)",
+      (_att, _fail) == (7, 7),
+      f"시도 {_att} · 실패 {_fail} — 수정 전엔 threads 가 (0, 0) 이었다")
+
+_posts.clear()
+_reset(_m, 0.0, 100.0)
+_stub(_m, "ok", _posts)
+_m._FETCH_ATT = _m._FETCH_FAIL = 0
+for _ in range(7):
+    _m.run_actor("slug", {})
+check("A8 정상 경로는 실패로 세지 않는다", _m.fetch_stats() == (7, 0), str(_m.fetch_stats()))
+
+# ── pipeline 이 그 수치를 실제로 표면화하는가 ──
+# 계측만 정확하고 판정이 그걸 안 보면 아무것도 달라지지 않는다.
+sys.path.insert(0, str(_REPO / "skills/net-sourcing/project"))
+from adapters import apify as _ap  # noqa: E402
+from adapters.base import Adapter  # noqa: E402
+from core import pipeline as _pl  # noqa: E402
+
+_ap._archive = lambda *a, **k: None
+_ap._OPTS = {"s": {"start_usd": 0.0, "memory_mb": 1024}}
+_ap._LIVE_USED, _ap._LIVE_CAP, _ap._GATE_OFF = 0.0, 100.0, False
+_ap.configure = lambda cfg: None
+_ap.usage_usd = lambda: 0.0
+_ap.requests = types.SimpleNamespace(
+    post=lambda url, **kw: (_ for _ in ()).throw(_rq.exceptions.ReadTimeout("전멸")),
+    get=None, exceptions=_rq.exceptions)
+
+
+class _DeadChannel(Adapter):
+    """실제 threads.py 형태 — 층별 실패를 격리하므로 빈 리스트가 돌아온다."""
+    source = "스레드"
+
+    def collect(self):
+        for _ in range(7):
+            try:
+                _ap.run_actor("s", {})
+            except Exception:            # noqa: BLE001
+                pass
+        return []
+
+
+class _LocalOnly(Adapter):
+    """linkedin_listly 형태 — 사람이 떨군 파일만 읽는다. 계측 0 이 정상."""
+    source = "링크드인"
+    no_fetch = True
+
+    def collect(self):
+        return []
+
+
+class _Uncounted(Adapter):
+    """계측을 아예 안 하는 새 어댑터 — 옛 threads 가 이 상태였다."""
+    source = "X"
+
+    def collect(self):
+        return []
+
+
+_pl._adapters = lambda cfg, kw, ch: [("threads", _DeadChannel({}, {})),
+                                     ("listly", _LocalOnly({}, {})),
+                                     ("newchan", _Uncounted({}, {}))]
+_pl._monthly_gate = lambda *a, **k: None
+_pl._preflight_cost = lambda *a, **k: None
+_pl._write_health = lambda *a, **k: None
+
+_degraded = ""
+try:
+    _pl.collect({"channels": {}}, {}, "all")
+except _pl.CollectDegraded as e:
+    _degraded = str(e)
+
+check("A8 pipeline 이 전멸을 degraded 로 표면화한다",
+      "threads: 요청 7건" in _degraded and "전부 실패" in _degraded,
+      "수정 전엔 `✅ collect threads: 0건` + exit 0 이었다")
+check("A8 계측이 없는 어댑터도 잡는다(`if att and fail:` 는 원리적으로 못 봤다)",
+      "newchan" in _degraded, "계측 부재 자체를 결손으로 센다(R5)")
+check("A8 외부 요청이 없다고 **선언한** 어댑터는 조용하다",
+      "listly" not in _degraded, "no_fetch=True — 오탐이면 매 실행이 degraded 가 된다")
+
+# ══════════════════════════════════════════════════════════════════════
 print("\n=== A7: 월 천장의 출처가 하나다 ===\n")
 # 🔴 A1~A6 을 다 붙이고 변이 시험을 돌렸더니 **F4(천장 이중화)만 아무도 못 잡았다.**
 #    `cap = _v.ceiling_usd or float(cfg["apify"]["monthly_budget_usd"])` 를 되돌려도 전부 초록.

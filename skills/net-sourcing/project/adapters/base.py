@@ -144,6 +144,14 @@ class Adapter:
 
     source: str = ""
 
+    # 🔴 [2026-08-13 W12 · A-F6] "외부 요청을 안 하는 어댑터"는 **선언해야 한다.**
+    #    계측이 0건인 상태는 두 뜻이다 — ⓐ 원래 요청을 안 한다(로컬 파일 파싱)
+    #    ⓑ 요청은 했는데 계측이 끊겼거나 전멸했다. 기본값을 False(=요청한다)로 두면
+    #    ⓑ 가 시끄럽게 잡히고, ⓐ 인 어댑터만 이 줄을 켜면 된다.
+    #    반대로 기본값을 True 로 두면 **새 어댑터가 조용히 계측 밖으로 나간다** —
+    #    그게 threads·linkedin 이 계약을 안 지키고도 4개월을 살아남은 방식이다.
+    no_fetch: bool = False
+
     def __init__(self, cfg: dict, keywords: dict):
         self.cfg = cfg
         self.keywords = keywords
