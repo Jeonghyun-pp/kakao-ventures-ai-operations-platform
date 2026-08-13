@@ -52,7 +52,13 @@ class JudgeCriteriaEmpty(RuntimeError):
 
 
 def _criteria_empty(text: str) -> bool:
-    """토큰이 단독 줄로 존재하면 룰 미기입 상태."""
+    """토큰이 단독 줄로 존재하면 룰 미기입 상태. **토큰 축만** 본다.
+
+    ⚠️ [W12] 여기에 분량 검사를 넣었다가 되돌렸다 — 합성 ①이 "인라인 토큰은 무관"·
+       "토큰 없으면 가동"을 **짧은 문자열**로 검사하는데, 분량 검사가 그 축을 덮어써
+       계약이 뒤집혔다. 두 축(토큰·분량)은 다른 질문이므로 다른 자리에서 묻는다 —
+       분량은 아래 `s_criteria_gate` 가 본다.
+    """
     return any(ln.strip() == _EMPTY_TOKEN for ln in text.splitlines())
 
 
@@ -73,7 +79,14 @@ def _contracts() -> dict:
 def s_criteria_gate(skill: str, job_id: str) -> None:
     if not CRITERIA.exists():
         raise JudgeCriteriaEmpty(f"🔴 기준 파일 없음: {CRITERIA}")
-    if _criteria_empty(CRITERIA.read_text(encoding="utf-8")):
+    _text = CRITERIA.read_text(encoding="utf-8")
+    # [W12 · C-F-B10] 분량 축 — 토큰만 보면 **빈 파일이 통과한다**(0바이트·공백만·제목만
+    # 실측 확인). 임계·판정은 `kv_core.validate` 가 정본이다(bplan 게이트와 공유).
+    from kv_core import validate as _v
+    _short = _v.criteria_missing(_text, _EMPTY_TOKEN)
+    if _short and not _criteria_empty(_text):
+        raise JudgeCriteriaEmpty(f"🔴 판단 룰 부실 — {_short}")
+    if _criteria_empty(_text):
         raise JudgeCriteriaEmpty(
             "🔴 판단 룰 미기입 — references/judge-criteria.md 의 L1/L2 를 채우고 "
             f"단독 줄 토큰 {_EMPTY_TOKEN} 을 지우면 무인 judge 가 가동된다. "

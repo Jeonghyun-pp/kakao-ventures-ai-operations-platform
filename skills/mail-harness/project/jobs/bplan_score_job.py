@@ -98,10 +98,11 @@ def _assert_safe_patch(props: dict) -> None:
 def s_criteria_gate(skill: str, job_id: str) -> None:
     if not CRITERIA.exists():
         raise BplanCriteriaEmpty(f"🔴 기준 파일 없음: {CRITERIA}")
-    text = CRITERIA.read_text(encoding="utf-8")
-    if any(ln.strip() == _EMPTY_TOKEN for ln in text.splitlines()):
-        raise BplanCriteriaEmpty(
-            f"🔴 판단 룰 미기입 — 단독 줄 토큰 {_EMPTY_TOKEN} 을 지우면 가동된다")
+    # [W12 · C-F-B10] 토큰만 보면 **빈 파일이 통과한다**(0바이트·공백만·제목만 실측 확인).
+    # 판정은 kv_core.validate 가 정본이다 — judge 쪽 게이트와 같은 규칙을 쓴다.
+    why = validate.criteria_missing(CRITERIA.read_text(encoding="utf-8"), _EMPTY_TOKEN)
+    if why:
+        raise BplanCriteriaEmpty(f"🔴 판단 룰 미기입 — {why}")
 
 
 def _queue_pointer(job_id: str):

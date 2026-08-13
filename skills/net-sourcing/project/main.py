@@ -101,10 +101,14 @@ def cmd_run(cfg: dict, channel: str, force_budget: bool = False) -> bool:
     # 다만 종료코드는 비-0으로 올려보낸다(크론이 알아야 한다).
     ok = cmd_collect(cfg, channel, force_budget=force_budget)
     cmd_land(cfg, channel)
+    # 🔴 [2026-08-13 W12 · 리뷰 A-F10] 여기 `return` **뒤에** 세 줄이 있었다:
+    #        if cfg.get("schedule", {}).get("notify"): notify.summary(cfg)
+    #    도달 불가 코드다. `config.yaml` 의 `schedule.notify` 를 켠 사람은 켜졌다고 믿는데
+    #    `run` 경로의 요약 알림만 영영 안 나갔다 — ADR 0002 의 "발동하지 않는 가드는
+    #    없는 가드보다 나쁘다"의 알림판이다.
+    #    되살리지 않고 **지운다.** 알림 정책은 정본 R3 가 이미 세 곳으로 모았고(alerts),
+    #    여기서 한 벌 더 내보내면 그 통합이 도로 깨진다.
     return ok
-    if cfg.get("schedule", {}).get("notify"):
-        from core import notify
-        notify.summary(cfg)
 
 
 def cmd_schedule(cfg: dict, action: str) -> None:

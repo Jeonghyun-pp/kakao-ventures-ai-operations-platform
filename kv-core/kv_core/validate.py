@@ -269,3 +269,42 @@ def load_contracts(path: str | Path) -> dict[str, Contract]:
                               on_invalid=spec.get("on_invalid", "halt"),
                               min_records=int(spec.get("min_records", 0)))
     return out
+
+
+# ─────────────────────────── 판단 룰 게이트 ───────────────────────────
+
+# 🔴 [2026-08-13 W12 · 리뷰 C-F-B10] "가동 스위치"가 **토큰만** 봤다.
+#    `if any(ln.strip() == _EMPTY_TOKEN ...)` 하나뿐이라 실측에서 이것들이 전부 통과했다:
+#        0바이트 · 공백만 · 제목 한 줄만 남은 파일
+#    나쁜 merge·잘못된 `>` 리다이렉트·편집 중 저장 사고로 룰 파일이 비면 게이트가 통과하고,
+#    프롬프트엔 시스템 문구와 데이터만 남는다. 모델은 그래도 라벨 안에서 뭔가를 고르고,
+#    계약도 통과하고, 노션에 기입된다 — **룰 0줄로 판정이 나간다.**
+#
+#    임계는 추측하지 않고 실측했다(2026-08-13):
+#        bplan-criteria.md   8,208자 · 본문 167줄
+#        judge-criteria.md  11,148자 · 본문 206줄
+#    30줄이면 작은 쪽 대비 5배 여유이고, 위 세 파손 형태는 전부 걸린다.
+#    ⚠️ 룰 ID(`CR-1` 등) 존재로 잡고 싶었지만 judge 쪽은 ID 체계가 없다(0종) —
+#       한쪽에만 있는 규약을 공통 게이트로 쓰면 그 파일이 영원히 막힌다.
+_CRITERIA_MIN_LINES = 30
+
+
+def criteria_body_lines(text: str) -> int:
+    """주석·제목·빈 줄을 뺀 실제 룰 분량."""
+    return sum(1 for ln in (text or "").splitlines()
+               if ln.strip() and not ln.lstrip().startswith("#"))
+
+
+def criteria_missing(text: str, empty_token: str) -> str:
+    """룰이 없거나 부실한 이유. 빈 문자열이면 가동 가능.
+
+    두 조건 **모두** 본다 — 토큰(사람이 명시적으로 끈 상태)과 분량(사고로 비워진 상태).
+    """
+    if any(ln.strip() == empty_token for ln in (text or "").splitlines()):
+        return f"단독 줄 토큰 {empty_token} 이 있다 — 지우면 가동된다"
+    n = criteria_body_lines(text)
+    if n < _CRITERIA_MIN_LINES:
+        return (f"룰 본문이 {n}줄뿐이다(최소 {_CRITERIA_MIN_LINES}). "
+                f"나쁜 merge·잘못된 리다이렉트로 비워졌는지 확인하라 — "
+                f"룰 0줄로 판정이 나가면 아무도 못 알아챈다")
+    return ""

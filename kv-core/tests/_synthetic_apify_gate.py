@@ -342,6 +342,39 @@ check("A7 정본 쪽에는 천장이 실제로 선언돼 있다(양쪽 다 없�
       bool(_cap), f"resources.yaml apify.monthly_budget_usd = {_cap}")
 
 # ══════════════════════════════════════════════════════════════════════
+print("\n=== A9: 커서가 실패한 픽까지 전진하지 않는다 ===\n")
+# 🔴 [리뷰 A-F7] `following_graph` 가 `cur + len(picks)` 로 커서를 올렸다 — 20명 중 12명이
+#    429 로 죽어도 20 전진한다. 그 12명의 글은 **로테이션이 한 바퀴 다 돌 때까지 안 산다.**
+#    커서는 진행도인데 실패를 안 세니 단위가 어긋나 있었다(계열 ②).
+#
+#    **선행 성공만** 센다 — 흩어진 실패를 개수로만 세면 뒤쪽 성공이 앞쪽 실패의 자리를 메워
+#    건너뛰기가 생긴다. `run_due` 가 밀린 주기에 쓰는 순차 드레인과 같은 규율이다.
+sys.path.insert(0, str(_REPO / "skills/net-sourcing/project"))
+from adapters import threads as _th  # noqa: E402
+
+_FAIL: set = set()
+
+
+def _fake_actor(slug, payload, timeout=180):
+    users = payload.get("usernames") or [payload.get("from")]
+    if any(u in _FAIL for u in users):
+        raise RuntimeError("429")
+    return [{"username": u} for u in users]
+
+
+_th.apify = types.SimpleNamespace(run_actor=_fake_actor, budget_tripped=lambda: False)
+_U = [f"u{i}" for i in range(50)]        # 20+20+10 = 배치 3회
+
+for _label, _fail, _want in [("전부 성공", set(), 50),
+                             ("1번째 배치 실패", {"u0"}, 0),
+                             ("2번째 배치 실패", {"u20"}, 20),
+                             ("마지막 배치 실패", {"u40"}, 40)]:
+    _FAIL = _fail
+    _, _lead = _th._run_user_posts("meta~x", _U, 5, "", "t")
+    check(f"A9 {_label} → 커서 근거 {_want}명", _lead == _want,
+          f"실제 {_lead} — 수정 전엔 항상 50 이었다")
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 Apify 관문 계약 실패 {len(FAIL)}건: {', '.join(FAIL)}")

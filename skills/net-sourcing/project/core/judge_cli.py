@@ -371,12 +371,14 @@ def apply(cfg: dict, file: str) -> int:
         props: dict = {row["verdict_field"]: {"select": {"name": val}}}
         if v.get("reason"):
             if row.get("has_ai_reason"):
-                props["AI Reason"] = {"rich_text": [{"text": {"content": str(v["reason"])[:2000]}}]}
+                props["AI Reason"] = {"rich_text": [
+                        {"text": {"content": notion._clip16(str(v["reason"]))}}]}
             else:
                 orphan_reasons.append({"page_id": pid, "channel": row.get("channel"),
                                        "verdict": val, "reason": str(v["reason"])})
         if v.get("one_liner") and row.get("has_one_liner"):
-            props["One Liner"] = {"rich_text": [{"text": {"content": str(v["one_liner"])[:2000]}}]}
+            props["One Liner"] = {"rich_text": [
+                    {"text": {"content": notion._clip16(str(v["one_liner"]))}}]}
         r = notion._write("PATCH", f"{notion.API}/pages/{pid}", token, {"properties": props})
         if r.status_code == 200:
             ok += 1

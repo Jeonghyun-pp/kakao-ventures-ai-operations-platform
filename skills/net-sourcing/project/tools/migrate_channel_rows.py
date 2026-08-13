@@ -73,7 +73,10 @@ def _prop_write(ptype: str, pval: dict):
         return None
     if ptype == "title":
         text = "".join(x.get("plain_text", "") for x in (pval.get("title") or []))
-        return {"title": [{"type": "text", "text": {"content": text[:2000]}}]} if text.strip() else None
+        # [W12] `[:2000]` 은 안전하지 않다 — 노션은 UTF-16 유닛을 센다(이모지 1자 = 2유닛).
+        # 2026-07-27 에 링크드인 495건 중 7건이 그렇게 통째로 착지 실패했다.
+        return ({"title": [{"type": "text", "text": {"content": notion._clip16(text)}}]}
+                if text.strip() else None)
     if ptype == "rich_text":
         rt = _clean_rt(pval.get("rich_text") or [])
         return {"rich_text": rt} if rt else None

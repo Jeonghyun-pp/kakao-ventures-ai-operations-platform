@@ -387,7 +387,8 @@ class ThreadsAdapter(Adapter):
         out: list[Candidate] = []
 
         if _accepts_batch(slug):                 # 배치 지원 → 20명씩 묶어서
-            items = _run_user_posts(slug, accounts, per, after, "watchlist")
+            # 워치리스트는 매번 전 계정을 도는 층이라 커서가 없다 — 성공 인원수는 안 쓴다.
+            items, _ = _run_user_posts(slug, accounts, per, after, "watchlist")
             for p in items:
                 u = _handle_of(p)
                 out.append(self._post_to_candidate(
@@ -588,9 +589,11 @@ class ThreadsAdapter(Adapter):
         cur = self._follow_cursor()
         picks = [targets[(cur + i) % len(targets)] for i in range(min(budget, len(targets)))] if targets else []
 
+        # [W12 · A-F7] 커서는 **실제로 응답을 받은 인원**까지만 전진한다(아래 참조).
+        ok_lead = len(picks)
         if picks and posts_slug_batch:
             # 배치 지원 액터(meta)는 한 런에 **최대 20명**. 60명이면 런 3회로 쪼갠다.
-            items = _run_user_posts(posts_slug, picks, posts_per, after, "following(글)")
+            items, ok_lead = _run_user_posts(posts_slug, picks, posts_per, after, "following(글)")
             for p in items:
                 u = _handle_of(p)
                 sd = sorted(expanded.get(u) or [])
@@ -600,13 +603,18 @@ class ThreadsAdapter(Adapter):
                     match_reason=f"팔로잉그래프: {' + '.join('@'+s for s in sd) or '@?'} → @{u} (1홉)",
                     layer="following_graph", seed=sd))
         else:
+            _broken = False
+            ok_lead = 0
             for user in picks:                  # burbn: `from`이 단일 문자열 → 유저당 런 1회
                 try:
                     posts = apify.run_actor(posts_slug, _user_posts_payload(
                         posts_slug, [user], posts_per, after))
                 except Exception as e:
                     print(f"⚠️  user_posts '{user}' 실패: {e}")
+                    _broken = True              # [W12 · A-F7] 이 사람부터는 커서 근거가 아니다
                     continue
+                if not _broken:
+                    ok_lead += 1
                 sd = sorted(expanded.get(user) or [])
                 for p in posts:
                     out.append(self._post_to_candidate(
@@ -618,9 +626,18 @@ class ThreadsAdapter(Adapter):
         if targets:
             # ★ .pending 으로만 쓴다 — 착지 성공 후 commit_seen()이 확정한다.
             #   착지 실패한 날 커서만 전진하면 그 사람들의 글은 **영영 안 산다**.
-            self._save_follow_cursor(cur + len(picks))
+            #
+            # 🔴 [2026-08-13 W12 · 리뷰 A-F7] 위 주석이 막겠다고 선언한 실패("착지 실패한 날")는
+            #    막았는데 **수집이 실패한 날**은 안 막았다. `len(picks)` 만큼 전진했으므로
+            #    20명 중 12명이 429 로 죽어도 커서는 20 전진했다. 2단계 커밋이 land 축만 보고
+            #    collect 축을 안 본 것이다 — 그 12명은 로테이션 한 바퀴가 돌 때까지 안 산다.
+            #    이제 **응답을 실제로 받은 선행 인원**까지만 전진한다.
+            self._save_follow_cursor(cur + ok_lead)
+        _lost = len(picks) - ok_lead
         print(f"· threads following_graph: 인물 {len(targets)}명 착지 "
-              f"(그중 {len(picks)}명은 최근 글까지 수집 — 커서 {cur} → {cur + len(picks)})")
+              f"(그중 {len(picks)}명 글 수집 시도 · 커서 {cur} → {cur + ok_lead})"
+              + (f"  ⚠️ {_lost}명은 수집 실패라 커서를 안 넘긴다(다음 실행에 재시도)"
+                 if _lost else ""))
         _health(out, "following_graph", len(targets))
         return out
 
@@ -1057,20 +1074,38 @@ def _accepts_batch(slug: str) -> bool:
 MAX_BATCH_USERS = 20          # meta 액터 usernames maxItems=20 (입력 스키마 실측)
 
 
-def _run_user_posts(slug: str, users: list[str], per_user: int, after: str, label: str) -> list[dict]:
+def _run_user_posts(slug: str, users: list[str], per_user: int, after: str,
+                    label: str) -> tuple[list[dict], int]:
     """유저들의 최근 글을 **20명씩 쪼개** 가져온다. 한 배치가 죽어도 나머지는 살린다.
 
     쪼개는 이유는 액터 상한(usernames maxItems=20)이다. 60명을 한 번에 보내면 런이 죽는데,
     이전엔 그게 "배치 실패" 한 줄로 끝나 **그 층 전체가 0건**이 됐다(07-13 실제).
+
+    반환: `(아이템, 선행 성공 인원수)`.
+
+    🔴 [2026-08-13 W12 · 리뷰 A-F7] 두 번째 값이 새로 생겼다. 예전엔 아이템만 돌려줬고
+       호출부가 **`len(picks)` 만큼 커서를 전진**시켰다 — 배치가 죽어도 그 인원까지
+       "처리됨"이 된다. 그 사람들의 글은 로테이션이 한 바퀴 다 돌 때까지 **사실상 영영
+       안 산다.** 커서는 진행도인데 실패를 세지 않았으니 단위가 안 맞았다.
+
+       **선행 성공만** 센다(첫 실패에서 멈춘다). 흩어진 실패를 개수로만 세면 뒤쪽 성공분이
+       앞쪽 실패분의 자리를 메워 **건너뛰기가 생긴다.** 순차 드레인은 `run_due` 가 밀린
+       주기에 쓰는 것과 같은 규율이다 — 재수집이 유실보다 항상 낫다.
     """
     items: list[dict] = []
+    ok_lead = 0
+    broken = False
     for i in range(0, len(users), MAX_BATCH_USERS):
         chunk = users[i:i + MAX_BATCH_USERS]
         try:
             items += apify.run_actor(slug, _user_posts_payload(slug, chunk, per_user, after))
         except Exception as e:
             print(f"⚠️  {label} 배치 {i // MAX_BATCH_USERS + 1} 실패({len(chunk)}명): {e}")
-    return items
+            broken = True
+            continue                      # 뒤 배치는 계속 산다(수집은 최대한 건진다)
+        if not broken:
+            ok_lead += len(chunk)         # 첫 실패 전까지만 커서 근거로 인정한다
+    return items, ok_lead
 
 
 def _user_posts_payload(slug: str, users: list[str], per_user: int, after: str) -> dict:
