@@ -63,6 +63,11 @@ FIELDS = {
 # 🔴 기입 허용 칸 — 이 목록 밖은 구조적으로 못 쓴다.
 _WRITABLE = {"점수", "포워드 이유", "fwd to whom?"}
 
+# 기계가 쓴 판정임을 표시하는 접두어. 백테스트가 이 행을 **정답에서 뺀다**(C-F-B7).
+# 새 칸을 만들지 않은 이유: `_WRITABLE` 을 넓히면 안전 경계가 함께 넓어지고, 프로덕션
+# 노션 스키마 변경은 사람 승인이 필요하다. 접두어는 그 둘 다 피하면서 사람에게도 보인다.
+AI_MARK = "[AI] "
+
 _SYS = ("JSON 배열만 출력하라. 각 원소는 "
         '{"page_id": "...", "score": "...", "fwd": "", "reason": "..."} 형식. '
         "프로즈·코드펜스·설명 금지. score 는 각 행의 allowed 목록 안에서만 고른다. "
@@ -163,7 +168,13 @@ def s_export(skill: str, job_id: str) -> None:
             break
         payload["start_cursor"] = d["next_cursor"]
 
-    qp = paths.data(SKILL) / f"bplan_queue_{date.today().isoformat()}.json"
+    # 🔴 [W12 · 리뷰 C-F-B9] 파일명에 **job_id 를 넣는다.** 예전엔 날짜뿐이라 같은 날
+    #    `-r2` attempt 가 돌면 앞 attempt 의 큐를 덮어썼다. base 잡의
+    #    `artifacts/queue_path.txt` 는 그대로인데 그 파일 내용은 r2 것이 되고, base 를
+    #    재개하면(export 는 stage_done 이라 스킵) **다른 attempt 의 큐로 apply 한다.**
+    #    바로 아래 원장(`bplan_verdicts_...`)은 같은 이유로 이미 job_id 를 넣고 있었다 —
+    #    **같은 함수 안에서 한쪽만 적용돼 있었다.**
+    qp = paths.data(SKILL) / f"bplan_queue_{date.today().isoformat()}_{job_id}.json"
     qp.write_text(json.dumps({"rows": rows}, ensure_ascii=False), encoding="utf-8")
     job.atomic_write(_queue_pointer(job_id), str(qp))
     print(f"· 미판정 {len(rows)}건 → {qp.name} (허용값 {allowed})")
@@ -230,8 +241,13 @@ def _apply(token: str, verdicts: list[dict], allowed: list[str], dry: bool) -> l
     for v in verdicts:
         props = {"점수": {"select": {"name": v["score"]}}}
         if (v.get("reason") or "").strip():
+            # 🔴 [W12 · 리뷰 C-F-B7] **출처를 남긴다.** 이 잡이 쓴 20행이 `tools/bplan_backtest.py`
+            #    의 **정답지 칼럼(`점수`)에 그대로 들어갔고**, `build_sample` 은 그 행을 걸러낼
+            #    방법이 없었다 — 다음 백테스트는 **자기 출력을 정답으로 채점**한다.
+            #    정확도가 올라도 개선인지 자기일치인지 구분 불가다(정본 R1 의 판정 라벨판).
+            #    사람에게도 유용하다: 어느 판정이 기계 것인지 보인다.
             props["포워드 이유"] = {"rich_text": [
-                {"text": {"content": notion.clip16(v["reason"])}}]}
+                {"text": {"content": notion.clip16(AI_MARK + v["reason"])}}]}
         if (v.get("fwd") or "").strip():
             props["fwd to whom?"] = {"select": {"name": v["fwd"]}}
         _assert_safe_patch(props)                 # 🔴 To do 를 절대 못 쓴다

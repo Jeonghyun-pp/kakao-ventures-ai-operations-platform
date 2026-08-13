@@ -771,11 +771,37 @@ def _person_key(cand: dict) -> str:
     return f"threads:{h}" if h else ""
 
 
+def _url_key(u: str) -> str:
+    """URL 착지키 — **층①(dedup)과 같은 정규화**를 통과시킨다.
+
+    🔴 [2026-08-13 W12 · 리뷰 B-F4] 여기가 `.strip()` 하나였다. 같은 사람의 URL 5변형이
+       층①에서는 1키인데 층②(착지)에서는 **5키**가 됐다(실측):
+
+           https://www.linkedin.com/in/hong          층① in/hong
+           https://linkedin.com/in/hong              층① in/hong
+           http://www.linkedin.com/in/hong/          층① in/hong
+           https://www.linkedin.com/in/hong?originalSubdomain=kr
+           https://kr.linkedin.com/in/hong
+
+       평소엔 층①이 먼저 걸러서 안 드러난다. 그런데 `dedup.py:31-35` 가 **변화 감지
+       후보는 층①을 일부러 통과시킨다**(`profile_changed`) — 그 경로에서는 **층②가
+       유일한 방어**다. 링크드인 URL 은 액터·모드에 따라 `kr.` · 쿼리 · 트레일링 슬래시가
+       붙었다 떨어졌다 하므로, 변형 하나에 그 사람이 '처음 보는 사람'이 되어 **인물 행이
+       새로 생긴다.** 2026-07-27 에 링크드인 345행 중 84행이 같은 사람의 두 번째 행이 된
+       사고와 같은 형태인데, 그때 고친 건 층①뿐이었다.
+    """
+    from adapters.base import _normalize_linkedin_url, _normalize_url
+    raw = (u or "").strip()
+    if not raw:
+        return ""
+    return _normalize_linkedin_url(raw) if "linkedin.com" in raw.lower() else _normalize_url(raw)
+
+
 def _landing_key(cand: dict) -> str | None:
-    """착지 dedup 키 — 앱스토어=app:{id}, 스레드=threads:{핸들}(인물), 그 외=URL."""
+    """착지 dedup 키 — 앱스토어=app:{id}, 스레드=threads:{핸들}(인물), 그 외=정규화 URL."""
     if cand.get("app_id"):
         return f"app:{cand['app_id']}"
-    return _person_key(cand) or (cand.get("url") or "").strip() or None
+    return _person_key(cand) or _url_key(cand.get("url") or "") or None
 
 
 def _scan_landing_dbs(cfg: dict) -> list[str]:
@@ -888,7 +914,9 @@ def existing_landing_keys(cfg: dict) -> dict[str, str]:
                 keys.setdefault(f"app:{app_id}", pid)
             post_url = (props.get("Post URL") or {}).get("url")
             if post_url:
-                keys.setdefault(post_url.strip(), pid)
+                # [W12 · B-F4] 쓰는 쪽(`_landing_key`)과 **같은 정규화**를 거쳐야 만난다.
+                # 둘 중 하나만 고치면 키가 어긋나 전원이 '신규'가 된다.
+                keys.setdefault(_url_key(post_url), pid)
             if _is_threads_row(props):
                 h = _plain(props.get("Author Username")).strip().lstrip("@").lower()
                 if h:

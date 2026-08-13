@@ -103,6 +103,9 @@ notion._assert_person_schema = lambda *a: None
 notion._build_landing_properties = lambda cfg, c, sch, rid: {
     k: {"rich_text": []} for k in ("C0", "C1", "C2")}
 notion._merge_patch = lambda pid, props, tp: dict(props)
+# ⚠️ 아래 스텁이 진짜 `_landing_key` 를 덮는다. L6 은 **진짜 함수**를 검사하므로
+#    덮기 전에 보관해 둔다 — 안 그러면 L6 이 스텁을 시험하는 공허한 검사가 된다.
+_REAL_LANDING_KEY = notion._landing_key
 notion._landing_key = lambda c: c.get("k")
 notion.existing_post_urls = lambda tok, pid: set()
 notion.append_career_blocks = lambda *a: False
@@ -180,6 +183,33 @@ else:
     check("L5 착지 DB 를 2개 이상 읽었다", len(_sizes) >= 2, str(_sizes))
     check("L5 착지 DB 들의 칸 구성이 서로 다르다(같으면 L1~L4 가 공허하다)",
           len(set(_sizes.values())) > 1, str(_sizes))
+
+# ══════════════════════════════════════════════════════════════════════
+print("\n=== L6: 착지키가 층①(dedup)과 같은 정규화를 쓴다 ===\n")
+# 🔴 [리뷰 B-F4] `_landing_key` 가 URL 을 `.strip()` 만 했다. 같은 사람의 URL 5변형이
+#    층①에서는 1키인데 층②(착지)에서는 **5키**가 됐다.
+#    평소엔 층①이 먼저 걸러 안 드러나지만, `dedup.py:31-35` 가 **변화 감지 후보는 층①을
+#    일부러 통과시킨다**(`profile_changed`) — 그 경로에서는 **층②가 유일한 방어**다.
+#    2026-07-27 에 링크드인 345행 중 84행이 같은 사람의 두 번째 행이 된 사고와 같은 형태.
+_VARIANTS = ["https://www.linkedin.com/in/hong",
+             "https://linkedin.com/in/hong",
+             "http://www.linkedin.com/in/hong/",
+             "https://www.linkedin.com/in/hong?originalSubdomain=kr",
+             "https://kr.linkedin.com/in/hong"]
+_k = {_REAL_LANDING_KEY({"source": "링크드인", "url": u}) for u in _VARIANTS}
+check("L6 URL 5변형이 한 사람으로 접힌다", len(_k) == 1, f"{len(_k)}키 {sorted(_k)}")
+
+# 쓰는 쪽과 읽는 쪽이 **같은 함수**를 써야 만난다 — 하나만 고치면 전원이 '신규'가 된다.
+check("L6 읽기 쪽 키와 쓰기 쪽 키가 일치한다",
+      notion._url_key(_VARIANTS[-1]) == _REAL_LANDING_KEY(
+          {"source": "링크드인", "url": _VARIANTS[0]}))
+
+# 다른 채널의 키 규칙은 건드리지 않았다(회귀 방지).
+check("L6 앱스토어 키는 그대로", _REAL_LANDING_KEY(
+    {"source": "앱스토어", "app_id": "123"}) == "app:123")
+check("L6 스레드 인물키는 그대로", _REAL_LANDING_KEY(
+    {"source": "스레드", "signals": {"author_username": "@Kim"}}) == "threads:kim")
+check("L6 빈 URL 은 None(키 없음)", _REAL_LANDING_KEY({"source": "링크드인", "url": " "}) is None)
 
 # ══════════════════════════════════════════════════════════════════════
 print()

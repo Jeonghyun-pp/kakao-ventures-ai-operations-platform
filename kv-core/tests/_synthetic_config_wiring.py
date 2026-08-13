@@ -246,6 +246,27 @@ probe = _chain(ast.parse('cfg.get("judge", {}).get("appstore", {})').body[0].val
 check("C3 체인 파서가 알려진 형태를 판독한다", probe == ["judge", "appstore"], str(probe))
 
 # ══════════════════════════════════════════════════════════════════════
+print("\n=== C5: 두 파일에 나뉜 상수가 서로 어긋나지 않는다 ===\n")
+# 🔴 [W12 · 리뷰 C-F-B7] bplan-score 가 자기 판정에 `[AI] ` 를 붙이고 백테스트가 그 행을
+#    정답에서 뺀다. **두 값이 갈라지면 방어가 조용히 죽는다** — 백테스트가 다시 자기
+#    출력을 정답으로 채점하고, 정확도가 올라도 개선인지 자기일치인지 모른다.
+#    같은 리포에서 이미 겪은 형태다(_COMMIT_HOOKS 어휘 불일치로 스킵이 no-op 이었다).
+import re  # noqa: E402
+
+_pairs = [
+    ("skills/mail-harness/project/jobs/bplan_score_job.py", r'^AI_MARK = "(.*?)"'),
+    ("skills/mail-harness/project/tools/bplan_backtest.py", r'^_AI_MARK = "(.*?)"'),
+]
+_vals = []
+for _rel, _rx in _pairs:
+    _m = re.search(_rx, (_REPO / _rel).read_text(encoding="utf-8"), re.M)
+    _vals.append(_m.group(1) if _m else None)
+check("C5 AI 출처 표시가 양쪽에 존재한다", all(v is not None for v in _vals),
+      f"{dict(zip([r.split('/')[-1] for r, _ in _pairs], _vals))}")
+check("C5 두 값이 같다(갈라지면 백테스트가 자기 출력을 정답으로 채점한다)",
+      len(set(_vals)) == 1, str(_vals))
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 설정 배선 계약 실패 {len(FAIL)}건: {', '.join(FAIL)}")

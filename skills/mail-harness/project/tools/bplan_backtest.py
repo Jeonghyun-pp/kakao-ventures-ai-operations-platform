@@ -99,6 +99,10 @@ def _allowed(props: dict) -> list[str]:
     return ["칼드랍", "Red", "Orange", "Green", "?"]
 
 
+# bplan_score_job 이 자기 판정에 붙이는 표시 — 그 잡과 **같은 값**이어야 한다.
+_AI_MARK = "[AI] "
+
+
 def build_sample(pages: list[dict], n: int, owner: str = "", seed: int = 11,
                  stratified: bool = True):
     """정답이 있고 서술 필드가 채워진 행에서 표본을 뽑는다.
@@ -116,6 +120,13 @@ def build_sample(pages: list[dict], n: int, owner: str = "", seed: int = 11,
         pr = pg["properties"]
         truth = _sel(pr, "점수")
         if not truth or truth == "?":
+            continue
+        # 🔴 [W12 · 리뷰 C-F-B7] **기계가 쓴 행은 정답이 아니다.** bplan-score 가 쓴 20행이
+        #    같은 `점수` 칼럼에 들어가 있어서, 그대로 두면 다음 백테스트가 **자기 출력을
+        #    정답으로 채점**한다. 정확도가 올라도 개선인지 자기일치인지 구분 불가다
+        #    (정본 R1 — 진실이 둘이 되면 반드시 어긋난다).
+        #    사람이 그 판정을 고치면 `[AI]` 접두어도 같이 지워지므로 자연스럽게 정답이 된다.
+        if _txt(pr, "포워드 이유").lstrip().startswith(_AI_MARK.strip()):
             continue
         if owner and (_sel(pr, "담당자") or "") != owner:
             continue
