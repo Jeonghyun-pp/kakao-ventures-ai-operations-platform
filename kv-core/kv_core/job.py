@@ -65,7 +65,7 @@ import fcntl
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -85,6 +85,10 @@ _ALLOWED: dict[str, tuple[str, ...]] = {
     "failed":     (),   # 종단
 }
 _TERMINAL = ("completed", "failed")
+
+# 항목 루프 중 파생 캐시(cursor.json)를 N개마다 갱신한다 — 그 사이 크래시하면 최대 N-1개
+# 뒤처진다. **events 는 항상 정확하다**(매 항목 fsync). 이건 관측용 캐시의 신선도일 뿐이다.
+_CURSOR_FLUSH = 25
 
 
 # ─────────────────────────── 경로 ───────────────────────────
@@ -184,8 +188,12 @@ def read_events(skill: str, job_id: str) -> list[dict]:
     p = _events_path(skill, job_id)
     if not p.exists():
         return []
+    # ⚠️ 파일을 **한 번만** 읽는다. 예전엔 파손 줄마다 `p.read_text()` 를 두 번 더 불러
+    #    전체를 다시 읽었다(줄 수를 세려고). events 가 수천 줄인 잡에서 그건 O(n²) 다.
+    lines = p.read_text(encoding="utf-8").splitlines()
+    last = len(lines) - 1
     out: list[dict] = []
-    for i, raw in enumerate(p.read_text(encoding="utf-8").splitlines()):
+    for i, raw in enumerate(lines):
         raw = raw.strip()
         if not raw:
             continue
@@ -193,10 +201,59 @@ def read_events(skill: str, job_id: str) -> list[dict]:
             out.append(json.loads(raw))
         except json.JSONDecodeError:
             # 마지막 줄만 허용. 중간 줄이 깨졌다면 그건 append 규약 위반이라 드러내야 한다.
-            if raw and i == len(p.read_text(encoding="utf-8").splitlines()) - 1:
+            if i == last:
                 break
-            raise
+            # 🔴 [2026-08-13 W12 · 리뷰 E-F11] 드러내는 것까지는 설계대로인데 **그 다음이
+            #    없었다.** 이 raise 는 `rebuild`·`transition`·`current_state` 를 전부 죽이므로
+            #    그 잡은 종단 상태로 갈 수 없다 — **영구 벽돌**이다. `judge_job:416` 의
+            #    attempt-suffix 재시도(`rebuild(...).state == "failed"`)도 같은 예외로 죽어
+            #    그날 judge 전체가 rc≠0 이 된다. 런북 6본에 이 복구 절차가 없었다.
+            #    → 무엇을 하면 되는지 예외가 직접 말한다(격리는 사람이 명시적으로 부른다 —
+            #      자동 격리는 "append 규약이 깨졌다"는 신호 자체를 지운다).
+            raise json.JSONDecodeError(
+                f"{p} 의 {i + 1}번째 줄이 깨졌다(마지막 줄이 아니므로 append 규약 위반이다). "
+                f"복구: python -c \"import sys;sys.path.insert(0,'kv-core');"
+                f"from kv_core import job;print(job.quarantine_corrupt_events("
+                f"'{skill}','{job_id}'))\"  — 깨진 줄을 .quarantine-<ts> 로 옮기고 "
+                f"나머지로 재생한다(지우지 않는다)",
+                raw, 0) from None
     return out
+
+
+def quarantine_corrupt_events(skill: str, job_id: str) -> dict:
+    """깨진 events 줄을 격리하고 나머지로 재생 가능하게 만든다. **지우지 않는다.**
+
+    🔴 [W12 · E-F11] `read_events` 가 중간 파손에 raise 하는 것은 설계대로다(append 규약
+       위반은 드러나야 한다). 문제는 **복구 경로가 없어 그 잡이 영구 벽돌**이 된 것이다.
+
+    ⚠️ 자동으로 부르지 않는다. 사람이 명시적으로 부른다 — 자동 격리는 "장부가 깨졌다"는
+       사실을 조용히 지우고, 그러면 원인(append 규약을 깬 코드)을 영영 못 찾는다.
+
+    반환: `{"quarantined": n, "kept": n, "path": <격리 파일>}`.
+    """
+    p = _events_path(skill, job_id)
+    if not p.exists():
+        return {"quarantined": 0, "kept": 0, "path": None}
+    lines = p.read_text(encoding="utf-8").splitlines()
+    good: list[str] = []
+    bad: list[str] = []
+    for raw in lines:
+        if not raw.strip():
+            continue
+        try:
+            json.loads(raw)
+            good.append(raw)
+        except json.JSONDecodeError:
+            bad.append(raw)
+    if not bad:
+        return {"quarantined": 0, "kept": len(good), "path": None}
+    qp = p.with_suffix(f".jsonl.quarantine-{int(time.time())}")
+    qp.write_text("\n".join(bad) + "\n", encoding="utf-8")   # 원본 보존이 먼저
+    atomic_write(p, "\n".join(good) + "\n")
+    print(f"🔴 {skill}/{job_id}: events 파손 줄 {len(bad)}개를 격리했다 → {qp.name}\n"
+          f"   남긴 줄 {len(good)}개로 재생 가능하다. **격리 파일을 지우지 마라** — "
+          f"append 규약을 깬 코드를 찾는 유일한 단서다.")
+    return {"quarantined": len(bad), "kept": len(good), "path": str(qp)}
 
 
 # ─────────────────────────── 재생(fold) — events → 파생 상태 ───────────────────────────
@@ -205,15 +262,23 @@ def read_events(skill: str, job_id: str) -> list[dict]:
 @dataclass
 class Derived:
     state: str
-    done_keys: set[str]          # 부작용까지 완료된 항목(멱등 가드의 근거)
+    # 🔴 [W12 · E-F12] 이 값은 **전 스테이지의 합집합**이다. 실제 멱등 가드(`_done_keys`)는
+    #    `stage` 로 거르는데 여기는 안 걸러서, **같은 이름의 값을 두 함수가 다른 단위로**
+    #    계산하고 있었다. 스테이지 간에 같은 키(page_id 등)를 쓰는 파이프라인이면
+    #    "s1 에서 끝난 a" 와 "s2 에서 끝난 a" 가 구분되지 않는다.
+    #    스테이지 정밀도가 필요하면 `done_by_stage` 를 써라.
+    done_keys: set[str]          # 부작용까지 완료된 항목(전 스테이지 합집합)
     skipped: list[dict]          # 건너뛴 항목 {key, error}
     request: dict
+    # 스테이지별 완료 키 — `_done_keys` 와 **같은 단위**다. `''` 는 스테이지 미지정(단일 run).
+    done_by_stage: dict[str, set[str]] = field(default_factory=dict)
 
 
 def rebuild(skill: str, job_id: str) -> Derived:
     """events.jsonl 을 재생해 현재 상태를 계산한다. **파일이 아니라 이벤트가 진실이다.**"""
     state = "requested"
     done: set[str] = set()
+    by_stage: dict[str, set[str]] = {}
     skipped: list[dict] = []
     request: dict = {}
     for ev in read_events(skill, job_id):
@@ -225,9 +290,11 @@ def rebuild(skill: str, job_id: str) -> Derived:
             state = ev.get("to", state)
         elif k == "item_done":
             done.add(ev["key"])
+            by_stage.setdefault(ev.get("stage", ""), set()).add(ev["key"])
         elif k == "item_skipped":
             skipped.append({"key": ev.get("key"), "error": ev.get("error")})
-    return Derived(state=state, done_keys=done, skipped=skipped, request=request)
+    return Derived(state=state, done_keys=done, skipped=skipped, request=request,
+                   done_by_stage=by_stage)
 
 
 def _materialize(skill: str, job_id: str, d: Derived) -> None:
@@ -235,9 +302,14 @@ def _materialize(skill: str, job_id: str, d: Derived) -> None:
     atomic_write(_state_path(skill, job_id),
                  json.dumps({"state": d.state, "updated": _now_iso()},
                             ensure_ascii=False, indent=2))
+    # 🔴 [W12 · E-F12] 예전엔 합집합 하나만 적었다. 스테이지가 여럿인 잡에서
+    #    "어느 스테이지가 어디까지 갔나"를 못 봤다 — `kill -9` 성공 신호가
+    #    *"상태 디렉토리만 보고 무엇이 어디까지 됐는지 안다"* 인데 그 절반이 없었다.
     atomic_write(_cursor_path(skill, job_id),
                  json.dumps({"done": len(d.done_keys), "skipped": len(d.skipped),
-                             "done_keys": sorted(d.done_keys)},
+                             "done_keys": sorted(d.done_keys),
+                             "by_stage": {k: sorted(v) for k, v in
+                                          sorted(d.done_by_stage.items())}},
                             ensure_ascii=False, indent=2))
 
 
@@ -463,6 +535,7 @@ def process_items(
     """
     done = set(watermark_reader()) if watermark_reader is not None else _done_keys(skill, job_id, stage)
     skipped = 0
+    n_done = 0
     for item in items:
         k = key(item)
         if k in done:                                  # 결정 C-① 가드: 이미 했다
@@ -475,6 +548,16 @@ def process_items(
             continue
         append_event(skill, job_id, "item_done", key=k, stage=stage)   # 커서 전진 — 성공 뒤에만
         done.add(k)
+        # 🔴 [W12 · E-F12] 캐시를 **항목 루프 중에도** 갱신한다. 예전엔 `_materialize` 가
+        #    create·transition·잡 종료 때만 돌아서, `kill -9` 직후 `cursor.json` 이
+        #    `done: 0` 인데 events 엔 완료 2건이 있었다(실측). 상태 디렉토리만 보고
+        #    판단하라는 규약(BASIC-STRUCTURE:207)이 3개 파일 중 1개에서 거짓이었다.
+        #    매 항목마다 쓰면 비싸므로 N개마다 — 크래시 시 최대 N-1개 뒤처진다.
+        n_done += 1
+        if n_done % _CURSOR_FLUSH == 0:
+            _materialize(skill, job_id, rebuild(skill, job_id))
+    if n_done:
+        _materialize(skill, job_id, rebuild(skill, job_id))   # 루프 종료 시 마지막 반영
     return len(done), skipped
 
 

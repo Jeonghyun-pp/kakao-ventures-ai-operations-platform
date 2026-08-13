@@ -362,6 +362,60 @@ def test_no_send_guard() -> None:
     os.environ["KV_NO_SEND"] = "1"
 
 
+# ── W12 E-F11/E-F12: 장부 파손 복구 · 커서 단위 ────────────────────────────
+
+def test_w12_events_and_cursor() -> None:
+    """중간 파손이 잡을 영구 벽돌로 만들지 않고, 커서가 진실을 따라간다."""
+    import json as _j
+    print("[W12] events 중간 파손 복구 · cursor 스테이지 단위")
+
+    jid = "w12-corrupt"
+    job.create(SKILL, {"t": "x"}, jid)
+    for st in ("queued", "running"):
+        job.transition(SKILL, jid, st)
+    p = job._events_path(SKILL, jid)
+    lines = p.read_text(encoding="utf-8").splitlines()
+    lines[1] = '{"ts": "2026", "kind": "sta'          # 중간 줄 파손(마지막 줄 아님)
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    bricked = False
+    try:
+        job.rebuild(SKILL, jid)
+    except _j.JSONDecodeError as e:
+        bricked = True
+        check("중간 파손은 드러난다(조용히 넘기지 않는다)", True)
+        check("예외가 복구 방법을 알려준다", "quarantine_corrupt_events" in str(e),
+              str(e)[:60])
+    check("파손 시 rebuild 가 실패한다", bricked)
+
+    r = job.quarantine_corrupt_events(SKILL, jid)
+    check("격리가 깨진 줄만 골라낸다", r["quarantined"] == 1 and r["kept"] == 2, str(r))
+    check("격리 파일이 원본을 보존한다(지우지 않는다)",
+          r["path"] and Path(r["path"]).exists())
+    check("격리 후 잡이 되살아난다(벽돌 해제)",
+          job.rebuild(SKILL, jid).state == "running")
+    job.transition(SKILL, jid, "failed")
+    check("종단 상태로 갈 수 있다", job.rebuild(SKILL, jid).state == "failed")
+    check("멀쩡한 잡에 부르면 무해하다",
+          job.quarantine_corrupt_events(SKILL, "nonexistent")["quarantined"] == 0)
+
+    # ── 커서 단위 ──
+    jid2 = "w12-cursor"
+    job.create(SKILL, {"t": "y"}, jid2)
+    job.transition(SKILL, jid2, "queued")
+    job.transition(SKILL, jid2, "running")
+    job.process_items(SKILL, jid2, ["a", "b"], key=str, process=lambda x: None, stage="s1")
+    job.process_items(SKILL, jid2, ["a", "c"], key=str, process=lambda x: None, stage="s2")
+    d = job.rebuild(SKILL, jid2)
+    cur = _j.loads((job.job_dir(SKILL, jid2) / "cursor.json").read_text(encoding="utf-8"))
+    check("done_by_stage 가 스테이지를 구분한다(가드 `_done_keys` 와 같은 단위)",
+          d.done_by_stage["s1"] == {"a", "b"} and d.done_by_stage["s2"] == {"a", "c"},
+          str({k: sorted(v) for k, v in d.done_by_stage.items()}))
+    check("cursor.json 이 스테이지별로 보인다(디렉토리만 보고 안다)",
+          cur.get("by_stage", {}).get("s2") == ["a", "c"], str(cur.get("by_stage")))
+    check("cursor 가 진실과 일치한다", cur["done"] == len(d.done_keys))
+
+
 if __name__ == "__main__":
     print(f"=== 리뷰 회귀 테스트 (KV_DATA={os.environ['KV_DATA']}) ===\n")
     test_no_send_guard()
@@ -379,6 +433,7 @@ if __name__ == "__main__":
     test_scheduler_double_start()
     print()
     test_d4_stale_lock()
+    test_w12_events_and_cursor()
     print()
     test_validate_boundaries()
     print()
