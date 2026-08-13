@@ -13,16 +13,29 @@ r"""[W12 재빌드] 비플랜 접수 동기화 — 구글폼 시트 → 노션. 
 | 락 | 0개 (`threading.Lock` 은 프로세스 간 무효) | `resources=[sheet-a1, notion-bplan]` |
 | 부작용 멱등 | 가드 한 겹 → 생성 200 직후 크래시 = 중복 | 가드 + **노션 조회 upsert** 두 겹 |
 
-## 커서가 없는 것이 핵심이다
+## 진행 상태는 **바닥선(floor) + 접수키** 두 축이다
 
-접수키를 노션 행에 심어두면 **"이 접수가 이미 있나"를 노션에 직접 물어볼 수 있다.**
-그러면 별도 커서가 필요 없다 — 부작용을 담은 곳(노션)이 곧 진행 상태다.
+🔴 처음엔 "커서를 아예 없앤다 — 노션에 없으면 신규다"로 설계했다. **dry-run 이 그걸
+   즉시 깨뜨렸다**: 신규 36건을 기대했는데 **5,033건**이 나왔다.
 
-옛 방식은 진행도를 세 곳에 두었다(시트 A1 · sync_ledger · 노션 실물). 셋이 어긋나면
-어느 것도 믿을 수 없었고, 실제로 A1 을 되돌리면 그 구간이 영영 유실됐다.
-지금은 **한 곳**이고, 그 한 곳이 부작용 자체다(정본 R1 의 정공법).
+    시트    5,548건 · 2020~2026 (6년치 전체 이력)
+    노션      515건 · **2026-03-17 ~ 2026-08-01 만**
 
-⚠️ 대가: 매 실행마다 노션 전수 조회(519행 ≈ 6요청). judge 도 같은 비용을 낸다.
+   노션 DB 는 최근 4.5개월만 담고 있다(오래된 행은 정리됐거나 DB 신설 전이다).
+   즉 **"노션에 없다" ≠ "아직 안 넣었다"** — 5,033건은 이미 처리됐거나 처리 대상이
+   아니었던 것이다. 그대로 돌렸으면 6년치 접수를 노션에 쏟아부었다.
+
+   → 두 축으로 나눈다:
+       **바닥선(floor)**  "이 시각 이후 접수만 본다" — 되살리기를 막는다
+       **접수키**         "그 창 안에서 이미 넣었나" — 재실행·크래시를 막는다
+
+   키만으로는 "한 번도 안 넣음"과 "넣었다 지움"을 구분할 수 없다. 바닥선이 그 구분이다.
+
+   바닥선 = `max(저장된 바닥선, 노션 접수키의 최대 시각)` — **단조 증가**다.
+   저장 파일이 사라져도 노션 쪽이 받쳐주고(보수적), 사람이 최근 행을 지워도 저장 파일이
+   받쳐준다. 어느 쪽으로도 과거를 되살리지 않는다.
+
+⚠️ 대가: 매 실행마다 노션 전수 조회(≈6요청). judge 도 같은 비용을 낸다.
    행이 수천 단위가 되면 `접수키 is_not_empty` 필터 + 최근 N개만 조회로 좁힌다.
 
 ## 이 잡이 건드리지 않는 것 — 안전 경계
@@ -162,8 +175,10 @@ def s_fetch(skill: str, job_id: str) -> None:
         print(f"⚠️  타임스탬프를 못 읽어 제외한 행 {bad_ts}건 — 시트 확인 요망")
 
     have = _existing_keys(c["token"], c["db"])
-    todo = [s for s in subs if s["key"] not in have]
-    print(f"· 시트 접수 {len(subs)} · 노션 보유 {len(have)} · **신규 {len(todo)}**")
+    floor = _floor(have)
+    # 바닥선 **이후** 접수만 본다(되살리기 금지) + 그 창 안에서 접수키로 중복 제거.
+    todo = [s for s in subs if s["ts"] > floor and s["key"] not in have]
+    print(f"· 시트 접수 {len(subs)} · 노션 보유 {len(have)} · 바닥선 {floor} · **신규 {len(todo)}**")
 
     if not todo:
         # 진공을 성공으로 조용히 넘기지 않는다(R5). 상류가 죽어도 여기선 0 으로 보인다.
@@ -173,6 +188,47 @@ def s_fetch(skill: str, job_id: str) -> None:
                        task="bplan-sync", candidates=0)
     job.atomic_write(_queue_path(job_id),
                      json.dumps({"rows": todo}, ensure_ascii=False, indent=1))
+
+
+def _floor_path() -> Path:
+    return paths.data(SKILL) / "bplan_sync_floor.json"
+
+
+def _floor(have: set[str]) -> str:
+    """이 시각 **이후** 접수만 처리한다. 단조 증가 — 과거를 되살리지 않는다.
+
+    `max(저장값, 노션 접수키의 최대 시각)`:
+      · 저장 파일이 사라져도 노션이 받쳐준다(보수적 — 오래된 것을 안 되살린다)
+      · 사람이 최근 행을 지워도 저장 파일이 받쳐준다(같은 방향)
+    둘 다 실패하면 **오늘 자정**으로 떨어진다 — 그것도 되살리기보다 안전한 쪽이다
+    (놓친 접수는 사람이 `--since` 로 명시해 넣는다. 조용히 6년치를 붓는 것보다 낫다).
+    """
+    stored = ""
+    p = _floor_path()
+    if p.exists():
+        try:
+            stored = json.loads(p.read_text(encoding="utf-8")).get("last_ts", "")
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"⚠️  바닥선 파일 판독 실패({e}) — 노션 쪽 값으로 진행한다")
+    live = max((k.split("|", 1)[1] for k in have if "|" in k), default="")
+    floor = max(stored, live) or date.today().isoformat() + "T00:00:00"
+    if not stored and not live:
+        print(f"🔴 바닥선 근거가 하나도 없다 — 오늘 자정({floor})으로 잡는다. "
+              f"과거 접수를 넣으려면 사람이 명시적으로 처리하라.")
+    return floor
+
+
+def _save_floor(ts: str) -> None:
+    """성공한 것까지만 전진. 실패한 건은 다음 실행에 다시 잡힌다(구멍 방지)."""
+    cur = ""
+    p = _floor_path()
+    if p.exists():
+        try:
+            cur = json.loads(p.read_text(encoding="utf-8")).get("last_ts", "")
+        except (json.JSONDecodeError, OSError):
+            cur = ""
+    if ts > cur:
+        job.atomic_write(p, json.dumps({"last_ts": ts}, ensure_ascii=False, indent=1))
 
 
 def _existing_keys(tok: str, db: str) -> set[str]:
@@ -245,9 +301,21 @@ def s_upsert(skill: str, job_id: str, *, limit: int, dry: bool, assignee: str) -
             raise RuntimeError(f"노션 생성 실패 {cr.status_code}: {cr.text[:300]}")
         print(f"  ✅ {sub['key']}  {sub['props'].get('기업명','')[:24]}")
 
-    d = job.process_items(SKILL, job_id, rows, key=lambda s: s["key"], process=_one,
-                          stage="upsert")
-    print(f"· 생성 {len(d.done_keys)}건 · 건너뜀 {len(d.skipped)}건")
+    # ⚠️ `process_items` 는 `Derived` 가 아니라 **(done, skipped) 튜플**을 돌려준다.
+    #    `d.done_keys` 로 썼다가 첫 실행에서 AttributeError 로 죽었다 — 2건을 실제로
+    #    처리한 **뒤에** 죽어서, 부작용은 났는데 잡은 failed 였다. dry-run 이었기에
+    #    망정이지 --apply 였으면 "노션엔 들어갔는데 실패로 기록"이 됐다.
+    done, skipped = job.process_items(SKILL, job_id, rows, key=lambda s: s["key"],
+                                      process=_one, stage="upsert")
+    print(f"· 생성 {done}건 · 건너뜀 {skipped}건")
+
+    # 바닥선은 **실제로 처리한 것까지만** 전진한다. 실패분은 다음 실행에 다시 잡힌다.
+    if not dry and done:
+        finished = job.rebuild(SKILL, job_id).done_keys
+        ok_ts = [r["ts"] for r in rows if r["key"] in finished]
+        if ok_ts:
+            _save_floor(max(ok_ts))
+            print(f"· 바닥선 전진 → {max(ok_ts)}")
 
 
 def _stages(limit: int, dry: bool, assignee: str) -> list[Stage]:
