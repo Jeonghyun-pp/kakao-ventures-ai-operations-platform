@@ -534,13 +534,25 @@ def main() -> int:
         assert os.environ.get("KV_DATA"), "KV_DATA 스크래치 필수"
         return _synthetic()
 
-    jid = f"bplan-sync-{date.today().isoformat()}"
+    # 🔴 [2026-08-14] dry 와 apply 가 **같은 job_id 를 쓰면 안 된다.** 실제로 이렇게 났다:
+    #      --relabel-only(dry)  → 잡이 completed 로 끝남
+    #      --relabel-only --apply → 같은 id → run_pipeline 이 즉시 반환 → 42건 그대로
+    #    그리고 `→ completed` 를 찍었다. **아무것도 안 한 것이 성공과 구분되지 않았다.**
+    #    모드를 id 에 넣으면 dry 가 apply 의 자리를 차지할 수 없다. 계획을 세는 것과
+    #    실행하는 것은 다른 잡이다 — id 도 달라야 한다.
+    mode = "" if args.apply else "-dry"
+    scope = "-relabel" if args.relabel_only else ""
+    jid = f"bplan-sync-{date.today().isoformat()}{scope}{mode}"
     for n in range(1, 4):
         cand = jid if n == 1 else f"{jid}-r{n}"
-        if job.rebuild(SKILL, cand).state == "failed":
-            continue
+        if job.rebuild(SKILL, cand).state in ("failed", "completed"):
+            continue        # 실패분만이 아니라 **끝난 잡도 비켜간다** — 같은 id 는 1회다
         jid = cand
         break
+    else:
+        # 3회 다 차 있으면 조용히 마지막 것을 재사용하지 않는다 — 그게 위 사고의 형태다.
+        raise SystemExit(f"🔴 오늘자 {jid} 계열이 이미 3개 다 끝났다. 정말 또 돌려야 하면 "
+                         f"job_id 를 사람이 지정해라 — 무의식적 재실행을 막는다.")
     job.create(SKILL, {"kind": "bplan-sync", "period": date.today().isoformat()}, jid)
     # gmail-inbox 자원을 잡는다 — 라벨 단계가 인박스를 바꾼다. 트리아지와 직렬화되지 않으면
     # 같은 메일을 한쪽은 protect 로 읽고 다른 쪽이 INBOX 에서 빼는 순간이 생긴다.

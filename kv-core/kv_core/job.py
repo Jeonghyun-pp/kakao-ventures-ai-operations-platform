@@ -659,7 +659,15 @@ def run_pipeline(
     """
     d = rebuild(skill, job_id)
     if d.state in _TERMINAL:
-        return d                                        # 이미 끝난 잡은 다시 안 돈다
+        # 🔴 [2026-08-14] 여기서 **조용히** 돌려주던 것이 실사고를 만들었다.
+        #    `bplan_sync_job.py --relabel-only`(dry) 가 잡을 completed 로 만들었고, 곧바로
+        #    `--apply` 를 돌리자 같은 job_id 라 여기서 즉시 반환됐다. 호출부는 `→ completed`
+        #    를 찍었다 — **아무것도 안 했는데 성공과 글자 하나 다르지 않았다.** 42건이 그대로
+        #    남았고, 사람이 Gmail 을 다시 세어보고서야 알았다.
+        #    "안 한 것"과 "해서 끝난 것"은 다른 사실이다(불변규칙 05 · 근원 ⑤).
+        print(f"↩️  {skill}/{job_id}: 이미 {d.state} 인 잡 — **아무 스테이지도 실행하지 않았다.**\n"
+              f"    다시 돌리려면 새 job_id 로 만들어라(같은 id 는 설계상 1회다).")
+        return d
     if d.state == "requested":
         transition(skill, job_id, "queued")
 

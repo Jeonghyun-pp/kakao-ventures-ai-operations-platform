@@ -204,6 +204,35 @@ check("L5 동시 기록 5개가 전부 살아남는다(lost update 없음)", len
       f"{len(_final)}/5 — 락이 없으면 1~2개만 남는다")
 
 # ══════════════════════════════════════════════════════════════════════
+print("\n=== L6: '이미 끝난 잡' 재실행이 성공과 구분된다 ===\n")
+# 🔴 [2026-08-14] `run_pipeline` 은 잡이 이미 terminal 이면 **조용히** Derived 를 돌려줬다.
+#    호출부는 그걸 받아 `→ completed` 를 찍는다 — 실제로 일한 것과 **글자 하나 다르지 않다.**
+#
+#    실사고: `bplan_sync_job.py --relabel-only`(dry)가 오늘자 잡을 completed 로 만들었고,
+#    곧바로 `--apply` 를 돌리자 같은 job_id 라 즉시 반환됐다. 42건이 그대로 남았는데
+#    화면엔 `[bplan-sync] … → completed`. 사람이 Gmail 을 다시 세어보고서야 알았다.
+#    "안 한 것"과 "해서 끝난 것"은 다른 사실이다 — 이 파일의 주제 그대로다.
+import contextlib  # noqa: E402
+import io  # noqa: E402
+
+_ran: list[str] = []
+_st6 = [job.Stage("only", lambda sk, ji: _ran.append(ji))]
+job.create("net-sourcing", {"kind": "l6"}, "l6-job")
+job.run_pipeline("net-sourcing", "l6-job", _st6, resources=[])
+check("L6 첫 실행은 스테이지를 돈다", _ran == ["l6-job"], f"{_ran}")
+
+_buf = io.StringIO()
+with contextlib.redirect_stdout(_buf):
+    _d6 = job.run_pipeline("net-sourcing", "l6-job", _st6, resources=[])
+_out = _buf.getvalue()
+check("L6 재실행은 스테이지를 다시 돌지 않는다(멱등은 유지)", _ran == ["l6-job"], f"{_ran}")
+check("L6 재실행이 **소리내어** 말한다(조용히 completed 를 돌려주지 않는다)",
+      _out.strip() != "" and "completed" in _out,
+      f"출력 {_out.strip()[:120]!r} — 비어 있으면 호출부가 '했다'와 구분할 수 없다")
+check("L6 그 문장이 '아무것도 안 했다'를 명시한다",
+      any(w in _out for w in ("실행하지 않", "아무 스테이지도")), _out.strip()[:120])
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 침묵 폴백 계약 실패 {len(FAIL)}건: {', '.join(FAIL)}")
