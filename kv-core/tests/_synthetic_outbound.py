@@ -639,6 +639,64 @@ if _guard is not None:
           "정의만 있고 호출이 없으면 발동하지 않는 가드다(ADR 0002)")
 
 # ══════════════════════════════════════════════════════════════════════
+print("\n=== O11: 위치 커서로 돌아가지 않는다 ===\n")
+# 🔴 [2026-08-14 결정] 비플랜의 멱등 단위는 **위치가 아니라 사람**이다:
+#        sync  `이메일|접수시각`(접수 단위)   ·   drop  `이메일`(사람 단위, 1주)
+#    옛 코드는 시트 행 서수 + `Setting!A1` 커서였고, 그래서 같은 사람이 여러 번 접수하면
+#    거절 메일을 여러 통 받았다(실측 최다 5통). 재빌드가 그 축을 통째로 버렸다.
+#
+#    그 결정의 대가로 `Setting!A1` 은 2026-08-02 값(5512)에 얼어붙었다. 시트는 5556행이고
+#    그 사이 44행은 새 sync 가 이미 노션에 넣었다 — **옛 코드를 되살리면 44건을 또 만든다.**
+#    그래서 "원본 스킬로 복귀"는 비플랜에 한해 롤백이 아니라 사고다(cutover.md §롤백 B).
+#
+#    문서만 고치면 다음 사람이 A1 의존을 다시 만든다. 상태를 코드로 잠근다.
+_a1_users = []
+for p in _py_files():
+    rel = str(p.relative_to(_REPO))
+    try:
+        tree = ast.parse(p.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeDecodeError):
+        continue
+    for n in ast.walk(tree):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.args):
+            continue
+        # ⚠️ `cell` 은 gspread 전용이 아니다 — python-docx 의 **표 셀**도 같은 이름이다
+        #    (`writer_docx.py` 가 5곳에서 쓴다. 첫 판이 그걸 잡아 거짓 양성을 냈다).
+        #    gspread 에만 있는 이름으로 좁힌다.
+        if n.func.attr in ("acell", "update_acell", "update_cell"):
+            _a1_users.append(f"{rel}:{n.lineno} — {n.func.attr}")
+        # `update("A1", …)` — 범위 문자열이 A1 표기인 것만. gspread 의 셀 쓰기 형태다.
+        elif (n.func.attr == "update" and isinstance(n.args[0], ast.Constant)
+              and isinstance(n.args[0].value, str)
+              and re.fullmatch(r"[A-Z]{1,3}\d{1,7}(:[A-Z]{1,3}\d{1,7})?", n.args[0].value)):
+            _a1_users.append(f"{rel}:{n.lineno} — update({n.args[0].value!r})")
+        # 워크시트 이름으로 `Setting` 시트를 여는 것도 잡는다(커서 시트다)
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "worksheet" and n.args
+                and isinstance(n.args[0], ast.Constant) and n.args[0].value == "Setting"):
+            _a1_users.append(f"{rel}:{n.lineno} — worksheet('Setting')")
+check("O11 리포 코드가 시트 커서(A1·Setting)를 읽지도 쓰지도 않는다", not _a1_users,
+      "\n       ".join(_a1_users)
+      or "멱등 단위는 사람이다 — 위치로 돌아가면 1인 다통이 재발한다")
+
+# 두 잡의 멱등 키가 실제로 **이메일에 뿌리**를 두는가 — 위 결정의 본체다.
+from bplan_backfill_key import submission_key as _sk  # noqa: E402
+import datetime as _dtm  # noqa: E402
+
+_k1 = _sk("A@B.com ", _dtm.datetime(2026, 8, 1, 9, 0))
+_k2 = _sk("a@b.com", _dtm.datetime(2026, 8, 1, 9, 0))
+check("O11 sync 키가 이메일+접수시각이고 정규화된다", _k1 == _k2 and _k1.startswith("a@b.com|"),
+      f"{_k1!r} vs {_k2!r}")
+check("O11 sync 키가 행 위치를 안 쓴다", not any(c.isdigit() and "|" not in _k1[:i]
+                                       for i, c in enumerate(_k1[:7])),
+      f"{_k1!r} — 서수가 들어가면 시트가 재정렬될 때 같은 접수가 다른 키가 된다")
+_dj_src = ast.parse(_dj)
+_ne = next((n for n in ast.walk(_dj_src)
+            if isinstance(n, ast.FunctionDef) and n.name == "norm_email"), None)
+check("O11 drop 키가 이메일 단위다(page_id 가 아니다)", _ne is not None,
+      "page_id 로 돌아가면 같은 사람이 접수 횟수만큼 거절 메일을 받는다(실측 최다 5통)")
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 외부 발송 경계 실패 {len(FAIL)}건: {', '.join(FAIL)}")

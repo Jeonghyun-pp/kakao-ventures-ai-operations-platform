@@ -70,23 +70,46 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 _VOLATILE = ("*.log",)
 
 
-def _tree_digest(root: Path) -> str:
-    """디렉토리 내용 지문 — read-only 계약 검증용.
+def _tree_map(root: Path) -> dict[str, str]:
+    """경로 → 내용 해시. 살아 있는 데몬의 로그는 제외한다(위 주석 참조).
 
-    살아 있는 launchd 데몬이 쓰는 로그는 제외한다(위 주석 참조).
+    🔴 [2026-08-14] 예전엔 트리 전체를 **해시 하나**로 접었다. 그래서 실패가
+       `_tree_digest(REAL) == real_before` → `False` 한 줄이었고, **무엇이 바뀌었는지
+       말하지 않았다.** 위 주석이 "나는 처음에 내 변경 탓인 줄 알았다"고 적어둔 그 오해가
+       오늘 그대로 재발했다 — 진단할 근거가 실패 안에 없으면 주석은 안 읽힌다.
+
+       접기 전 단계를 남긴다. 실패가 파일 이름을 말하면 데몬 탓인지 1초에 판별된다.
     """
-    h = hashlib.sha256()
+    out: dict[str, str] = {}
     for p in sorted(root.rglob("*")):
-        if not p.is_file():
+        if not p.is_file() or any(p.match(pat) for pat in _VOLATILE):
             continue
-        if any(p.match(pat) for pat in _VOLATILE):
-            continue
-        h.update(str(p.relative_to(root)).encode())
         try:
-            h.update(p.read_bytes())
+            out[str(p.relative_to(root))] = hashlib.sha256(p.read_bytes()).hexdigest()[:12]
         except OSError:
-            h.update(b"<unreadable>")
-    return h.hexdigest()
+            out[str(p.relative_to(root))] = "<unreadable>"
+    return out
+
+
+# 살아 있는 데몬이 **정당하게** 쓰는 상태 경로. 제외 목록이 아니라 **설명 목록**이다 —
+# 여기 것이 바뀌어도 검사는 그대로 실패한다. 다만 실패 메시지가 원인을 지목한다.
+_DAEMON_OWNED = ("_approvals/", "_scheduler/", "_alerts/", "net-sourcing/", "ai-consumer-pulse/")
+
+
+def _explain(before: dict[str, str], after: dict[str, str]) -> str:
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    changed = sorted(k for k in set(before) & set(after) if before[k] != after[k])
+    lines = []
+    for tag, xs in (("추가", added), ("삭제", removed), ("변경", changed)):
+        for x in xs[:6]:
+            owner = "데몬 소관" if x.startswith(_DAEMON_OWNED) else "🔴 우리 탓일 수 있다"
+            lines.append(f"{tag} {x} ({owner})")
+    if not lines:
+        return "차이 없음(경합 중 읽혔을 수 있다)"
+    n = len(added) + len(removed) + len(changed)
+    tail = f" …외 {n - len(lines)}건" if n > len(lines) else ""
+    return "; ".join(lines) + tail
 
 
 def _reset(root: Path) -> None:
@@ -171,10 +194,11 @@ txt = orrery.render_text(st)
 check("R4 렌더까지 완주", "KV-ORRERY" in txt and len(txt) > 200)
 
 # ── R5. read-only 계약 ──
-before = _tree_digest(_SCRATCH)
+before = _tree_map(_SCRATCH)
 orrery.render_slack(orrery.gather(now=TODAY, with_network=False))
-after = _tree_digest(_SCRATCH)
-check("R5 gather/render 가 데이터를 변경하지 않음", before == after)
+after = _tree_map(_SCRATCH)
+check("R5 gather/render 가 데이터를 변경하지 않음", before == after,
+      _explain(before, after) if before != after else "")
 
 # ══════════════════════════════════════════════════════════════════════
 print("\n=== ② 실 ~/kv-data 스냅샷 리플레이 (읽기 전용 복사본) ===\n")
@@ -182,7 +206,7 @@ REAL = Path.home() / "kv-data"
 if not REAL.exists():
     print("  ⚠️  실 ~/kv-data 없음 — 픽스처 단언만 수행(CI 정상 경로)")
 else:
-    real_before = _tree_digest(REAL)
+    real_before = _tree_map(REAL)
     _reset(_SCRATCH)
     for sub in REAL.iterdir():
         if sub.name in ("_locks",):                  # 락은 복사하지 않는다(유령 락 유발)
@@ -209,7 +233,9 @@ else:
             contradictions.append(f"{name}(관측✅·알림🔴)")
     check("실데이터: 알림🔴 인데 관측✅ 인 task 0건", not contradictions, str(contradictions))
     check("실데이터: 브리핑 렌더 완주", "KV-ORRERY" in orrery.render_text(st))
-    check("실데이터: 원본 ~/kv-data 무변경", _tree_digest(REAL) == real_before)
+    _after = _tree_map(REAL)
+    check("실데이터: 원본 ~/kv-data 무변경", _after == real_before,
+          _explain(real_before, _after) if _after != real_before else "")
 
 # ══════════════════════════════════════════════════════════════════════
 print()
