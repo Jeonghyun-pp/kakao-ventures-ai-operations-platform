@@ -170,7 +170,7 @@
   catch_up: coalesce
   watermark: last_success    # ADR 0004: 실패하면 다시 시도해야 한다. 옛 `last_attempt` 는
                              # 실패해도 워터마크가 전진해 그날 접수분을 영구히 건너뛴다.
-  resources: [sheet-a1, notion-bplan]   # 접수 시트 읽기 + 노션 행 생성. claude 안 쓴다(판단 없음).
+  resources: [sheet-a1, notion-bplan, gmail-inbox]   # 시트 읽기 + 노션 행 생성 + Gmail 라벨/아카이빙
   stages: [sync]
   origin: system
   runner: local

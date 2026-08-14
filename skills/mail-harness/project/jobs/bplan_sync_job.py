@@ -38,25 +38,57 @@ r"""[W12 재빌드] 비플랜 접수 동기화 — 구글폼 시트 → 노션. 
 ⚠️ 대가: 매 실행마다 노션 전수 조회(≈6요청). judge 도 같은 비용을 낸다.
    행이 수천 단위가 되면 `접수키 is_not_empty` 필터 + 최근 N개만 조회로 좁힌다.
 
-## 이 잡이 건드리지 않는 것 — 안전 경계
+## 🔴 [2026-08-14] 라벨 단계를 되살렸다 — 뺀 것이 안전 경계가 아니라 **일의 절반**이었다
 
-    쓰는 것    노션 **행 생성**(신규 접수만)
-    안 쓰는 것 Gmail · 라벨 · 아카이빙 · `To do` 이동 · 드랍 초안 · 시트(A1 포함)
+재빌드 첫 판(08-13)의 이 자리엔 이렇게 적혀 있었다:
 
-옛 sync 는 접수메일에 담당자 라벨을 붙이고 **인박스에서 뺐다**(`removeLabelIds:['INBOX']`).
-그건 되돌리기 번거롭고, 회사명이 공란이면 **남의 메일**을 건드린다(리뷰 C-F-B15).
-이 잡은 메일을 아예 안 본다. 라벨링은 컷오버 이후 별도 결정으로 남긴다.
+    안 쓰는 것 Gmail · 라벨 · 아카이빙 …
+    이 잡은 메일을 아예 안 본다. 라벨링은 컷오버 이후 별도 결정으로 남긴다.
+
+**틀렸다.** 라벨은 sync 의 부수 효과가 아니라 **다음 단계의 입력**이다:
+
+    bplan_drop_job.find_original()  →  q = f`label:"{label}" subject:"…"`
+                                          ↑ 이 라벨이 없으면 원본을 **영영 못 찾는다**
+
+게다가 트리아지는 `BPLAN_INTAKE` 를 `protect` 로 둔다 — **일부러 안 건드리고 sync 에
+양보한다**(`references/routing.md`). 그래서 sync 가 빠지자 42건이 **아무도 담당하지 않는
+상태**로 인박스에 남았다(08-03~08-13, 노션엔 42/42 전부 있음. 08-14 실측).
+
+sync 와 drop 을 따로 재빌드하고 각각 격리 검증한 것이 원인이다. **"앞 단계의 산출물이
+뒷 단계의 입력을 만족하는가"** 를 아무도 안 봤다. 그 계약을 `_synthetic_outbound.py` O9 로 옮겼다.
+
+## 이 잡의 경계
+
+    쓰는 것    노션 **행 생성**(신규 접수만) · Gmail **라벨 부여 + INBOX 제거**(=아카이빙)
+    안 쓰는 것 **발송** · `To do` 이동 · 드랍 초안 · 시트(A1 포함) · 접수메일 **본문**
+
+아카이빙은 **되돌릴 수 있다**(INBOX 라벨 재부여). 삭제가 아니다.
+
+### 라벨 단계는 자기 수리한다 — 옛 코드가 못 하던 것
+
+옛 sync 는 "방금 만든 행"에만 라벨을 붙였고, 실패하면 `⚠️` 한 줄 찍고 **영구 고아**로
+남겼다(장부가 "완료"라 다시 안 잡는다). 여기서는 작업 대상을 다르게 잡는다:
+
+    작업 대상 = "라벨이 없고 아직 인박스에 있는 접수 메일"   ← 노션 상태가 아니라 **Gmail 상태**
+
+그래서 ① 지난 실행의 실패분이 다음 실행에 자동으로 다시 잡히고 ② 재실행이 무해하며
+(질의 자체가 이미 처리된 것을 제외한다) ③ 이번 42건 같은 **소급 복구가 같은 코드**로 된다.
+
+⚠️ 노션에 행이 없는 접수메일은 **건드리지 않는다.** 라벨만 붙여 인박스에서 빼면 아무도
+   추적하지 않는 메일이 조용히 사라진다 — 그건 이 잡이 막아야 할 사고지 처리할 일이 아니다.
 
 실행:
-    python jobs/bplan_sync_job.py --dry            # 계획만(노션 쓰기 0) — 기본값
+    python jobs/bplan_sync_job.py --dry            # 계획만(노션·Gmail 쓰기 0) — 기본값
     python jobs/bplan_sync_job.py --apply --limit 5
-    python jobs/bplan_sync_job.py --synthetic      # 시트·노션 불호출
+    python jobs/bplan_sync_job.py --apply --relabel-only   # 라벨 복구만(행 생성 안 함)
+    python jobs/bplan_sync_job.py --synthetic      # 시트·노션·Gmail 불호출
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -68,6 +100,7 @@ sys.path.insert(0, str(_REPO / "kv-core"))
 
 from kv_core import alerts, job, notion, paths, secrets  # noqa: E402
 from kv_core.job import Stage  # noqa: E402
+from core.labels import bplan_label  # noqa: E402
 
 sys.path.insert(0, str(PROJ / "tools"))
 from bplan_backfill_key import KEY_PROP, parse_ts, submission_key  # noqa: E402
@@ -318,10 +351,125 @@ def s_upsert(skill: str, job_id: str, *, limit: int, dry: bool, assignee: str) -
             print(f"· 바닥선 전진 → {max(ok_ts)}")
 
 
-def _stages(limit: int, dry: bool, assignee: str) -> list[Stage]:
-    return [Stage("fetch", s_fetch),
-            Stage("upsert", lambda sk, ji: s_upsert(sk, ji, limit=limit, dry=dry,
-                                                    assignee=assignee))]
+# ─────────────────────────── Gmail 라벨 ───────────────────────────
+
+_SUBJ_RE = re.compile(r"^\[카카오벤처스\]\s*(.*?)\s*로부터 접수된 사업계획서")
+
+
+def _company_from_subject(subject: str) -> str:
+    """제목에서 기업명. 못 뽑으면 빈 문자열 — 추측하지 않는다."""
+    m = _SUBJ_RE.match(subject or "")
+    return m.group(1).strip() if m else ""
+
+
+def _norm(s: str) -> str:
+    """기업명 대조용 정규화. 노션 제목과 메일 제목은 표기가 흔들린다
+    (`(주)차엔차` vs `차엔차` · 공백·괄호). 대조에만 쓰고 **저장하지 않는다**."""
+    return re.sub(r"[\s()（）,.\-_]|주식회사|\(주\)|㈜", "", s or "").lower()
+
+
+def _gmail():
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    return build("gmail", "v1", cache_discovery=False,
+                 credentials=Credentials.from_authorized_user_file(
+                     str(secrets.credential_path("google/token.json"))))
+
+
+def _notion_titles(tok: str, db: str) -> set[str]:
+    """노션 Bplan DB 의 기업명(정규화) 집합."""
+    out, cur = set(), None
+    while True:
+        body = {"page_size": 100} | ({"start_cursor": cur} if cur else {})
+        r = notion.write("POST", f"{notion.API}/databases/{db}/query", tok, body)
+        if r.status_code != 200:
+            raise RuntimeError(f"노션 조회 실패 {r.status_code}: {r.text[:200]}")
+        j = r.json()
+        for p in j["results"]:
+            for v in p["properties"].values():
+                if v["type"] == "title":
+                    out.add(_norm("".join(x["plain_text"] for x in v["title"])))
+                    break
+        cur = j.get("next_cursor")
+        if not j.get("has_more"):
+            return out
+
+
+def s_label(skill: str, job_id: str, *, dry: bool, label: str) -> None:
+    """접수메일에 담당자 라벨을 붙이고 인박스에서 뺀다. **자기 수리** — 윗 독스트링 참조.
+
+    작업 대상은 Gmail 상태로 정의한다: *라벨 없고 아직 인박스에 있는 접수메일*.
+    그래서 지난 실행의 실패분이 다음 실행에 다시 잡히고, 재실행이 무해하다.
+    """
+    svc = _gmail()
+    ids = {l["name"]: l["id"] for l in
+           svc.users().labels().list(userId="me").execute().get("labels", [])}
+    if label not in ids:
+        # 🔴 조용히 넘어가면 "라벨 0건 처리"가 정상처럼 보인다. 라벨은 사람이 만든다.
+        raise RuntimeError(f"Gmail 라벨 '{label}' 이 없다 — 라벨을 먼저 만들어라. "
+                           f"이 단계를 건너뛰면 drop 이 원본을 영영 못 찾는다.")
+
+    q = f'subject:"로부터 접수된 사업계획서" in:inbox -label:"{label}"'
+    msgs, tokn = [], None
+    while True:
+        r = svc.users().messages().list(userId="me", q=q, pageToken=tokn,
+                                        maxResults=500).execute()
+        msgs += r.get("messages", [])
+        tokn = r.get("nextPageToken")
+        if not tokn:
+            break
+    if not msgs:
+        print("· 라벨 대상 없음 — 접수메일 전부 처리됨")
+        return
+
+    c = _cfg()
+    titles = _notion_titles(c["token"], c["db"])
+    print(f"· 라벨 대상 {len(msgs)}건 (노션 기업명 {len(titles)}종과 대조)")
+
+    orphan: list[str] = []
+
+    def _one(m: dict) -> None:
+        full = svc.users().messages().get(userId="me", id=m["id"], format="metadata",
+                                          metadataHeaders=["Subject"]).execute()
+        subj = {h["name"]: h["value"]
+                for h in full.get("payload", {}).get("headers", [])}.get("Subject", "")
+        comp = _company_from_subject(subj)
+        if len(comp) < 2:
+            orphan.append(f"{m['id']} 기업명 추출 실패: {subj[:50]!r}")
+            return
+        # ⚠️ 노션에 없으면 **안 건드린다.** 라벨만 붙여 인박스에서 빼면 아무도 추적하지
+        #    않는 메일이 조용히 사라진다 — 접수는 됐는데 sync 가 안 된 상태를 감추게 된다.
+        if _norm(comp) not in titles:
+            orphan.append(f"{comp} — 노션에 행이 없다(sync 누락 의심)")
+            return
+        if dry:
+            print(f"  [dry] 라벨+아카이브 → {comp[:30]}")
+            return
+        svc.users().messages().modify(
+            userId="me", id=m["id"],
+            body={"addLabelIds": [ids[label]], "removeLabelIds": ["INBOX"]}).execute()
+        print(f"  ✅ {comp[:30]}")
+
+    done, skipped = job.process_items(SKILL, job_id, msgs, key=lambda m: m["id"],
+                                      process=_one, stage="label")
+    print(f"· 라벨 {done}건 · 건너뜀 {skipped}건")
+    if orphan:
+        # 조용히 세지 않는다 — 이게 "접수는 왔는데 노션에 없다"의 유일한 관측 지점이다.
+        print(f"🔴 라벨 보류 {len(orphan)}건 — 사람이 봐야 한다:")
+        for o in orphan[:20]:
+            print(f"     {o}")
+        alerts.warn(f"[bplan-sync] 라벨 보류 {len(orphan)}건 — 노션에 행이 없는 접수메일. "
+                    f"첫 건: {orphan[0]}")
+
+
+def _stages(limit: int, dry: bool, assignee: str, *, label: str,
+            relabel_only: bool = False) -> list[Stage]:
+    upsert = [Stage("fetch", s_fetch),
+              Stage("upsert", lambda sk, ji: s_upsert(sk, ji, limit=limit, dry=dry,
+                                                      assignee=assignee))]
+    # 라벨은 **행 생성 뒤**다. 순서가 뒤집히면 노션에 없는 메일을 인박스에서 빼게 된다.
+    return ([] if relabel_only else upsert) + [
+        Stage("label", lambda sk, ji: s_label(sk, ji, dry=dry, label=label))]
 
 
 def _synthetic() -> int:
@@ -375,6 +523,10 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true", help="실제로 노션에 생성(기본은 dry)")
     ap.add_argument("--limit", type=int, default=5, help="이번 실행 최대 생성 건수(0=무제한)")
     ap.add_argument("--assignee", default=os.getenv("BPLAN_ASSIGNEE", "에반 Evan"))
+    ap.add_argument("--label", default=bplan_label(),
+                    help="접수메일을 옮길 Gmail 라벨 (drop 이 이 라벨 안에서 원본을 찾는다)")
+    ap.add_argument("--relabel-only", action="store_true",
+                    help="행 생성 없이 라벨 복구만 — 지난 실패분·소급 복구용")
     ap.add_argument("--synthetic", action="store_true")
     args = ap.parse_args()
 
@@ -390,8 +542,12 @@ def main() -> int:
         jid = cand
         break
     job.create(SKILL, {"kind": "bplan-sync", "period": date.today().isoformat()}, jid)
-    d = job.run_pipeline(SKILL, jid, _stages(args.limit, not args.apply, args.assignee),
-                         resources=["sheet-a1", "notion-bplan"])
+    # gmail-inbox 자원을 잡는다 — 라벨 단계가 인박스를 바꾼다. 트리아지와 직렬화되지 않으면
+    # 같은 메일을 한쪽은 protect 로 읽고 다른 쪽이 INBOX 에서 빼는 순간이 생긴다.
+    d = job.run_pipeline(SKILL, jid,
+                         _stages(args.limit, not args.apply, args.assignee,
+                                 label=args.label, relabel_only=args.relabel_only),
+                         resources=["sheet-a1", "notion-bplan", "gmail-inbox"])
     print(f"[bplan-sync] {jid} → {d.state}")
     return 0 if d.state == "completed" else 1
 

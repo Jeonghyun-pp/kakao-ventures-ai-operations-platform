@@ -440,6 +440,100 @@ else:
           "유령 검사는 위에서 이미 돌았다.")
 
 # ══════════════════════════════════════════════════════════════════════
+print("\n=== O9: 앞 단계의 산출물이 뒷 단계의 입력을 만족한다 ===\n")
+# 🔴 [2026-08-14] sync 와 drop 을 따로 재빌드하고 **각각 격리해서** 검증했다. 둘 다 통과했다.
+#    그런데 재빌드가 sync 에서 Gmail 라벨 단계를 통째로 뺐고, drop 은 바로 그 라벨로
+#    원본 메일을 찾는다 — `q = f'label:"{label}" subject:"…"'`.
+#    결과: 42건이 라벨 없이 인박스에 남았고, 그 42건은 드랍 초안이 **영영 안 만들어진다**.
+#
+#    트리아지가 `BPLAN_INTAKE` 를 `protect` 로 두는 것이 이 결합을 더 조인다 — 트리아지는
+#    **일부러 비켜주고** sync 에 넘긴다. sync 가 빠지면 아무도 담당하지 않는다.
+#
+#    검사 하나하나는 옳았는데 **검사들 사이에 아무도 없었다.** 여기서 그 틈을 메운다.
+import importlib  # noqa: E402
+
+sys.path.insert(0, str(_REPO / "skills/mail-harness/project"))
+sys.path.insert(0, str(_REPO / "skills/mail-harness/project/jobs"))
+_SYNC_JOB = _REPO / "skills/mail-harness/project/jobs/bplan_sync_job.py"
+_sj = _SYNC_JOB.read_text(encoding="utf-8")
+
+# ① drop 이 라벨로 원본을 찾는가 — 이 사실이 아래 계약의 전제다. 전제가 사라지면 검사도 무의미.
+_drop_needs_label = 'label:"' in _dj
+check("O9 drop 이 라벨 안에서 원본을 찾는다(계약의 전제)", _drop_needs_label,
+      "이게 거짓이 되면 아래 검사를 지워라 — 근거 없는 검사는 남기지 않는다")
+
+# ② 그렇다면 sync 는 그 라벨을 **반드시 부여해야 한다.** addLabelIds 호출이 있는가(AST).
+_labels_mail = any(
+    isinstance(n, ast.Constant) and n.value == "addLabelIds"
+    for n in ast.walk(ast.parse(_sj)))
+check("O9 sync 가 접수메일에 라벨을 부여한다", not _drop_needs_label or _labels_mail,
+      "drop 의 입력을 만드는 유일한 단계다 — 빠지면 초안이 영영 안 만들어진다")
+
+# ③ 두 잡이 **같은 라벨**을 본다. 기본값이 갈리면 sync 는 A 에 넣고 drop 은 B 에서 찾는다.
+_defaults = {}
+for _tag, _src in (("sync", _sj), ("drop", _dj)):
+    for n in ast.walk(ast.parse(_src)):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "add_argument"
+                and any(isinstance(a, ast.Constant) and a.value == "--label" for a in n.args)):
+            for kw in n.keywords:
+                if kw.arg == "default":
+                    _defaults[_tag] = ast.unparse(kw.value)
+check("O9 sync·drop 둘 다 --label 을 받는다", set(_defaults) == {"sync", "drop"},
+      f"{sorted(_defaults)} — 없는 쪽은 label 의 출처가 아예 없다는 뜻이다")
+# ⚠️ "문자열이 같나"로 묻지 않는다 — 양쪽에 같은 리터럴을 적어두는 것도 통과시키기 때문이다.
+#    그건 진실이 두 곳인 상태(근원 ③)고, 한쪽만 고치는 순간 조용히 갈린다.
+#    묻는 것은 **같은 한 곳을 보는가**다.
+check("O9 두 기본값이 같은 함수 한 곳에서 온다(리터럴 중복이 아니다)",
+      len(set(_defaults.values())) == 1 and _defaults.get("sync", "").endswith("()"),
+      f"{_defaults}")
+# ⚠️ 여기서 `bplan_label() == config 의 값` 을 비교하면 **영원히 참이다** — 둘 다 같은 파일을
+#    읽으니까. 변이 시험에서 실제로 생존했다(config 를 '9. Nobody' 로 바꿔도 통과).
+#    자기참조 검사는 없는 검사보다 나쁘다. 물어야 할 것은 **그 한 곳의 진실원이 config 인가**다.
+_lb_src = (_REPO / "skills/mail-harness/project/core/labels.py").read_text(encoding="utf-8")
+_lb_fn = next(n for n in ast.walk(ast.parse(_lb_src))
+              if isinstance(n, ast.FunctionDef) and n.name == "bplan_label")
+# ⚠️ "`config.yaml` 이라는 상수가 있나"로 물으면 **에러 메시지 f-string 만으로 통과한다**
+#    (변이 시험에서 실제로 생존했다). 물어야 할 것은 **파일을 읽는 호출이 있나**다.
+_reads_cfg = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and n.func.attr in ("read_text", "safe_load", "load")
+                 for n in ast.walk(_lb_fn))
+_reads_key = {"bplan", "gmail_label"} <= {n.value for n in ast.walk(_lb_fn)
+                                          if isinstance(n, ast.Constant)}
+# 리터럴을 그냥 돌려주면 config 는 장식이 된다.
+_returns_literal = [n.lineno for n in ast.walk(_lb_fn)
+                    if isinstance(n, ast.Return) and isinstance(n.value, ast.Constant)
+                    and isinstance(n.value.value, str)]
+check("O9 그 한 곳의 진실원이 config.yaml 의 bplan.gmail_label 이다(리터럴 하드코딩 아님)",
+      _reads_cfg and _reads_key and not _returns_literal,
+      f"파일 읽음={_reads_cfg} · 키 사용={_reads_key} · 리터럴 반환 줄={_returns_literal}")
+_cfg_label = yaml.safe_load(
+    (_REPO / "skills/mail-harness/project/config.yaml").read_text(encoding="utf-8")
+)["bplan"]["gmail_label"]
+check("O9 그 값이 비어 있지 않다(빈 라벨은 drop 질의를 조용히 무력화한다)",
+      isinstance(_cfg_label, str) and len(_cfg_label.strip()) >= 2, repr(_cfg_label))
+
+# ④ 트리아지가 접수메일을 protect 로 비켜준다 — 그래서 sync 가 빠지면 **아무도** 안 한다.
+#    이 사실을 검사로 붙들어야 "트리아지가 하겠지"라는 오해가 다시 안 생긴다.
+_routing = (_REPO / "skills/mail-harness/references/routing.md").read_text(encoding="utf-8")
+_bp_line = next((l for l in _routing.splitlines() if "BPLAN_INTAKE" in l), "")
+check("O9 트리아지는 접수메일을 protect 로 비켜준다(= sync 가 유일한 담당)",
+      "protect" in _bp_line, _bp_line.strip()[:100] or "routing.md 에 BPLAN_INTAKE 행이 없다")
+
+# ⑤ 라벨 단계가 노션 확인 **뒤에** 온다. 순서가 뒤집히면 노션에 없는 메일을 인박스에서 뺀다
+#    — 아무도 추적하지 않는 메일이 조용히 사라진다.
+# ⚠️ AST 로 `Stage(...)` 를 훑어 순서를 재려던 첫 판은 **변이가 생존했다**: `ast.walk` 는 BFS라
+#    소스 순서를 보장하지 않고, 파일 안의 모든 Stage 호출을 세므로 반환 목록에서 빠진 단계도
+#    여전히 세어졌다. 추측 대신 **실제로 호출해서** 반환값을 본다.
+_bsj = importlib.import_module("bplan_sync_job")
+_order = [s.name for s in _bsj._stages(1, True, "x", label="y")]
+check("O9 sync 의 라벨 단계가 upsert 뒤에 온다", _order[-1] == "label" and "upsert" in _order,
+      f"순서 {_order}")
+_order_ro = [s.name for s in _bsj._stages(1, True, "x", label="y", relabel_only=True)]
+check("O9 --relabel-only 는 라벨 단계만 돈다(행 생성 없음)", _order_ro == ["label"],
+      f"순서 {_order_ro}")
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 외부 발송 경계 실패 {len(FAIL)}건: {', '.join(FAIL)}")

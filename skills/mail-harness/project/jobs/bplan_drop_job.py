@@ -66,6 +66,7 @@ sys.path.insert(0, str(_REPO / "kv-core"))
 
 from kv_core import alerts, job, notion, paths, secrets  # noqa: E402
 from kv_core.job import Stage  # noqa: E402
+from core.labels import bplan_label  # noqa: E402
 
 SKILL = "mail-harness"
 
@@ -487,6 +488,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--limit", type=int, default=3)
+    # 🔴 재빌드 첫 판엔 이 인자가 **없었다** — `_stages(limit, dry, label)` 의 label 은
+    #    출처가 아예 없었다. main() 이 컷오버 가드에서 먼저 죽어 아무도 못 봤을 뿐이다.
+    #    sync 가 붙이는 라벨과 **같은 곳**(core/labels.py)에서 온다.
+    ap.add_argument("--label", default=bplan_label(),
+                    help="이 라벨 안에서 접수 원본을 찾는다 (sync 가 붙이는 그 라벨)")
     ap.add_argument("--synthetic", action="store_true")
     args = ap.parse_args()
     if args.synthetic:
