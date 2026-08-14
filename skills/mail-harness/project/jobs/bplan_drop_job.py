@@ -67,6 +67,7 @@ sys.path.insert(0, str(_REPO / "kv-core"))
 from kv_core import alerts, job, notion, paths, secrets  # noqa: E402
 from kv_core.job import Stage  # noqa: E402
 from core.labels import bplan_label  # noqa: E402
+from core.result import emit as emit_result  # noqa: E402
 
 SKILL = "mail-harness"
 
@@ -136,20 +137,45 @@ def _record_sent(email: str, page_id: str, today: date) -> None:
         os.fsync(f.fileno())              # 옛 장부엔 이게 없었다(전원 차단 = 중복 초안)
 
 
-def decide_language(body: str, ceo_name: str, company: str) -> tuple[str, str]:
+# 옛 `KOREAN_EMAIL_DOMAINS` 를 그대로 옮긴다. 사람이 고른 목록이지 코드의 판단이 아니다.
+_KO_DOMAINS = {"naver.com", "hanmail.net", "daum.net", "kakao.com", "nate.com",
+               "korea.com", "empas.com", "paran.com", "dreamwiz.com"}
+
+
+def _korean_email(email: str) -> str:
+    """한국 이메일이면 그 도메인, 아니면 빈 문자열."""
+    if "@" not in (email or ""):
+        return ""
+    dom = email.rsplit("@", 1)[-1].strip(" <>,;").lower()
+    return dom if (dom.endswith(".kr") or dom in _KO_DOMAINS) else ""
+
+
+def decide_language(body: str, ceo_name: str, company: str,
+                    email: str = "") -> tuple[str, str]:
     """본문 한글비율로 정하되 **모순 신호**를 본다.
 
     🔴 [리뷰 C-F-B16] 옛 코드는 본문만 봤다. 딥테크·AI 팀이 영문으로 답하면 `en` 이 되고
        인사말이 `Hello 김민수,` 가 된다(실측: 한글 대표명 + 영문 답변 → 한글비율 0.8% → en).
        한글 이름 + 영문 본문은 **성의 없음의 강한 신호**다.
+
+    🔴 [2026-08-14 전수 대조] 재빌드가 옛 신호 하나를 빠뜨렸다 — **이메일 도메인**이다.
+       옛 판정은 5단 캐스케이드였다(본문비율 → 노션필드 한글 → **이메일 도메인** →
+       한글신호 없음 → 기본 ko). 새 판정엔 도메인 축이 없었다.
+
+       위험군: 본문도 이름도 로마자인데 이메일이 `.kr`·네이버인 경우 — 옛 ko, 새 en.
+       실측 2행 / 561행(0.4%). 작지만 **발송은 비가역**이다. 한국 창업자가 영문 거절
+       메일을 받는 쪽으로만 틀린다. 되살린다.
     """
     ko = len(_HANGUL.findall(body or ""))
     la = len(_LATIN.findall(body or ""))
     total = ko + la
     ratio = (ko / total) if total else 0.0
     lang = "ko" if ratio >= 0.15 or total < 20 else "en"
-    if lang == "en" and (_HANGUL.search(ceo_name or "") or _HANGUL.search(company or "")):
-        return "ko", f"본문 한글 {ratio:.0%} 이나 대표명·기업명이 한글 — 모순 신호로 ko"
+    if lang == "en":
+        if _HANGUL.search(ceo_name or "") or _HANGUL.search(company or ""):
+            return "ko", f"본문 한글 {ratio:.0%} 이나 대표명·기업명이 한글 — 모순 신호로 ko"
+        if dom := _korean_email(email):
+            return "ko", f"본문 한글 {ratio:.0%} 이나 이메일 도메인 {dom} — 한국 팀으로 본다"
     return lang, f"본문 한글 {ratio:.0%}"
 
 
@@ -390,14 +416,15 @@ def s_draft(skill: str, job_id: str, *, limit: int, dry: bool, label: str) -> No
             print(f"  ⏭️  건너뜀 [{r['company'][:20]}] — {why}")
             return
         if dry:
-            lang, w = decide_language("", r["ceo_name"], r["company"])
+            lang, w = decide_language("", r["ceo_name"], r["company"], r.get("email", ""))
             print(f"  [dry] {norm_email(r['email']):32} {r['company'][:20]} · {lang} ({w})")
             return
         orig, why2 = find_original(svc, r["company"], label)
         if not orig:
             print(f"  ⏭️  건너뜀 [{r['company'][:20]}] — {why2}")
             return
-        lang, w = decide_language(orig["body"], r["ceo_name"], r["company"])
+        lang, w = decide_language(orig["body"], r["ceo_name"], r["company"],
+                                  r.get("email", ""))
         mime = build_mime(r["email"], orig["subject"], r["ceo_name"], lang, orig["message_id"])
         raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
         svc.users().drafts().create(
@@ -467,6 +494,15 @@ def _synthetic() -> int:
                         "John Smith", "Acme")[0] == "en")
     chk("⑨ 신호가 부족하면 ko 로 떨어진다(보수적 기본값)",
         decide_language("ok", "John", "Acme")[0] == "ko")
+    chk("⑨-b 영문 본문·영문 이름이어도 한국 이메일이면 ko [08-14 복원]",
+        decide_language("We build AI infrastructure for enterprise customers.",
+                        "Example Person L", "Acme", "person-4d92fb162b30@example.com")[0] == "ko")
+    chk("⑨-c 해외 이메일이면 en 그대로",
+        decide_language("We build AI infrastructure for enterprise customers.",
+                        "Example Person L", "Acme", "person-142d78e466ca@example.com")[0] == "en")
+    chk("⑨-d .kr 도 한국으로 본다",
+        decide_language("We build AI infrastructure for enterprise customers.",
+                        "John", "Acme", "person-0cc414183c5b@example.com")[0] == "ko")
     chk("⑩ 한글 본문은 ko", decide_language("안녕하세요 저희는 커머스입니다.", "김", "가")[0] == "ko")
 
     chk("⑪ 대표명 공란은 초안 거부", bool(check_recipient({"email": "a@b.com", "ceo_name": ""})))
@@ -498,6 +534,9 @@ def main() -> int:
     if args.synthetic:
         assert os.environ.get("KV_DATA"), "KV_DATA 스크래치 필수"
         return _synthetic()
+    # 게이트에 막혔다는 것도 **결과다.** 조용히 죽으면 harness 가 `rc=1` 만 보고 원인을 모른다.
+    emit_result("bplan-drop", ok=False, halted="컷오버 전 HARD-GATE #1 — 실행 거부",
+                gate="hard-gate-1")
     raise SystemExit(
         "🔴 컷오버 전에는 실행하지 않는다 — skills/mail-harness/SKILL.md HARD-GATE #1.\n"
         "   `--synthetic` 만 허용된다. 컷오버 후 이 가드를 사람이 명시적으로 연다.")

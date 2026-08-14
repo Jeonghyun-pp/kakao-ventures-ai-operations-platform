@@ -90,7 +90,7 @@ import json
 import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 PROJ = Path(__file__).resolve().parents[1]
@@ -101,6 +101,7 @@ sys.path.insert(0, str(_REPO / "kv-core"))
 from kv_core import alerts, job, notion, paths, secrets  # noqa: E402
 from kv_core.job import Stage  # noqa: E402
 from core.labels import bplan_label  # noqa: E402
+from core.result import emit as emit_result  # noqa: E402
 
 sys.path.insert(0, str(PROJ / "tools"))
 from bplan_backfill_key import KEY_PROP, parse_ts, submission_key  # noqa: E402
@@ -301,6 +302,30 @@ def _payload(db: str, sub: dict, assignee: str) -> dict:
     return {"parent": {"database_id": db}, "properties": props}
 
 
+def _assert_assignee(tok: str, db: str, assignee: str) -> None:
+    """담당자 태그가 노션 DB 에 **실재하는 옵션인지** 확인한다. 아니면 죽는다.
+
+    🔴 [2026-08-14] 재빌드가 옛 `get_valid_notion_assignees` 를 옮기지 않았다.
+       `담당자` 는 `select` 인데, 노션은 **모르는 이름을 주면 새 옵션을 자동 생성한다** —
+       400 도 안 나고 경고도 없다. 즉 `BPLAN_ASSIGNEE` 오타 하나면 존재하지 않는
+       담당자가 새로 생기고 그날 접수분 전부가 그 사람에게 배정된다. 조용히.
+       (실측 옵션: 소피아 Sofia · 김명준Jayden Kim · 에반 Evan — 셋뿐이다.)
+
+    사람을 새로 추가할 땐 **노션에서 먼저** 옵션을 만든다. 코드가 사람 명부를 만들지 않는다.
+    """
+    # `fetch_schema` 를 쓴다 — 429/타임아웃 재시도 규율을 그대로 탄다(직접 requests 금지).
+    prop = notion.fetch_schema(db, tok).get("담당자", {})
+    if not prop:
+        raise RuntimeError("노션 DB 에 `담당자` 칸이 없다 — 스키마가 바뀌었는지 확인하라. "
+                           "확인 못 한 채로 쓰지 않는다(오타면 없는 사람이 생긴다).")
+    opts = [o["name"] for o in prop.get(prop.get("type", "select"), {}).get("options", [])]
+    if assignee not in opts:
+        raise RuntimeError(
+            f"🔴 담당자 '{assignee}' 는 노션 DB 의 옵션이 아니다. 허용: {opts}\n"
+            f"   그대로 쓰면 노션이 **새 옵션을 자동 생성**한다 — 없는 사람에게 배정된다.\n"
+            f"   사람을 늘리려면 노션에서 먼저 옵션을 만들어라.")
+
+
 def s_upsert(skill: str, job_id: str, *, limit: int, dry: bool, assignee: str) -> None:
     """접수키로 upsert. 부작용(노션 생성) → 그 뒤에 item_done(결정 C 순서)."""
     q = json.loads(_queue_path(job_id).read_text(encoding="utf-8"))
@@ -314,6 +339,8 @@ def s_upsert(skill: str, job_id: str, *, limit: int, dry: bool, assignee: str) -
 
     c = _cfg()
     tok, db = c["token"], c["db"]
+    # dry 에서도 검증한다 — 계획 단계에서 잡아야 apply 전에 사람이 안다.
+    _assert_assignee(tok, db, assignee)
 
     def _one(sub: dict) -> None:
         if dry:
@@ -540,19 +567,28 @@ def main() -> int:
     #    그리고 `→ completed` 를 찍었다. **아무것도 안 한 것이 성공과 구분되지 않았다.**
     #    모드를 id 에 넣으면 dry 가 apply 의 자리를 차지할 수 없다. 계획을 세는 것과
     #    실행하는 것은 다른 잡이다 — id 도 달라야 한다.
-    mode = "" if args.apply else "-dry"
     scope = "-relabel" if args.relabel_only else ""
-    jid = f"bplan-sync-{date.today().isoformat()}{scope}{mode}"
-    for n in range(1, 4):
-        cand = jid if n == 1 else f"{jid}-r{n}"
-        if job.rebuild(SKILL, cand).state in ("failed", "completed"):
-            continue        # 실패분만이 아니라 **끝난 잡도 비켜간다** — 같은 id 는 1회다
-        jid = cand
-        break
+    if not args.apply:
+        # **dry 는 계획이다** — 재개할 부작용도, 지킬 멱등도 없다. 그러니 날짜 단위 id 를
+        # 쓸 이유가 없고, 쓰면 하루에 몇 번 못 돌린다(실제로 harness dry-run 이 여기서
+        # rc=1 로 죽었다). 매 실행 고유 id 로 둔다 — 서로 자리를 뺏지 않는다.
+        jid = f"bplan-sync-{datetime.now().strftime('%Y%m%d-%H%M%S')}{scope}-dry"
     else:
-        # 3회 다 차 있으면 조용히 마지막 것을 재사용하지 않는다 — 그게 위 사고의 형태다.
-        raise SystemExit(f"🔴 오늘자 {jid} 계열이 이미 3개 다 끝났다. 정말 또 돌려야 하면 "
-                         f"job_id 를 사람이 지정해라 — 무의식적 재실행을 막는다.")
+        # apply 는 다르다. 날짜 단위여야 크래시 재개가 되고, 같은 날 두 번 도는 것이 막힌다.
+        jid = f"bplan-sync-{date.today().isoformat()}{scope}"
+        for n in range(1, 4):
+            cand = jid if n == 1 else f"{jid}-r{n}"
+            if job.rebuild(SKILL, cand).state in ("failed", "completed"):
+                continue    # 실패분만이 아니라 **끝난 잡도 비켜간다** — 같은 id 는 1회다
+            jid = cand
+            break
+        else:
+            # 3회 다 차 있으면 조용히 마지막 것을 재사용하지 않는다 — 그게 위 사고의 형태다.
+            # ⚠️ 죽는 경로도 **결과를 찍는다.** 안 찍으면 harness 가 `rc=1` 만 보고 원인을
+            #    모른다 — 방금 고친 그 결함(O10)을 여기서 되풀이하지 않는다.
+            why = (f"오늘자 {jid} 계열이 이미 3개 다 끝났다 — job_id 를 사람이 지정하라")
+            emit_result("bplan-sync", ok=False, halted=why)
+            raise SystemExit(f"🔴 {why}. 무의식적 재실행을 막는다.")
     job.create(SKILL, {"kind": "bplan-sync", "period": date.today().isoformat()}, jid)
     # gmail-inbox 자원을 잡는다 — 라벨 단계가 인박스를 바꾼다. 트리아지와 직렬화되지 않으면
     # 같은 메일을 한쪽은 protect 로 읽고 다른 쪽이 INBOX 에서 빼는 순간이 생긴다.
@@ -561,6 +597,12 @@ def main() -> int:
                                  label=args.label, relabel_only=args.relabel_only),
                          resources=["sheet-a1", "notion-bplan", "gmail-inbox"])
     print(f"[bplan-sync] {jid} → {d.state}")
+    # 🔴 [2026-08-14] 이 한 줄이 없어서 `harness.py` 가 이 단계를 **성공해도 fail 로** 찍었다
+    #    (`result is None and name not in ("triage","apply")` → fail). 재빌드가 옛
+    #    `emit_result` 를 안 옮긴 결과다. 계약은 `core/result.py` 에 있다.
+    emit_result("bplan-sync", ok=(d.state == "completed"), job=jid, state=d.state,
+                mode=("apply" if args.apply else "dry"),
+                scope=("relabel" if args.relabel_only else "full"))
     return 0 if d.state == "completed" else 1
 
 

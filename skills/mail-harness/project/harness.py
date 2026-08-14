@@ -31,7 +31,11 @@ from core import metrics as metrics_mod  # noqa: E402
 PY = paths.repo_root() / ".venv" / "bin" / "python"
 DATA = paths.data("mail-harness", "harness")
 STAGE_TIMEOUT = 300
-RESULT_RE = re.compile(r"@@HARNESS_RESULT@@ (\{.*\})")
+# 🔴 [2026-08-14] 마커를 여기에 따로 적어두면 잡 쪽과 조용히 갈린다 —
+#    실제로 재빌드가 잡 쪽 emit 을 빠뜨렸고 두 단계가 항상 fail 로 찍혔다.
+#    생산자·소비자가 **같은 모듈**을 본다(core/result.py 독스트링).
+from core import result as result_mod  # noqa: E402
+RESULT_RE = result_mod.PATTERN
 
 
 def cfg() -> dict:
@@ -48,10 +52,7 @@ def _run_stage(name: str, cmd: list[str]) -> dict:
         return {"name": name, "status": "fail", "note": f"{STAGE_TIMEOUT}s 타임아웃"}
     out = p.stdout + p.stderr
     print(out.strip()[-2000:])
-    m = None
-    for m in RESULT_RE.finditer(out):
-        pass  # 마지막 결과 라인 사용
-    result = json.loads(m.group(1)) if m else None
+    result = result_mod.parse_last(out)
     if p.returncode != 0 or (result and not result.get("ok", True)) \
             or (result is None and name != "triage" and name != "apply"):
         note = (result or {}).get("halted") or f"rc={p.returncode}"
@@ -134,9 +135,10 @@ def phase1(c: dict, rec: dict, dry_run: bool) -> bool:
     # 🔴 [2026-08-13 W12 재빌드] 구 `bplan/main.py sync` → 새 `jobs/bplan_sync_job.py`.
     #    바뀐 것: 멱등키가 시트 행 서수 → **접수키(이메일|타임스탬프)** · 커서가 시트 A1 →
     #    바닥선 + 노션 upsert · 장부가 500건 절삭 json → events.jsonl · 락 0개 → resources.
-    #    ⚠️ 새 잡은 **메일을 안 본다**(라벨·아카이빙 없음). 회사명이 공란이면 남의 메일을
-    #       건드리던 경로(C-F-B15)를 통째로 뺐다. 라벨링은 컷오버 후 별도 결정이다 —
-    #       그래서 `--label`·`--tag` 인자가 없어졌다.
+    #    ⚠️ [2026-08-14 정정] 위 재빌드는 **라벨 단계를 잘못 뺐다.** drop 이 `label:"…"` 로
+    #       원본을 찾으므로 라벨은 안전 경계가 아니라 **다음 단계의 입력**이었다. 되살렸다 —
+    #       `--label` 은 `core/labels.py` 한 곳에서 온다(drop 과 같은 값). 남의 메일을
+    #       집던 C-F-B15 는 라벨 제거가 아니라 `pick_thread` 가드로 막는다.
     sync_cmd = [PY, PROJ / "jobs" / "bplan_sync_job.py", "--limit", "0"]
     if not dry_run:
         sync_cmd.append("--apply")

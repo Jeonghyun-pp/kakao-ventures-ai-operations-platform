@@ -534,6 +534,111 @@ check("O9 --relabel-only 는 라벨 단계만 돈다(행 생성 없음)", _order
       f"순서 {_order_ro}")
 
 # ══════════════════════════════════════════════════════════════════════
+print("\n=== O10: 하네스가 부르는 모든 단계가 결과를 돌려준다 ===\n")
+# 🔴 [2026-08-14] O9 를 붙인 뒤 **같은 계열을 전수로** 훑다가 나온 두 번째 사고다.
+#    `harness.py` 는 각 단계를 서브프로세스로 돌리고 stdout 의 `@@HARNESS_RESULT@@` 를 읽는다:
+#
+#        result is None and name not in ("triage", "apply")  →  status: "fail"
+#
+#    재빌드가 옛 `bplan/main.py` 의 `emit_result` 를 새 잡으로 옮기지 않았다. 그래서
+#    `bplan_sync`·`bplan_drop` 두 단계가 **성공해도 fail** 로 찍히고(note: `rc=0`),
+#    다이제스트에서 비플랜 숫자가 통째로 빠진다. 잡은 멀쩡히 돌았는데도.
+#
+#    이 검사는 harness 가 부르는 **모든** 단계를 소스에서 뽑아내므로, 단계를 새로 추가하고
+#    emit 을 잊어도 걸린다 — 지금 아는 두 개만 하드코딩하지 않는다.
+_H = _REPO / "skills/mail-harness/project/harness.py"
+_hsrc = _H.read_text(encoding="utf-8")
+_htree = ast.parse(_hsrc)
+
+# `_run_stage("<이름>", [PY, PROJ / "a" / "b.py", ...])` 를 전부 뽑는다.
+_stages_called: list[tuple[str, str]] = []
+for n in ast.walk(_htree):
+    if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id == "_run_stage" and len(n.args) >= 2):
+        continue
+    if not isinstance(n.args[0], ast.Constant):
+        continue
+    name = n.args[0].value
+    # 인자가 리스트 리터럴이면 거기서, 변수면 그 변수의 대입을 찾아서 스크립트 경로를 얻는다.
+    node = n.args[1]
+    if isinstance(node, ast.Name):
+        node = next((a.value for a in ast.walk(_htree)
+                     if isinstance(a, ast.Assign) and len(a.targets) == 1
+                     and isinstance(a.targets[0], ast.Name)
+                     and a.targets[0].id == node.id), node)
+    parts = [x.value for x in ast.walk(node)
+             if isinstance(x, ast.Constant) and isinstance(x.value, str)]
+    script = next((p for p in parts if p.endswith(".py")), "?")
+    _stages_called.append((name, script))
+
+check("O10 harness 의 단계 호출을 실제로 찾았다(0개면 아래가 공허하다)",
+      len(_stages_called) >= 3, str(_stages_called))
+
+# harness 가 result 없이도 봐주는 이름 — 소스에서 읽는다(여기 따로 적으면 또 갈린다).
+_exempt = set()
+for n in ast.walk(_htree):
+    if (isinstance(n, ast.Compare) and isinstance(n.left, ast.Name)
+            and n.left.id == "name" and all(isinstance(o, ast.NotEq) for o in n.ops)):
+        _exempt |= {c.value for c in n.comparators if isinstance(c, ast.Constant)}
+_exempt |= {"triage", "apply"}       # 소스가 바뀌어도 최소 집합은 유지
+
+_no_emit = []
+for name, script in _stages_called:
+    if name in _exempt:
+        continue
+    cand = list(_REPO.glob(f"skills/mail-harness/project/**/{Path(script).name}"))
+    if not cand:
+        _no_emit.append(f"{name} → {script} 파일을 못 찾음")
+        continue
+    src = cand[0].read_text(encoding="utf-8")
+    # emit 은 **호출**이어야 한다 — import 만 해두고 안 부르면 결과가 안 나간다.
+    called = any(isinstance(x, ast.Call) and (
+        (isinstance(x.func, ast.Name) and "emit" in x.func.id)
+        or (isinstance(x.func, ast.Attribute) and "emit" in x.func.attr))
+        for x in ast.walk(ast.parse(src)))
+    if not (called or "@@HARNESS_RESULT@@" in src):
+        _no_emit.append(f"{name} → {cand[0].relative_to(_REPO)}")
+check("O10 면제되지 않은 단계는 전부 결과를 찍는다", not _no_emit,
+      "\n       ".join(_no_emit)
+      or f"{len([s for s in _stages_called if s[0] not in _exempt])}단계 확인 · 면제 {sorted(_exempt)}")
+
+# 마커 문자열이 **한 곳**에서 온다 — 생산자와 소비자가 각자 적어두면 조용히 갈린다.
+_rsrc = (_REPO / "skills/mail-harness/project/core/result.py").read_text(encoding="utf-8")
+check("O10 harness 가 마커를 직접 적지 않고 core/result 에서 가져온다",
+      "result_mod" in _hsrc and 'r"@@HARNESS_RESULT@@ (\\{.*\\})"' not in _hsrc,
+      "양쪽에 따로 적으면 한쪽만 고쳐도 조용히 갈린다(O9 와 같은 계열)")
+check("O10 그 한 곳이 마커와 파서를 함께 내놓는다",
+      "MARKER" in _rsrc and "PATTERN" in _rsrc and "def emit" in _rsrc)
+
+# 🔴 같은 전수 대조에서 나온 셋째 — 옛 `get_valid_notion_assignees` 도 안 옮겨졌다.
+#    `담당자` 는 select 다. 노션은 **모르는 이름을 주면 새 옵션을 자동 생성한다** —
+#    400 도 경고도 없다. `BPLAN_ASSIGNEE` 오타 하나면 존재하지 않는 담당자가 생기고
+#    그날 접수분 전부가 그 사람에게 간다. 조용히. (실옵션 3개: 소피아·Jayden·에반)
+_guard = next((n for n in ast.walk(ast.parse(_sj))
+               if isinstance(n, ast.FunctionDef) and n.name == "_assert_assignee"), None)
+check("O10 sync 가 담당자 태그를 노션 옵션과 대조한다", _guard is not None,
+      "없으면 오타가 없는 사람을 만든다(노션 select 는 자동 생성한다)")
+if _guard is not None:
+    check("O10 그 가드가 라이브 스키마를 읽는다(하드코딩 명부가 아니다)",
+          any(isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute)
+              and x.func.attr == "fetch_schema" for x in ast.walk(_guard)),
+          "명부를 코드에 적으면 사람이 늘 때마다 코드가 진실원이 된다")
+    # ⚠️ "함수 어딘가에 raise 가 있나"로 물으면 **불일치 분기의 raise 를 지워도 통과한다**
+    #    (이 가드엔 raise 가 둘이다 — 변이 시험에서 실제로 생존시켰다).
+    #    막아야 하는 것은 `assignee not in opts` 그 분기다. 거기 안을 본다.
+    _branch = [x for x in ast.walk(_guard)
+               if isinstance(x, ast.If) and "not in opts" in ast.unparse(x.test)]
+    check("O10 그 가드가 **불일치 분기에서** 막는다(경고만 하지 않는다)",
+          bool(_branch) and any(isinstance(y, ast.Raise)
+                                for b in _branch for y in ast.walk(b)),
+          f"분기 {len(_branch)}개 — 경고만 하면 그대로 진행돼 없는 사람이 생긴다")
+    # 실제로 불리는가 — 정의만 하고 안 부르면 없는 것과 같다.
+    check("O10 그 가드가 실제로 호출된다",
+          any(isinstance(x, ast.Call) and isinstance(x.func, ast.Name)
+              and x.func.id == "_assert_assignee" for x in ast.walk(ast.parse(_sj))),
+          "정의만 있고 호출이 없으면 발동하지 않는 가드다(ADR 0002)")
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 외부 발송 경계 실패 {len(FAIL)}건: {', '.join(FAIL)}")
