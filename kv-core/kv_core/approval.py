@@ -150,12 +150,42 @@ def status_of(r: dict) -> str:
 
 
 def _iter_queue() -> list[dict]:
+    """승인 큐 전량. **읽을 수 없는 것과 알아볼 수 없는 것을 둘 다 걸러낸다.**
+
+    🔴 [2026-08-14] 예전엔 JSON 파싱 실패만 걸렀다. 그런데 `{}` 는 **파싱에 성공한다** —
+       그대로 레코드로 흘러가 `r["key"]` 에서 `KeyError('key')` 로 터졌고, 그게
+       `approvals_tick` 의 **announce 단계를 통째로 죽였다**(실제 발생: `announce -1`).
+       파일 하나 때문에 그 틱의 모든 승인 요청이 슬랙에 안 뜬다.
+
+       같은 파일이 슬랙 post 실패에는 head-of-line blocking 을 일부러 없애 뒀는데
+       (A-F8) **레코드 파손엔 그 규율이 없었다.** 한쪽만 견디면 견디는 게 아니다.
+
+    `key` 는 레코드의 **정체**다 — 없으면 갱신도 결정도 못 하니 승인 요청이 아니다.
+    ⚠️ 파일명에서 유추하지 않는다. 그러면 큐 디렉토리에 떨어진 아무 json 이 승인 요청이
+       되어 슬랙으로 나간다 — 조용한 실패보다 나쁜, 조용한 **날조**다.
+    """
     out: list[dict] = []
+    shapeless: list[str] = []
     for p in sorted(_queue_dir().glob("*.json")):
         try:
-            out.append(json.loads(p.read_text(encoding="utf-8")))
+            r = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             print(f"⚠️  approval: 레코드 파손 {p.name} — 건너뜀")
+            continue
+        if not isinstance(r, dict) or not str(r.get("key") or "").strip():
+            shapeless.append(p.name)
+            continue
+        out.append(r)
+    if shapeless:
+        # 조용히 거르면 "승인 요청을 넣었는데 안 뜬다"가 원인 불명이 된다.
+        print(f"🔴 approval: 정체(`key`) 없는 레코드 {len(shapeless)}건 — 큐에서 제외: "
+              f"{shapeless[:5]}\n"
+              f"   승인 요청이 아니다(갱신·결정 불가). 큐에 잘못 떨어진 파일인지 확인하라.")
+        from . import alerts
+        alerts.observe("approval_shapeless", "approval-shapeless",
+                       f"🔴 승인 큐에 정체 없는 레코드 {len(shapeless)}건 — {shapeless[:3]}. "
+                       f"제외하고 계속 돈다(예전엔 announce 단계가 통째로 죽었다).",
+                       count=len(shapeless))
     return out
 
 

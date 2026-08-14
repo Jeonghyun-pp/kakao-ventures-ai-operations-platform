@@ -231,6 +231,57 @@ approvals_tick._announce()
 check("A-F7 isoformat created 도 announce 됨(9999 뭉갬 제거)",
       approval.load("m-iso").get("slack_ts") is not None)
 
+# ══════════════════════════════════════════════════════════════════════
+print("\n[2026-08-14 실사고] 정체 없는 레코드 1건이 announce 단계를 통째로 죽였다\n")
+# 🔴 실제로 났다. 큐 디렉토리에 `{}` 파일 하나가 떨어졌고(내 테스트 잔재였다):
+#
+#      ⚠️  created 파싱 실패('') — 신규로 취급해 announce 한다      ← 이건 견뎠다
+#      🔴 approvals tick [announce] 오류: KeyError('key')          ← 여기서 죽었다
+#      └─ announce **-1** · decide 0 · execute 0
+#
+#    `_iter_queue` 는 JSON **파싱 실패**만 걸렀는데 `{}` 는 파싱에 성공한다. 그대로
+#    레코드로 흘러가 `r["key"]` 에서 터졌고, 그 틱의 **모든 승인 요청이 슬랙에 안 떴다**.
+#    같은 파일이 슬랙 post 실패엔 head-of-line blocking 을 일부러 없앴는데(A-F8)
+#    레코드 파손엔 그 규율이 없었다 — 한쪽만 견디면 견디는 게 아니다.
+import json as _json  # noqa: E402
+
+_q = approval._queue_dir()
+for _f in list(_q.glob("*.json")):
+    _f.unlink()
+for _i in (1, 2):
+    (_q / f"shape-ok-{_i}.json").write_text(_json.dumps({
+        "key": f"shape-ok-{_i}", "task": "meeting-mail", "kind": "judgment",
+        "status": "drafted", "created": "2026-08-14T00:00:00Z",
+        "payload": {"text": "정상"}}), encoding="utf-8")
+(_q / "_stray.json").write_text("{}", encoding="utf-8")                     # 실사고 그 모양
+(_q / "_stray_list.json").write_text("[1, 2]", encoding="utf-8")            # dict 조차 아님
+(_q / "_stray_blank.json").write_text('{"key": "   "}', encoding="utf-8")   # 공백 key
+(_q / "_broken.json").write_text("{ JSON 아님", encoding="utf-8")            # 기존 경로(회귀 방지)
+
+_recs = approval._iter_queue()
+# ⚠️ 검사 자신이 파손 데이터에 죽으면 안 된다. `r["key"]` 는 KeyError 로, `.get` 은
+#    (`_stray_list.json` 이 리스트라) AttributeError 로 죽었다 — 둘 다 변이 시험에서
+#    실제로 났다. 회귀는 잡히지만 트레이스백만 남고 **어떤 단언이 깨졌는지 안 보인다.**
+#    파손을 관찰하는 검사는 파손을 견뎌야 한다.
+def _kid(r) -> str:
+    return str(r.get("key")) if isinstance(r, dict) else f"<{type(r).__name__}>"
+
+
+check("정체 없는 레코드가 큐에서 제외된다",
+      sorted(_kid(r) for r in _recs) == ["shape-ok-1", "shape-ok-2"],
+      f"반환 {[_kid(r) for r in _recs]}")
+
+_posted: list = []
+_ORIG_POST2 = slackbot.post
+slackbot.post = lambda card, **k: (_posted.append(card) or (f"ts{len(_posted)}", "C1"))
+_n_ann = approvals_tick._announce()
+slackbot.post = _ORIG_POST2
+check("파손 1건이 있어도 announce 가 완주한다(예전엔 예외로 -1)", _n_ann == 2, f"반환 {_n_ann}")
+check("정상 2건이 실제로 발송됐다", len(_posted) == 2, f"{len(_posted)}건")
+check("제외된 것이 슬랙으로 나가지 않았다(파일명으로 key 를 유추하지 않는다)",
+      not any("_stray" in c for c in _posted),
+      "유추하면 큐에 떨어진 아무 json 이 승인 요청으로 날조된다")
+
 _alm.push = _ORIG_PUSH                       # [Batch A] 스텁 원복 — 다음 시나리오를 가리지 않는다
 _alm.observe = _ORIG_OBSERVE
 
