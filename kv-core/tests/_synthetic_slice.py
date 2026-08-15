@@ -21,8 +21,27 @@ import os
 import sys
 from pathlib import Path
 
-# scratch KV_DATA (실 데이터 안 건드림)
-os.environ.setdefault("KV_DATA", str(Path(__file__).resolve().parent / "_scratch_slice_data"))
+# 🔴 [2026-08-16] 스크래치 KV_DATA 를 **요구한다.** 기본값을 두지 않는다.
+#
+#    예전엔 `setdefault` 로 리포 안 경로를 기본값으로 뒀는데, 아래 `main()` 이 그 경로를
+#    `shutil.rmtree` 한다(:145). 즉 `KV_DATA=~/kv-data` 가 export 된 셸에서 이 파일을
+#    돌리면 **운영 데이터 트리(949MB)가 통째로 삭제**된다 — 워터마크·events·승인 큐·
+#    linkedin_seen·앱스토어 스냅샷 3,617본까지. 그중 다수는 재수집이 불가능하다.
+#    26본 중 가드가 없는 것은 이 파일 하나였다(`_chaos_lab.py:25-27` 이 같은 가드를 갖는다).
+#
+#    `assert` 가 아니라 `raise SystemExit` 인 이유: `python -O` 에서 assert 는 사라진다.
+#    데이터 파괴를 막는 가드가 최적화 플래그 하나로 없어지면 안 된다.
+#    (기본값이 리포 안이었던 것도 원칙 위반이다 — `git clean -xdf` 사정권이라
+#     `paths.py` 가 "데이터는 리포 밖"이라고 못박은 바로 그 자리다.)
+_KV = os.environ.get("KV_DATA")
+if not _KV:
+    raise SystemExit(
+        "🔴 KV_DATA 스크래치 필수 — 이 테스트는 KV_DATA 디렉토리를 rmtree 한다.\n"
+        "   예: KV_DATA=/tmp/kvslice .venv/bin/python kv-core/tests/_synthetic_slice.py")
+if Path(_KV).resolve() == (Path.home() / "kv-data").resolve():
+    raise SystemExit(
+        "🔴 운영 KV_DATA(~/kv-data)로 실행 금지 — 이 테스트는 그 디렉토리를 rmtree 한다.\n"
+        "   스크래치 경로를 지정하라.")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kv_core import job, paths, session, validate as V  # noqa: E402

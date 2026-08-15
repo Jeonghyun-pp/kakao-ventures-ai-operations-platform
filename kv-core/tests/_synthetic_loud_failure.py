@@ -195,7 +195,12 @@ _code = ('import sys;sys.path.insert(0,"kv-core");'
 _f = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False)
 _f.write(_code)
 _f.close()
-_ps = [subprocess.Popen([".venv/bin/python", _f.name, f"msg{i}"],
+# 🔴 [2026-08-16] `.venv/bin/python` 하드코딩 → `sys.executable`.
+#    CI 는 `setup-python` + `pip install -e ./kv-core` 라 러너에 `.venv` 가 **없다**.
+#    `Popen` 이 `FileNotFoundError` 를 내는데 잡는 곳이 없어 이 테스트가 통째로 죽는다
+#    = 푸시하는 순간 CI 빨강. 이 파일은 미푸시 커밋 안에 있어 CI 가 본 적이 없었다.
+#    자식은 **부모와 같은 인터프리터**로 띄우는 것이 옳다 — 부모가 이미 그 venv 다.
+_ps = [subprocess.Popen([sys.executable, _f.name, f"msg{i}"],
                         cwd=str(_REPO), env={**os.environ}) for i in range(5)]
 for _p in _ps:
     _p.wait()
