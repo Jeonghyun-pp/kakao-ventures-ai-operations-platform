@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 from . import apify
@@ -340,11 +341,20 @@ class LinkedInAdapter(Adapter):
         #   하드컷은 하지 않는다(수집에서 자르지 않는 게 이 스킬의 원칙이고, 위치가 빈 프로필도 있다).
         #   대신 **정렬**한다: 착지 순서가 곧 사람이 노션에서 위에서부터 읽는 순서다.
         #   kr_location/kr_school/stealth/fresh_tenure가 높은 사람이 위로 온다.
-        out.sort(key=lambda c: c.signals.get("score", 0), reverse=True)
+        # 🔴 [2026-08-15] 정렬 키를 `score`(구 소프트 스코어)에서 `profile_score`로 바꿨다.
+        #   구 score는 이 파일 상단 주석이 스스로 밝혔듯 **랭킹 정보량이 거의 0**이다
+        #   (최상위 밴드 정밀도 21.7% ≈ base rate 20.6%). 계산은 남기되 순서는 맡기지 않는다.
+        #   동점은 tiebreak(창업기간·KR신호·재직)이 가른다.
+        from core import profile_score as _ps
+        out.sort(key=lambda c: (c.signals.get("profile_score", 0), _ps.tiebreak(c.signals)),
+                 reverse=True)
         kr = sum(1 for c in out if c.signals.get("korea_signal"))
         st = sum(1 for c in out if c.signals.get("stealth"))
+        dist = Counter(c.signals.get("profile_score", 0) for c in out)
+        band = " · ".join(f"{s}점 {dist[s]}명" for s in range(_ps.MAX_SCORE, -1, -1) if dist[s])
         print(f"✅ linkedin profile_search: {len(out)}건(신규 URN) · 쿼리 {len(specs)}개 "
-              f"· 한국 신호 {kr}명 · Stealth {st}명 (score 내림차순 정렬 — 위에서부터 보면 된다)")
+              f"· 한국 신호 {kr}명 · Stealth {st}명\n"
+              f"   프로필 점수 분포: {band or '(0건)'} — 위에서부터 보면 된다")
         return out
 
     # ---------------- 축별 실행 주기 (스톡/플로우 분리) ----------------
@@ -516,6 +526,12 @@ class LinkedInAdapter(Adapter):
         also_posted = bool(post_authors) and _normalize(name) in post_authors
 
         prof_url = _profile_url(p, urn)
+
+        # ★ [2026-08-15] 프로필 점수 — 심사역이 읽을 순서를 만드는 0~4점 정렬 키.
+        #   컷이 아니다(점수 0도 그대로 착지한다). 규칙·가중치 근거는 core/profile_score.py.
+        from core import profile_score as _ps
+        _score, _score_why = _ps.score(p)
+
         return Candidate(
             source=self.source,
             name=name,
@@ -567,6 +583,10 @@ class LinkedInAdapter(Adapter):
                 #   정작 노션에서 한국인으로 필터하거나 Stealth만 뽑을 방법이 없었다.
                 "korea_signal": [t for t, on in (("KR-거주", is_kr), ("KR-학교", has_kr_school)) if on],
                 "stealth": is_stealth,
+                # ★ 프로필 점수(0~4) + 근거. 근거를 같이 싣는 이유: 점수만 있으면
+                #   "이 사람이 왜 위에 있지"를 재현할 수 없고, 가중치를 고칠 근거도 안 쌓인다.
+                "profile_score": _score,
+                "profile_score_why": " · ".join(_score_why),
             },
         )
 

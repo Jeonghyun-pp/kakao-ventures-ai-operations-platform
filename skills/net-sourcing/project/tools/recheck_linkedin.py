@@ -65,6 +65,12 @@ EXIT_RISK_MAX_MONTHS = 12
 #   근거: 프로브 실측 공백 분포 중앙 8개월, 3~9개월이 창업 준비 신호로 가장 그럴듯했다.
 GAP_MIN_MONTHS = 3
 GAP_MAX_MONTHS = 18
+# ★ [2026-08-15] 우선군 = `판단 점수` 이 값 이상. 예전 `Tier == "Catch"` 자리다.
+#   7로 두는 근거: Catch 는 판정 1,149건 중 202건(17.6%)이었다. 0~10 척도에서 상위 ~18%를
+#   잡으려면 7 근처다. **실측이 아니라 자리맞춤이다** — 점수가 몇 주 쌓이면 분포를 보고
+#   다시 잡아라. 너무 낮으면 리텐션이 전원을 재확인해 돈이 새고($0.004/인), 너무 높으면
+#   이 레인이 존재 이유(아는 사람의 변화 포착)를 잃는다.
+PRIO_SCORE_MIN = 7
 
 _IN = re.compile(r"linkedin\.com/in/([^/?#]+)", re.I)
 
@@ -110,8 +116,17 @@ def _targets(cfg: dict, token: str, limit: int = 0) -> list[dict]:
                 tenure = (props.get("Tenure Months") or {}).get("number")
                 target = bool((props.get("타깃") or {}).get("checkbox"))
                 builder = bool((props.get("빌더") or {}).get("checkbox"))
+                # 🔴 [2026-08-15] 우선군 판정을 `Tier`에서 `판단 점수`로 옮긴다.
+                #   judge 가 더는 Tier 를 쓰지 않으므로(점수 모드 전환), 그대로 두면 이 조건이
+                #   **신규 유입에 대해 영원히 거짓**이 된다 — 우선군이 조용히 말라죽는다.
+                #   ⚠️ 기존 Catch 202건은 **살려둔다.** 그때의 사람 판단이 사라질 이유가 없고,
+                #      점수가 아직 안 붙은 과거 행이 우선군에서 통째로 빠지는 것도 막는다.
+                #      (점수 백필이 끝나면 이 폴백은 자연히 무의미해진다 — 지워도 안 지워도 같다)
+                score = (props.get("판단 점수") or {}).get("number")
                 tier = ((props.get("Tier") or {}).get("select") or {}).get("name")
-                prio = target or builder or tier == "Catch"
+                prio = (target or builder
+                        or (isinstance(score, (int, float)) and score >= PRIO_SCORE_MIN)
+                        or tier == "Catch")
                 exiting = (isinstance(tenure, (int, float))
                             and EXIT_RISK_MIN_MONTHS <= tenure < EXIT_RISK_MAX_MONTHS)
                 # ★ 공백형 — `공백 개월`(현직 전무) 또는 `본업 공백`(부업만 걸어둠) 둘 중 하나가

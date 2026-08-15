@@ -51,17 +51,37 @@ def _schema_of(token: str, db: str) -> dict:
     return _SCHEMA_CACHE[db]
 
 
-def _verdict_field(schema: dict) -> tuple[str, list[str]]:
-    """이 DB에서 판정을 적는 select 칸과 허용 옵션. (이름, 옵션들) 또는 ("", []).
+SCORE_FIELD = "판단 점수"
+SCORE_REASON_FIELD = "판단 이유"
+SCORE_MAX = 10
+# 규칙 점수(core/profile_score) — 판정 **투입 순서**를 정한다. 판정 결과가 아니다.
+RULE_SCORE_FIELD = "프로필 점수"
 
-    사람 채널 = `Tier`(Catch/Trend/Wait) · 앱스토어 = `판정`(Pass/Drop) — 결정 #5 유지.
+
+def _verdict_field(schema: dict) -> tuple[str, list[str], str]:
+    """이 DB에서 판정을 적는 칸. (이름, 허용값, 종류) 또는 ("", [], "").
+
+    🔴 [2026-08-15] **점수 모드 추가.** 판단 단계에서 `Tier`(Catch/Trend/Wait)를 쓰지
+       않기로 했다(사용자 결정 — 관리되지 않은 칼럼이고, 슬랙 큐는 전역 순위가 필요하다).
+
+       ⚠️ **"순위"가 아니라 "점수"인 이유**: 판정은 배치(1콜 ≈ 13행)로 쪼개져 돈다.
+          한 배치는 자기 안의 13명밖에 못 본다 — 거기서 매긴 순위는 **전역에서 의미가 없다.**
+          공통 척도의 점수여야 배치를 가로질러 한 줄로 정렬된다.
+
+       전환 스위치는 **라이브 스키마**다. `판단 점수`(number) 칸이 있으면 점수 모드, 없으면
+       기존 select 모드 → 링크드인 DB만 바뀌고 스레드는 그대로 돈다. 채널 이름을 코드에
+       박지 않는다(이 파일의 기존 원칙과 같다).
+
     🔴 **옵션을 코드에 박지 않는다.** 노션은 모르는 select 값을 조용히 버리고 PATCH는 200을 준다.
     """
+    m = schema.get(SCORE_FIELD) or {}
+    if m.get("type") == "number":
+        return SCORE_FIELD, [str(i) for i in range(SCORE_MAX + 1)], "number"
     for name in ("Tier", "판정"):
         m = schema.get(name) or {}
         if m.get("type") == "select":
-            return name, [o["name"] for o in m["select"]["options"]]
-    return "", []
+            return name, [o["name"] for o in m["select"]["options"]], "select"
+    return "", [], ""
 
 
 def _targets(cfg: dict, channel: str, include_base: bool) -> list[tuple[str, str]]:
@@ -181,16 +201,26 @@ def export(cfg: dict, limit: int = 0, channel: str = "", include_base: bool = Fa
         except RuntimeError as e:
             print(f"🔴 {e}")
             return 1
-        field, allowed = _verdict_field(schema)
+        field, allowed, kind = _verdict_field(schema)
         if not field:
-            print(f"⚠️  {ch}({db[:8]}): 판정 select 칸이 없다 — 건너뜀")
+            print(f"⚠️  {ch}({db[:8]}): 판정 칸이 없다 — 건너뜀")
             continue
-        fields_by_ch[ch] = f"{field}{allowed}"
+        fields_by_ch[ch] = f"{field}({kind}){allowed if kind == 'select' else f'0~{SCORE_MAX}'}"
         has = schema.__contains__
 
         url = f"{notion.API}/databases/{db}/query"
-        payload: dict = {"filter": {"property": field, "select": {"is_empty": True}},
+        # 🔴 미판정 필터의 **키가 칸 종류마다 다르다.** number 칸에 {"select": ...} 를 보내면
+        #    노션이 400을 준다 — 여기서 틀리면 큐가 통째로 0건이고, 그건 "판정할 게 없다"와
+        #    구분이 안 된다(이 프로젝트의 단골 실패: 조용한 0건).
+        payload: dict = {"filter": {"property": field, kind: {"is_empty": True}},
                          "page_size": 100}
+        # ★ [2026-08-15] **정렬 없이 자르면 `--limit`은 "상위 N"이 아니라 "아무 N"이다.**
+        #   노션은 정렬을 안 주면 임의 순서를 준다 — 밀린 1,151행을 200으로 자르는 순간
+        #   그 200이 누구인지 아무도 모르고, 재실행하면 또 달라진다.
+        #   규칙 점수(무과금·전량 소급 가능) 내림차순으로 세워야 `--limit`이 뜻을 갖는다.
+        #   ⚠️ 점수가 안 채워진 행은 노션이 뒤로 보낸다 → 백필을 먼저 돌려야 이게 작동한다.
+        if has(RULE_SCORE_FIELD):
+            payload["sorts"] = [{"property": RULE_SCORE_FIELD, "direction": "descending"}]
         got = 0
         while True:
             r = notion._write("POST", url, token, payload)
@@ -208,8 +238,10 @@ def export(cfg: dict, limit: int = 0, channel: str = "", include_base: bool = Fa
                     # ★ 판정 계약을 **행마다 박아둔다.** apply가 이걸 보고 어느 칸에 무슨 값을
                     #   쓸지 정한다. 문서가 아니라 이 파일이 정본이다.
                     "verdict_field": field,
+                    "verdict_kind": kind,          # select | number — apply 가 이걸 보고 쓴다
                     "allowed": allowed,
                     "has_ai_reason": has("AI Reason"),
+                    "has_score_reason": has(SCORE_REASON_FIELD),
                     "has_one_liner": has("One Liner"),
                     "name": notion._plain(p.get("서비스명")),
                     "url": (p.get("Post URL") or {}).get("url") or "",
@@ -270,7 +302,15 @@ def export(cfg: dict, limit: int = 0, channel: str = "", include_base: bool = Fa
             payload["start_cursor"] = d["next_cursor"]
         print(f"   · {ch}({db[:8]}) {field} 빈칸 {got}건")
         if limit and len(rows) >= limit:
-            print(f"   ⚠️  --limit {limit} 도달 — 나머지 채널은 뽑지 않았다")
+            # 🔴 `--limit`은 **채널 합계**다. 2026-07-16에 limit 400이 앞 채널에서 다 소진돼
+            #    링크드인이 0건으로 끝났고, 로그가 "나머지 채널"이라고만 해서 **어느 채널이
+            #    빠졌는지 몰랐다.** 이름을 찍는다 — 이 한 줄이 그때 하루를 아꼈다.
+            rest = [c for c, _ in targets[targets.index((ch, db)) + 1:]]
+            print(f"   ⚠️  --limit {limit} 도달 — 여기서 끊는다. "
+                  f"**뽑지 못한 채널: {', '.join(rest) or '(없음)'}**")
+            if rest:
+                print(f"      한 채널만 원하면 `--channel <이름>` 을 같이 줘라 "
+                      f"(limit 은 채널 합계라 앞 채널이 다 먹는다)")
             break
 
     out = {
@@ -328,8 +368,10 @@ def apply(cfg: dict, file: str) -> int:
         return 1
 
     def _verdict_of(v: dict) -> str:
-        for k in ("verdict", "tier", "판정"):
-            if v.get(k):
+        # 점수 모드는 **0이 유효값**이다. `if v.get(k)` 로 뽑으면 0이 falsy 라 통째로 사라져
+        # "점수 없음"이 되고, 검증이 그걸 형식 오류로 잡아 배치 전체가 기입 0이 된다.
+        for k in ("score", "점수", "verdict", "tier", "판정"):
+            if v.get(k) is not None and v.get(k) != "":
                 return str(v[k]).strip()
         return ""
 
@@ -346,9 +388,14 @@ def apply(cfg: dict, file: str) -> int:
             errs.append(f"[{i}] page_id가 export 큐에 없다: {pid}")
             continue
         allowed = row.get("allowed") or []
+        # 점수 모드도 **화이트리스트로 검증한다** — allowed 가 "0".."10" 문자열이라
+        # select 와 같은 코드가 그대로 성립한다. 범위를 코드에 따로 박지 않는 이유:
+        # 계약은 export 가 행마다 박아둔 것 하나여야 한다(문서가 아니라 큐가 정본).
         if val not in allowed:
+            kind = row.get("verdict_kind", "select")
             errs.append(f"[{i}] {row.get('channel','?')} 판정 '{val}' 는 "
-                        f"{row.get('verdict_field','?')} 옵션이 아니다 (허용: {allowed})")
+                        f"{row.get('verdict_field','?')} 의 허용값이 아니다 "
+                        + (f"(0~{allowed[-1]} 정수)" if kind == "number" else f"(허용: {allowed})"))
     if errs:
         print(f"🔴 검증 실패 {len(errs)}건 — **아무것도 쓰지 않았다.**")
         for e in errs[:12]:
@@ -368,9 +415,17 @@ def apply(cfg: dict, file: str) -> int:
         pid = v["page_id"].strip()
         row = contract[pid]
         val = _verdict_of(v)
-        props: dict = {row["verdict_field"]: {"select": {"name": val}}}
+        if row.get("verdict_kind") == "number":
+            props: dict = {row["verdict_field"]: {"number": int(val)}}
+        else:
+            props = {row["verdict_field"]: {"select": {"name": val}}}
         if v.get("reason"):
-            if row.get("has_ai_reason"):
+            # 점수 모드 DB엔 전용 칸(`판단 이유`)이 있다. 없으면 기존 AI Reason 으로 간다 —
+            # 사유는 어디로도 사라지면 안 된다(조용한 삭제 없음).
+            if row.get("has_score_reason") and row.get("verdict_kind") == "number":
+                props[SCORE_REASON_FIELD] = {"rich_text": [
+                        {"text": {"content": notion._clip16(str(v["reason"]))}}]}
+            elif row.get("has_ai_reason"):
                 props["AI Reason"] = {"rich_text": [
                         {"text": {"content": notion._clip16(str(v["reason"]))}}]}
             else:

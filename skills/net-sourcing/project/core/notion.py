@@ -1409,6 +1409,12 @@ def _build_landing_properties(cfg: dict, cand: dict, schema: dict, run_id: str) 
         # ★ 링크드인 검색축. `Seed`와 같은 이유로 구조화한다 — 예전엔 Match Reason 문장 안에만
         #   있어서 "새 기준(극초기 필터)으로 발굴된 사람만 보기"가 노션에서 불가능했다.
         ("Axis", _as_list(s.get("label")) if s.get("engine") == "profile_search" else []),
+        # ★ [2026-08-15] 프로필 점수(0~4) — 심사역이 읽을 순서. **컷이 아니라 정렬 키**다.
+        #   🔴 `Tier`(Catch/Trend/Wait)와 **축이 다르니 같은 칸에 넣지 마라.** 저건 투자 관점
+        #      판정이고 `recheck_linkedin`이 `Tier == "Catch"`를 우선군 조건으로 읽는다.
+        ("프로필 점수", s.get("profile_score")),
+        # 점수만 있고 근거가 없으면 "왜 위에 있지"를 재현 못 하고 가중치를 고칠 근거도 안 쌓인다.
+        ("점수 근거", s.get("profile_score_why")),
     ]
 
     props: dict = {}
