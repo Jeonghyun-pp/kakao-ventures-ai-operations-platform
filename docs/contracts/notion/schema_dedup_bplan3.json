@@ -1,0 +1,377 @@
+{
+  "object": "database",
+  "id": "00000000-0000-0000-0000-36ea38d63b9f",
+  "cover": null,
+  "icon": {
+    "type": "emoji",
+    "emoji": "📕"
+  },
+  "created_time": "2026-03-23T01:05:00.000Z",
+  "created_by": {
+    "object": "user",
+    "id": "00000000-0000-0000-0000-268641a6e153"
+  },
+  "last_edited_by": {
+    "object": "user",
+    "id": "00000000-0000-0000-0000-576644aee277"
+  },
+  "last_edited_time": "2026-08-14T07:58:00.000Z",
+  "title": [
+    {
+      "type": "text",
+      "text": {
+        "content": "Bplan 3.0 DB(3.23 ~ing)",
+        "link": null
+      },
+      "annotations": {
+        "bold": false,
+        "italic": false,
+        "strikethrough": false,
+        "underline": false,
+        "code": false,
+        "color": "default"
+      },
+      "plain_text": "Bplan 3.0 DB(3.23 ~ing)",
+      "href": null
+    }
+  ],
+  "description": [],
+  "is_inline": false,
+  "properties": {
+    "대표명": {
+      "id": "9A0f",
+      "name": "대표명",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "Status": {
+      "id": "Dw'I",
+      "name": "Status",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-d4fee742e97e",
+            "name": "Fwd 후 미결정",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "!I$?",
+            "name": "미팅 예정",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a0b601f47d9b",
+            "name": "미팅 후 미결정",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-02e146f5eb95",
+            "name": "Drop 완료",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-19d40a8e14b6",
+            "name": "투자 완료",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8f1a54b69095",
+            "name": "리서치 후 논의",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-475fb42b941b",
+            "name": "Fwd to Slack",
+            "color": "blue",
+            "description": null
+          }
+        ]
+      }
+    },
+    "팀이력": {
+      "id": "GfEX",
+      "name": "팀이력",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "이메일": {
+      "id": "HKR%5E",
+      "name": "이메일",
+      "description": "",
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "접수키": {
+      "id": "KW~%7B",
+      "name": "접수키",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "드랍메일": {
+      "id": "LicT",
+      "name": "드랍메일",
+      "description": null,
+      "type": "checkbox",
+      "checkbox": {}
+    },
+    "담당자": {
+      "id": "NZ%5Dn",
+      "name": "담당자",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-859fb6cc7916",
+            "name": "소피아 Sofia",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7093859628be",
+            "name": "김명준Jayden Kim",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-73d594a17265",
+            "name": "에반 Evan",
+            "color": "blue",
+            "description": null
+          }
+        ]
+      }
+    },
+    "비즈니스모델": {
+      "id": "OrAg",
+      "name": "비즈니스모델",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "DB 업데이트 시간": {
+      "id": "QWRK",
+      "name": "DB 업데이트 시간",
+      "description": null,
+      "type": "created_time",
+      "created_time": {}
+    },
+    "솔루션": {
+      "id": "T6T(",
+      "name": "솔루션",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "fwd to whom?": {
+      "id": "UPD%5C",
+      "name": "fwd to whom?",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "Se:d",
+            "name": "ReviewerTwo",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-38d85fe55148",
+            "name": "ReviewerOne",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-fa83e76e3c34",
+            "name": "zero",
+            "color": "default",
+            "description": null
+          }
+        ]
+      }
+    },
+    "점수": {
+      "id": "Wapd",
+      "name": "점수",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-8e0312185a8b",
+            "name": "칼드랍",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6e05b9ba4c80",
+            "name": "Red",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1c1fc61b40af",
+            "name": "Orange",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7a3b4887af99",
+            "name": "Green",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d30e583d96b0",
+            "name": "?",
+            "color": "brown",
+            "description": null
+          }
+        ]
+      }
+    },
+    "문제정의": {
+      "id": "%5E%3Bz*",
+      "name": "문제정의",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "to do": {
+      "id": "_MqW",
+      "name": "to do",
+      "description": "",
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-1f866e38744f",
+            "name": "Newly Added",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-4cdf57278954",
+            "name": "Review Done",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a0cd72e7f89b",
+            "name": "Mail Fwd",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-bdfe46488884",
+            "name": "To Drop",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-bd19c5921d9d",
+            "name": "미팅요청",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0c2f9bdc8d2b",
+            "name": "Q&A",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-842ffa5a3db5",
+            "name": "Hold",
+            "color": "yellow",
+            "description": null
+          }
+        ]
+      }
+    },
+    "사업계획서": {
+      "id": "j4nn",
+      "name": "사업계획서",
+      "description": null,
+      "type": "url",
+      "url": {}
+    },
+    "포워드 이유": {
+      "id": "lNZg",
+      "name": "포워드 이유",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "추가내용": {
+      "id": "mHt%3F",
+      "name": "추가내용",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "담당심사역": {
+      "id": "sYzt",
+      "name": "담당심사역",
+      "description": null,
+      "type": "people",
+      "people": {}
+    },
+    "연락처": {
+      "id": "tykj",
+      "name": "연락처",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "경쟁사": {
+      "id": "wq%5CG",
+      "name": "경쟁사",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "경쟁력": {
+      "id": "x%3EW%3F",
+      "name": "경쟁력",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "서비스정의": {
+      "id": "%7Cp%5E9",
+      "name": "서비스정의",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "기업명": {
+      "id": "title",
+      "name": "기업명",
+      "description": "",
+      "type": "title",
+      "title": {}
+    }
+  },
+  "parent": {
+    "type": "block_id",
+    "block_id": "00000000-0000-0000-0000-9573589f20a6"
+  },
+  "url": "https://app.notion.com/p/0000000000000000000036ea38d63b9f",
+  "public_url": null,
+  "in_trash": false,
+  "archived": false,
+  "request_id": "00000000-0000-0000-0000-b183f0b93a1c"
+}

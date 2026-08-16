@@ -1,0 +1,1644 @@
+{
+  "object": "database",
+  "id": "00000000-0000-0000-0000-72b2b8579963",
+  "cover": null,
+  "icon": {
+    "type": "emoji",
+    "emoji": "⛏️"
+  },
+  "created_time": "2021-02-21T15:03:00.000Z",
+  "created_by": {
+    "object": "user",
+    "id": "00000000-0000-0000-0000-3878b9a24e74"
+  },
+  "last_edited_by": {
+    "object": "user",
+    "id": "00000000-0000-0000-0000-23c0b8ef1b69"
+  },
+  "last_edited_time": "2026-08-13T02:14:00.000Z",
+  "title": [
+    {
+      "type": "text",
+      "text": {
+        "content": "극초기 스타트업 DB",
+        "link": null
+      },
+      "annotations": {
+        "bold": false,
+        "italic": false,
+        "strikethrough": false,
+        "underline": false,
+        "code": false,
+        "color": "default"
+      },
+      "plain_text": "극초기 스타트업 DB",
+      "href": null
+    }
+  ],
+  "description": [],
+  "is_inline": false,
+  "properties": {
+    "다운로드수": {
+      "id": "%3Cd%5Ca",
+      "name": "다운로드수",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "슬랙 발송?": {
+      "id": "%3EzEL",
+      "name": "슬랙 발송?",
+      "description": null,
+      "type": "checkbox",
+      "checkbox": {}
+    },
+    "한 줄 설명": {
+      "id": "Cdut",
+      "name": "한 줄 설명",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "발굴": {
+      "id": "DaXR",
+      "name": "발굴",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-a74e8dd3edd8",
+            "name": "앱스토어",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "zXXv",
+            "name": "플레이스토어",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5aee2f9e2e0d",
+            "name": "디스콰이엇",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1617222b38a2",
+            "name": "비긴메이트",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-89f0b09db045",
+            "name": "더히트(thehit)",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-245757e5f98b",
+            "name": "마루180",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7c9ab068506f",
+            "name": "디캠프",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2ee18be5b5bd",
+            "name": "롯데벤처스",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2b593225893f",
+            "name": "넥스트유니콘",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e71456a22e54",
+            "name": "피칫",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a2498669139e",
+            "name": "패스트벤처스:텍스트북",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-49b6d8ff1e31",
+            "name": "Travis Bot",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0d20acd478f4",
+            "name": "일상 속 관심사",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-70526a04fd28",
+            "name": "토스 Found",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-effea8db9612",
+            "name": "채용 플랫폼",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-841ed2b3e5da",
+            "name": "SNU 유니콘",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1569d2834425",
+            "name": "프로덕트헌트",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-4331ed4fafdf",
+            "name": "seezak",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d98ba313e65e",
+            "name": "데모데이",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d57e023d5043",
+            "name": "Crypto Fundraising",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a6f684adf645",
+            "name": "플래텀",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0d0889699097",
+            "name": "혁신의숲",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-64d8a5bbed3f",
+            "name": "인스타그램",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e394c95a4e8e",
+            "name": "링크드인",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-b0ef3ff1e2e8",
+            "name": "앤틀러",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-42bd425f3a0b",
+            "name": "긱뉴스",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1fed415935c2",
+            "name": "인프런",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6e8e76628042",
+            "name": "해커뉴스",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ebce437cb72b",
+            "name": "스레드",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9a6597b040e9",
+            "name": "eoplanet",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-10fce9aba8e0",
+            "name": "linkit",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-436407516ada",
+            "name": "Brianimpact",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c83e22ca010f",
+            "name": "GitHub",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-524bb5ddced4",
+            "name": "클로드코드",
+            "color": "pink",
+            "description": null
+          }
+        ]
+      }
+    },
+    "DB 확인": {
+      "id": "F%5ELL",
+      "name": "DB 확인",
+      "description": null,
+      "type": "checkbox",
+      "checkbox": {}
+    },
+    "To do ": {
+      "id": "O%60TR",
+      "name": "To do ",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-e7ea614994f9",
+            "name": "1. 미팅요청",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-77daad166dc1",
+            "name": "2. Q&A하기",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7316b4b06d12",
+            "name": "3. 드랍하기",
+            "color": "pink",
+            "description": null
+          }
+        ]
+      }
+    },
+    "Status": {
+      "id": "OtJJ",
+      "name": "Status",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-efb60226e875",
+            "name": "0. 미팅 X",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e7bc03c279f6",
+            "name": "1. 미팅여부 결정전",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-cb57b5356173",
+            "name": "2. 미팅요청",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1715b3692ade",
+            "name": "3. 미팅회신 대기중",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-81d8011fd1c1",
+            "name": "4. 미팅예정",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-b9be0cb95a8f",
+            "name": "5. 미팅 후 미결정",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-23f2f124687c",
+            "name": "6. (소프트 포함) 드랍완료",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1a3e24c96e06",
+            "name": "7. 투자완료",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "{J~x",
+            "name": "8. 스타트업 DB로 포팅",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d2e1cf10fefe",
+            "name": "메일 작성(앤)",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-59619c123f30",
+            "name": "메일 작성(마이크)",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-258ad4177895",
+            "name": "메일 작성(Reviewer C)",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-eea60de0f0df",
+            "name": "초안 메일 작성 완료(AI)",
+            "color": "green",
+            "description": null
+          }
+        ]
+      }
+    },
+    "만나요": {
+      "id": "RNO%3F",
+      "name": "만나요",
+      "description": null,
+      "type": "people",
+      "people": {}
+    },
+    "발굴자": {
+      "id": "S%3D%3Ev",
+      "name": "발굴자",
+      "description": null,
+      "type": "people",
+      "people": {}
+    },
+    "Created time": {
+      "id": "%5Bbpv",
+      "name": "Created time",
+      "description": null,
+      "type": "created_time",
+      "created_time": {}
+    },
+    "논의 포인트": {
+      "id": "%5BqY%7C",
+      "name": "논의 포인트",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "링크": {
+      "id": "rYjV",
+      "name": "링크",
+      "description": null,
+      "type": "url",
+      "url": {}
+    },
+    "영역": {
+      "id": "vvpW",
+      "name": "영역",
+      "description": null,
+      "type": "multi_select",
+      "multi_select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-3583b696904f",
+            "name": "지식정보",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6ab5b8304fdf",
+            "name": "비즈니스",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-766b32a27541",
+            "name": "교육",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1774e0402803",
+            "name": "엔터테인먼트",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ba911d4e0acd",
+            "name": "금융",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9f4dc7527081",
+            "name": "식음료",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-febb0a69fb14",
+            "name": "헬스케어 & 건강",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2ced09beb1ad",
+            "name": "라이프스타일",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-f044fe365157",
+            "name": "부동산/인테리어",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ed378eb0d95f",
+            "name": "뉴스/잡지",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9d703a858205",
+            "name": "소셜 & 데이팅",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1c20ec8b3a65",
+            "name": "여성향",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1fea0844d676",
+            "name": "커머스",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-10fbb9510d89",
+            "name": "여행",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ed9c44d733be",
+            "name": "모빌리티",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-28ce9fa21561",
+            "name": "키즈",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a9b36ecf3aff",
+            "name": "스포츠",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-26150571d8f1",
+            "name": "물류",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ffcd47b98a87",
+            "name": "뷰티",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-bf42c2ecca4b",
+            "name": "반려동물",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6ed0ad84436c",
+            "name": "기록",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-3cd69073c2d2",
+            "name": "리걸테크",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e3ba557ffb6f",
+            "name": "애드테크",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a35a705ecb2b",
+            "name": "실버",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-4809e9245937",
+            "name": "O2O",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-34d204d8a44d",
+            "name": "컨텐츠제작",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e22c4d030902",
+            "name": "커뮤니티",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-035f2b3fb629",
+            "name": "육아",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-043ac2348e3c",
+            "name": "SaaS",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-922347bd797a",
+            "name": "패션",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a73f1b7d7ebd",
+            "name": "기타",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8239ceec29a5",
+            "name": "예술/디자인",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d9c1ad1a6dcb",
+            "name": "스마트팜",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2b7b671f9d39",
+            "name": "AI",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-87a10ed2a8e2",
+            "name": "건축",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d576f059325d",
+            "name": "축산",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-f43162600850",
+            "name": "채용",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-057669ac67d4",
+            "name": "시니어",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ee11f12d8d61",
+            "name": "low-code",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5560e1613fa9",
+            "name": "B2B",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-afb518ab484a",
+            "name": "솔루션",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-25b85022b7b8",
+            "name": "건설",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-24dc9dc599a6",
+            "name": "컨텐츠",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-93cbd1e071a0",
+            "name": "생산성",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-714d852ccf55",
+            "name": "캠핑",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-14d08f0ec10b",
+            "name": "유틸리티",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1ce7401bd686",
+            "name": "플랫폼",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-4efb659964fc",
+            "name": "NFT",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-47acaf57b057",
+            "name": "소재",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c826f9a89790",
+            "name": "친환경",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-670593809fb0",
+            "name": "중고거래",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-773cc81dbdac",
+            "name": "핀테크",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-63551950a24a",
+            "name": "HR",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0e46b4bf869c",
+            "name": "크로스보더",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d346f347fa46",
+            "name": "팀빌딩",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-de305b78ca1c",
+            "name": "게임",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-b3df2cf2da75",
+            "name": "오프라인",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2e9286ac650c",
+            "name": "리테일",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-da71ff40966a",
+            "name": "하이퍼로컬",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-15d9fdb802cd",
+            "name": "비건",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7d9a8334f85a",
+            "name": "투자",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8dd73921b455",
+            "name": "SNS",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a91b08ff0e4d",
+            "name": "개발자",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-108c342a1b99",
+            "name": "CRM",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0c11b843d5a3",
+            "name": "커리어",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-3643e3f24777",
+            "name": "배송",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-09a7e8f3c634",
+            "name": "가전제품",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-05f22f25dad9",
+            "name": "침구류",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5a26913e0c6f",
+            "name": "멘탈케어",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-3de0fee03240",
+            "name": "배달",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0c59d6982c29",
+            "name": "반찬",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-76039eeb5589",
+            "name": "챗봇",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-270a901f37e3",
+            "name": "영어회화",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9f3418b6894e",
+            "name": "4050",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6b3083c1b440",
+            "name": "SME",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1252401cc2bf",
+            "name": "크리에이터",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7f881764d9e0",
+            "name": "식물",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e4840ff8182a",
+            "name": "생활서비스",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-916181df49bd",
+            "name": "운동",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-202cc078abf6",
+            "name": "축산물",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-61476a9addcc",
+            "name": "소셜",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e5f99b9d1340",
+            "name": "숏폼",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-aafb55f119f9",
+            "name": "웹툰",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-accb38d7f37a",
+            "name": "채팅",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2d6c4f499bf8",
+            "name": "프롭테크",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e9edee289577",
+            "name": "이사견적",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a3147859cce8",
+            "name": "블록체인",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-f50d0a5f8cce",
+            "name": "프롭",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-68175d5ae963",
+            "name": "이커머스",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-669c1db4904c",
+            "name": "남성향",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-923a04e82963",
+            "name": "웹쓰리",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9364534faddc",
+            "name": "음향",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-12d2f6e226a0",
+            "name": "노코드",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7473781648f3",
+            "name": "디지털굿즈",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-eb22d7beb432",
+            "name": "인플루언서",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6db4d28dfac1",
+            "name": "재무",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-3e07ea52875b",
+            "name": "\bO2O",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-88dd2a666dc6",
+            "name": "제조",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-23a04266a097",
+            "name": "ESG",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-df0c2d1ca2ca",
+            "name": "analytics",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8232d82863db",
+            "name": "RPA",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-515cd69d3351",
+            "name": "광고",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-cea013bf2074",
+            "name": "외국인",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2736662186d2",
+            "name": "채ㅇ",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ecaedbc261aa",
+            "name": "이미지생성",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-268777bfa8d5",
+            "name": "Social",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-08c1bf5bf0f2",
+            "name": "브랜드",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-26113f57f7ba",
+            "name": "사주",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6696aa2ca164",
+            "name": "컨",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-dde64123bb17",
+            "name": "세일즈",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-85c30be0d444",
+            "name": "일정관리",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-b5dd970d7f8d",
+            "name": "구매대행",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-dff89c695890",
+            "name": "에이전트",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-fe7981db65ea",
+            "name": "마케팅",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c57d3bbe14a1",
+            "name": "일기",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7e7bb11d3b8a",
+            "name": "Voice",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e3067eb8b42c",
+            "name": "검색",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-65415ce3d9ba",
+            "name": "Agent",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-12bbe3c56ee3",
+            "name": "프롬프트",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-577c8ec436bc",
+            "name": "LLM",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-109ed24a4b1a",
+            "name": "미팅록",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6038374804ea",
+            "name": "온보딩",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2d7c621a06f3",
+            "name": "앱 빌더",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7ad31e40fd09",
+            "name": "Vertical",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-57eacbd1daf0",
+            "name": "설문조사",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2bec7738c97d",
+            "name": "캔버스",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-762bb4251cf1",
+            "name": "테스팅",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ecf47bd8f0ae",
+            "name": "비디오",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-51a264e15c58",
+            "name": "자동화",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-97b70faac0bd",
+            "name": "브라우저",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-f3663493abb1",
+            "name": "IoT",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-95d1003fce8f",
+            "name": "음성 AI",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0949f47a6fdf",
+            "name": "개발도구",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-48cd68ef8f17",
+            "name": "API",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d9d4f4e34d8f",
+            "name": "문서화",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5d6c6a4bb31e",
+            "name": "머신러늽",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9bf4cc42c300",
+            "name": "심리",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a760563ae65e",
+            "name": "애드인",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-553bb11b38ca",
+            "name": "개발자 도구",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e52c282ac806",
+            "name": "소프트웨어 엔지니어링",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2dee842971c6",
+            "name": "뉴스",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0ef34ebfe8ef",
+            "name": "노트",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-acd018758241",
+            "name": "회의",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c39e17fbaf9b",
+            "name": "시간 관리",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-242ef145fafc",
+            "name": "대화형 인터페이스",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5790bb527a50",
+            "name": "사진",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6818973ee716",
+            "name": "어시스턴트",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-00f8d98a5bf5",
+            "name": "오디오",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8264fd195c5e",
+            "name": "노트테이킹",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6c6bd1b44225",
+            "name": "아바타",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-90a8ae79a138",
+            "name": "\bai",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8413531acf73",
+            "name": "영업",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-924724aeb3cd",
+            "name": "이미지",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7da6ceb4e975",
+            "name": "UI",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e8e3192d758f",
+            "name": "텍스트",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-17ca1ad864b3",
+            "name": "바이브코딩",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-74463470778a",
+            "name": "언어학습",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c6957e9d0ad8",
+            "name": "면접",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-b5f90a551c34",
+            "name": "크리에이티브",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a6e6606d0ba7",
+            "name": "멀티모달",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-008ba69a5700",
+            "name": "영상 AI",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-f6eed3a559a8",
+            "name": "자아탐색",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-f1378fec6892",
+            "name": "리서치",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-22f480bf839c",
+            "name": "UI/UX",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d4dd86aec8bd",
+            "name": "데이터 분석",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-4ce3c5ff249d",
+            "name": "CS",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-eedd19efb30c",
+            "name": "미팅",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e9c22c26605d",
+            "name": "AI 미팅",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-dc3ab42b6915",
+            "name": "DB",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9f3e7e892626",
+            "name": "워크플로우",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2f769f7fbd33",
+            "name": "디자인",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5d281fe3da2c",
+            "name": "음악 AI",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8ddbe9dd215c",
+            "name": "AI 브라우저",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a3115492b3e5",
+            "name": "노코드앱빌더",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e19b2f63e70f",
+            "name": "AI 비서",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2cddf751da0b",
+            "name": "AI 에이전트",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-bdbe8598d6f4",
+            "name": "프로젝트 관리",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-85e11b0fe882",
+            "name": "목표 관리",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d21240cdcf88",
+            "name": "이메일",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7c28733c8078",
+            "name": "AI 코딩",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-b1fd4bade1f8",
+            "name": "생성형 AI",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-38507ab84b90",
+            "name": "QA",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-56704899fb1f",
+            "name": "글쓰기",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1b60875f24d3",
+            "name": "SEO",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5faf41926070",
+            "name": "SMB",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-695e8632315e",
+            "name": "데모",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-e0c02d5fb037",
+            "name": "사모펀드",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-3cd2f66769e0",
+            "name": "AI컴패니언",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6ea889bc0c09",
+            "name": "보안",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7eb23f310f7b",
+            "name": "AX",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-39491198b811",
+            "name": "도서",
+            "color": "purple",
+            "description": null
+          }
+        ]
+      }
+    },
+    "평점": {
+      "id": "xATf",
+      "name": "평점",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "Tier": {
+      "id": "%7CO%5DL",
+      "name": "Tier",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-ad2b40c7b298",
+            "name": "Catch",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7dce26856b0a",
+            "name": "Trend",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c55b5a4ca08a",
+            "name": "Wait",
+            "color": "orange",
+            "description": null
+          }
+        ]
+      }
+    },
+    "법인(서비스)": {
+      "id": "title",
+      "name": "법인(서비스)",
+      "description": null,
+      "type": "title",
+      "title": {}
+    }
+  },
+  "parent": {
+    "type": "block_id",
+    "block_id": "00000000-0000-0000-0000-9573589f20a6"
+  },
+  "url": "https://app.notion.com/p/0000000000000000000072b2b8579963",
+  "public_url": null,
+  "in_trash": false,
+  "archived": false,
+  "request_id": "00000000-0000-0000-0000-cd85e04d9711"
+}

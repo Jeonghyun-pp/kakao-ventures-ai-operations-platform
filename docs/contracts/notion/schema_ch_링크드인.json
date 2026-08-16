@@ -1,0 +1,1086 @@
+{
+  "object": "database",
+  "id": "00000000-0000-0000-0000-8702f7cc7f34",
+  "cover": null,
+  "icon": null,
+  "created_time": "2026-07-15T04:12:00.000Z",
+  "created_by": {
+    "object": "user",
+    "id": "00000000-0000-0000-0000-c6fcf479d7ff"
+  },
+  "last_edited_by": {
+    "object": "user",
+    "id": "00000000-0000-0000-0000-268641a6e153"
+  },
+  "last_edited_time": "2026-08-15T08:23:00.000Z",
+  "title": [
+    {
+      "type": "text",
+      "text": {
+        "content": "그물망 링크드인 소싱 DB(링크드인)",
+        "link": null
+      },
+      "annotations": {
+        "bold": false,
+        "italic": false,
+        "strikethrough": false,
+        "underline": false,
+        "code": false,
+        "color": "default"
+      },
+      "plain_text": "그물망 링크드인 소싱 DB(링크드인)",
+      "href": null
+    }
+  ],
+  "description": [],
+  "is_inline": false,
+  "properties": {
+    "LinkedIn URL": {
+      "id": "%3AJy%3A",
+      "name": "LinkedIn URL",
+      "description": null,
+      "type": "url",
+      "url": {}
+    },
+    "Tenure Months": {
+      "id": "%3B%5Df~",
+      "name": "Tenure Months",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "Author Display Name": {
+      "id": "%3CYNR",
+      "name": "Author Display Name",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "재검토 사유": {
+      "id": "%3DG%5CC",
+      "name": "재검토 사유",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-3294b2473275",
+            "name": "프로필변화",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ac1c9b9c082c",
+            "name": "새글",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d0335517db79",
+            "name": "이탈임박",
+            "color": "red",
+            "description": null
+          }
+        ]
+      }
+    },
+    "Followers": {
+      "id": "%3EF%3Ag",
+      "name": "Followers",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "주차": {
+      "id": "%3FUyu",
+      "name": "주차",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-66a74564cce3",
+            "name": "2026-W14",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-280fa0492d17",
+            "name": "2026-W15",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-223495919382",
+            "name": "2026-W16",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-f417e60ef0f5",
+            "name": "2026-W17",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-505ad863f960",
+            "name": "2026-W18",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-18fba0fe8eb9",
+            "name": "2026-W19",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-27bd6aa1c376",
+            "name": "2026-W20",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-492402ae5d4e",
+            "name": "2026-W21",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ae59f1c1ddf0",
+            "name": "2026-W22",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a53aa961ceb9",
+            "name": "2026-W23",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5e209d4ec1a5",
+            "name": "2026-W24",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-bf9ce20d5510",
+            "name": "2026-W25",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-47359220ba98",
+            "name": "2026-W26",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-f3d9f667d2c7",
+            "name": "2026-W27",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-f5017d56a0b9",
+            "name": "2026-W28",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-cbed4e7705a7",
+            "name": "2026-W29",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5f0bd11e7341",
+            "name": "2026-W30",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-54466306e5e3",
+            "name": "2026-W31",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8ad1ccaf5f7a",
+            "name": "2026-W32",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-65dea27177ce",
+            "name": "2026-W33",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ab2747456858",
+            "name": "2026-W34",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c8406235ac3f",
+            "name": "2026-W35",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6fd0e8984b32",
+            "name": "2026-W36",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-3228789512bb",
+            "name": "2026-W37",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-297183109ee0",
+            "name": "2026-W38",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-257626e36e3d",
+            "name": "2026-W39",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-4268ad5d512a",
+            "name": "2026-W40",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1f962f39d2d5",
+            "name": "2026-W41",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ce7ffaa42f72",
+            "name": "2026-W42",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-16fe398318d1",
+            "name": "2026-W43",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-36d951311434",
+            "name": "2026-W44",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9c77ca0e74d3",
+            "name": "2026-W45",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-fe9d99d42987",
+            "name": "2026-W46",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-f81d6ef70ba7",
+            "name": "2026-W47",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c60e56d1eb22",
+            "name": "2026-W48",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ad7fa18b80c8",
+            "name": "2026-W49",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ec115bbfb4a6",
+            "name": "2026-W50",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-450cef1395bd",
+            "name": "2026-W51",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5247da8579a6",
+            "name": "2026-W52",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1185f62d41f0",
+            "name": "2026-W53",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ee4fe792ba31",
+            "name": "2027-W01",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7f844cdd6b61",
+            "name": "2027-W02",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-3a0d87ce3593",
+            "name": "2027-W03",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9a13ea1c07a7",
+            "name": "2027-W04",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6ee80e592b9c",
+            "name": "2027-W05",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8abe79665cc6",
+            "name": "2027-W06",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-509714fb42b6",
+            "name": "2027-W07",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-54ef71d52db0",
+            "name": "2027-W08",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5b54ddd66f00",
+            "name": "2027-W09",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-032fd41dae89",
+            "name": "2027-W10",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-b6e994ffba42",
+            "name": "2027-W11",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-89a038b9d6b2",
+            "name": "2027-W12",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-bff22b946431",
+            "name": "2027-W13",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-05e12381aee5",
+            "name": "2027-W14",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-cd856e616aa0",
+            "name": "2027-W15",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-b60146b9130f",
+            "name": "2027-W16",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5d24c3344e1a",
+            "name": "2027-W17",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c28704ec0e04",
+            "name": "2027-W18",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-de48f866de60",
+            "name": "2027-W19",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-24e24ed41dd8",
+            "name": "2027-W20",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-43d1c5ef3fa6",
+            "name": "2027-W21",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c1ad51357caa",
+            "name": "2027-W22",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d08f94398ef6",
+            "name": "2027-W23",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-b63feada90f5",
+            "name": "2027-W24",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-31abbb03c871",
+            "name": "2027-W25",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-5cea8c9ca1db",
+            "name": "2027-W26",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-10143a717dc3",
+            "name": "2027-W27",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-4c40392c0d5e",
+            "name": "2027-W28",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9451add81ff6",
+            "name": "2027-W29",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-6a58f7989def",
+            "name": "2027-W30",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-b284c6932896",
+            "name": "2027-W31",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c99683509f0e",
+            "name": "2027-W32",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a173d5d93a35",
+            "name": "2027-W33",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-644f4795f449",
+            "name": "2027-W34",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-08e183290d40",
+            "name": "2027-W35",
+            "color": "default",
+            "description": null
+          }
+        ]
+      }
+    },
+    "Axis": {
+      "id": "CL%7B%5E",
+      "name": "Axis",
+      "description": null,
+      "type": "multi_select",
+      "multi_select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-10ba7c821331",
+            "name": "early-kr",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-78bb247e5b31",
+            "name": "flow-new-founder",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-394c39e5b2a2",
+            "name": "gap-practitioner",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7e284742e125",
+            "name": "kr-tie-global",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9d3d9273c764",
+            "name": "posted-early",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-92b79ecbfc44",
+            "name": "recent-job-kr",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-3696da2e5501",
+            "name": "stealth-kr",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7b5c146e7773",
+            "name": "stealth-us-krschool",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0dd9c4f1cc2e",
+            "name": "t-ceo",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9a59437128a3",
+            "name": "t-cofounder",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a8f98a0f17b8",
+            "name": "t-cto",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8709179b3f6c",
+            "name": "t-eir",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7a094f73e9d2",
+            "name": "t-founder",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-791b3c49a072",
+            "name": "t-kr-changup",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-3fb54a74cda3",
+            "name": "t-kr-daepyo",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-056786431e54",
+            "name": "t-recently-posted",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0b2725a044f9",
+            "name": "t-stealth",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-441ad91d92f6",
+            "name": "t-stealth-mode",
+            "color": "default",
+            "description": null
+          }
+        ]
+      }
+    },
+    "API Query": {
+      "id": "CoBw",
+      "name": "API Query",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "공백 개월": {
+      "id": "EOCU",
+      "name": "공백 개월",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "Author Username": {
+      "id": "FqDN",
+      "name": "Author Username",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "재검토": {
+      "id": "IC~b",
+      "name": "재검토",
+      "description": null,
+      "type": "checkbox",
+      "checkbox": {}
+    },
+    "Raw Text": {
+      "id": "J%5Cm%5C",
+      "name": "Raw Text",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "타깃": {
+      "id": "LBsy",
+      "name": "타깃",
+      "description": null,
+      "type": "checkbox",
+      "checkbox": {}
+    },
+    "DB로 업데이트": {
+      "id": "O%3Bsn",
+      "name": "DB로 업데이트",
+      "description": null,
+      "type": "checkbox",
+      "checkbox": {}
+    },
+    "판단 점수": {
+      "id": "Tzx%5D",
+      "name": "판단 점수",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "빌더": {
+      "id": "UaW%5C",
+      "name": "빌더",
+      "description": null,
+      "type": "checkbox",
+      "checkbox": {}
+    },
+    "과거 스텔스": {
+      "id": "Wj%3Ft",
+      "name": "과거 스텔스",
+      "description": null,
+      "type": "checkbox",
+      "checkbox": {}
+    },
+    "Sourcing Method": {
+      "id": "Wmek",
+      "name": "Sourcing Method",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-e55dc388b038",
+            "name": "keyword_search",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-41c83c89b752",
+            "name": "tag_search",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-43512f5d9ab1",
+            "name": "manual",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a935b596a9da",
+            "name": "appstore_chart_kr",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-c6fef90e492d",
+            "name": "skill_ai_judged",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-9c5c320baf10",
+            "name": "appstore_rss_new",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-643f0143bba0",
+            "name": "watchlist",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-183dee95cabc",
+            "name": "following_graph",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-aedd10f45572",
+            "name": "reply_crawl",
+            "color": "default",
+            "description": null
+          }
+        ]
+      }
+    },
+    "프로필 점수": {
+      "id": "Xu%60%3A",
+      "name": "프로필 점수",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "Homepage": {
+      "id": "Ycll",
+      "name": "Homepage",
+      "description": null,
+      "type": "url",
+      "url": {}
+    },
+    "Tier": {
+      "id": "Zua%7D",
+      "name": "Tier",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-b3364bb122da",
+            "name": "Catch",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-cbee3a6bf4b5",
+            "name": "Trend",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-41ba1a2c3b35",
+            "name": "Wait",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-bddf3cb3ae7f",
+            "name": "Cut",
+            "color": "default",
+            "description": null
+          }
+        ]
+      }
+    },
+    "회사": {
+      "id": "%5DEa~",
+      "name": "회사",
+      "description": null,
+      "type": "formula",
+      "formula": {
+        "expression": "if(contains(prop(\"Homepage\"), \"/company/\"), replaceAll(prop(\"Homepage\"), \"(^.*/company/)|(/.*$)\", \"\"), \"\")"
+      }
+    },
+    "대표 콘텐츠": {
+      "id": "%5ESyb",
+      "name": "대표 콘텐츠",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "One Liner": {
+      "id": "%5Eq%60l",
+      "name": "One Liner",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "본업 공백": {
+      "id": "_HbF",
+      "name": "본업 공백",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "Status": {
+      "id": "_%5CO%3E",
+      "name": "Status",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-6562fc14854f",
+            "name": "New",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-083d007e9f90",
+            "name": "Reviewing",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7c54f524b4f6",
+            "name": "Promising",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a2cbfd979ff8",
+            "name": "Contacted",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ab164abbdb5f",
+            "name": "Passed",
+            "color": "gray",
+            "description": null
+          }
+        ]
+      }
+    },
+    "Captured At": {
+      "id": "_~%7DC",
+      "name": "Captured At",
+      "description": null,
+      "type": "date",
+      "date": {}
+    },
+    "Run ID": {
+      "id": "a%40_~",
+      "name": "Run ID",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "Match Reason": {
+      "id": "aoCk",
+      "name": "Match Reason",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "Author Headline": {
+      "id": "evm_",
+      "name": "Author Headline",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "판단 이유": {
+      "id": "f~_k",
+      "name": "판단 이유",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "Last Checked": {
+      "id": "jCVR",
+      "name": "Last Checked",
+      "description": null,
+      "type": "date",
+      "date": {}
+    },
+    "Post URL": {
+      "id": "kcUM",
+      "name": "Post URL",
+      "description": null,
+      "type": "url",
+      "url": {}
+    },
+    "AI Reason": {
+      "id": "uBUP",
+      "name": "AI Reason",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "편향검증": {
+      "id": "w%7Duq",
+      "name": "편향검증",
+      "description": null,
+      "type": "checkbox",
+      "checkbox": {}
+    },
+    "Korea Signal": {
+      "id": "yXx%3B",
+      "name": "Korea Signal",
+      "description": null,
+      "type": "multi_select",
+      "multi_select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-a31d7efbf3a4",
+            "name": "Pass1-한글비율",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-3e767467cb45",
+            "name": "Pass2-표지어",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d4f5dcc19e27",
+            "name": "Pass3-한국어키워드",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0bd88619faa8",
+            "name": "KR-거주",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-1e11810e24c9",
+            "name": "KR-학교",
+            "color": "default",
+            "description": null
+          }
+        ]
+      }
+    },
+    "점수 근거": {
+      "id": "ylet",
+      "name": "점수 근거",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "창업 개월": {
+      "id": "z%3F%3Ae",
+      "name": "창업 개월",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "Last Seen": {
+      "id": "%7CtC~",
+      "name": "Last Seen",
+      "description": null,
+      "type": "date",
+      "date": {}
+    },
+    "변화 요약": {
+      "id": "%7DZpB",
+      "name": "변화 요약",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "서비스명": {
+      "id": "title",
+      "name": "서비스명",
+      "description": null,
+      "type": "title",
+      "title": {}
+    }
+  },
+  "parent": {
+    "type": "page_id",
+    "page_id": "00000000-0000-0000-0000-d2e79c987024"
+  },
+  "url": "https://app.notion.com/p/000000000000000000008702f7cc7f34",
+  "public_url": null,
+  "in_trash": false,
+  "archived": false,
+  "request_id": "00000000-0000-0000-0000-5ba9fe3a4327"
+}

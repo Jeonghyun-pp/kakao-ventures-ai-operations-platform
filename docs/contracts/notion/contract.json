@@ -1,0 +1,4126 @@
+{
+  "base_주간소싱": {
+    "database_id": "00000000-0000-0000-0000-d609b10d8459",
+    "title": "그물망 스타트업 소싱 DB(자동화)",
+    "created_time": "2026-07-09T23:57:00.000Z",
+    "last_edited_time": "2026-08-15T08:17:00.000Z",
+    "row_count": 1470,
+    "prop_count": 56,
+    "properties": {
+      "재검토 사유": {
+        "type": "select",
+        "id": "%3AQxb",
+        "options": [
+          "프로필변화",
+          "새글",
+          "이탈임박"
+        ],
+        "filled": 5,
+        "fill_rate": 0.0034,
+        "value_counts": {
+          "프로필변화": 3,
+          "이탈임박": 2
+        },
+        "unused_options": [
+          "새글"
+        ],
+        "undeclared_values": []
+      },
+      "Match Reason": {
+        "type": "rich_text",
+        "id": "%3C%5E%7Bs",
+        "filled": 963,
+        "fill_rate": 0.6551
+      },
+      "Followers": {
+        "type": "number",
+        "id": "%3D%3CJE",
+        "format": "number",
+        "filled": 619,
+        "fill_rate": 0.4211
+      },
+      "Review Count": {
+        "type": "number",
+        "id": "%3Fzn%40",
+        "format": "number",
+        "filled": 107,
+        "fill_rate": 0.0728
+      },
+      "LinkedIn URL": {
+        "type": "url",
+        "id": "%40cRb",
+        "filled": 344,
+        "fill_rate": 0.234
+      },
+      "빌더": {
+        "type": "checkbox",
+        "id": "%40sXH",
+        "filled": 60,
+        "fill_rate": 0.0408,
+        "value_counts": {
+          "false": 1410,
+          "true": 60
+        }
+      },
+      "Raw Text": {
+        "type": "rich_text",
+        "id": "A%3BvX",
+        "filled": 1363,
+        "fill_rate": 0.9272
+      },
+      "Tier": {
+        "type": "select",
+        "id": "BJFk",
+        "options": [
+          "Catch",
+          "Trend",
+          "Wait",
+          "Cut"
+        ],
+        "filled": 0,
+        "fill_rate": 0.0,
+        "unused_options": [
+          "Catch",
+          "Cut",
+          "Trend",
+          "Wait"
+        ],
+        "undeclared_values": []
+      },
+      "Sourcing Method": {
+        "type": "select",
+        "id": "ECx%5E",
+        "options": [
+          "keyword_search",
+          "tag_search",
+          "manual",
+          "appstore_chart_kr",
+          "skill_ai_judged",
+          "appstore_rss_new",
+          "watchlist",
+          "following_graph",
+          "reply_crawl"
+        ],
+        "filled": 1126,
+        "fill_rate": 0.766,
+        "value_counts": {
+          "appstore_chart_kr": 492,
+          "keyword_search": 417,
+          "following_graph": 120,
+          "reply_crawl": 96,
+          "watchlist": 1
+        },
+        "unused_options": [
+          "appstore_rss_new",
+          "manual",
+          "skill_ai_judged",
+          "tag_search"
+        ],
+        "undeclared_values": []
+      },
+      "Comments": {
+        "type": "number",
+        "id": "Et%7CN",
+        "format": "number",
+        "filled": 471,
+        "fill_rate": 0.3204
+      },
+      "Posted At": {
+        "type": "date",
+        "id": "FRhe",
+        "filled": 534,
+        "fill_rate": 0.3633
+      },
+      "Author Verified": {
+        "type": "checkbox",
+        "id": "GnvN",
+        "filled": 50,
+        "fill_rate": 0.034,
+        "value_counts": {
+          "false": 1420,
+          "true": 50
+        }
+      },
+      "Rating": {
+        "type": "number",
+        "id": "HisB",
+        "format": "number",
+        "filled": 248,
+        "fill_rate": 0.1687
+      },
+      "Status": {
+        "type": "select",
+        "id": "IGrr",
+        "options": [
+          "New",
+          "Reviewing",
+          "Promising",
+          "Contacted",
+          "Passed"
+        ],
+        "filled": 1470,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "New": 1470
+        },
+        "unused_options": [
+          "Contacted",
+          "Passed",
+          "Promising",
+          "Reviewing"
+        ],
+        "undeclared_values": []
+      },
+      "Homepage": {
+        "type": "url",
+        "id": "IYyy",
+        "filled": 141,
+        "fill_rate": 0.0959
+      },
+      "Artwork": {
+        "type": "url",
+        "id": "JqEB",
+        "filled": 485,
+        "fill_rate": 0.3299
+      },
+      "재검토": {
+        "type": "checkbox",
+        "id": "Lqb%3F",
+        "filled": 5,
+        "fill_rate": 0.0034,
+        "value_counts": {
+          "false": 1465,
+          "true": 5
+        }
+      },
+      "Is Quote Post": {
+        "type": "checkbox",
+        "id": "Nifn",
+        "filled": 1,
+        "fill_rate": 0.0007,
+        "value_counts": {
+          "false": 1469,
+          "true": 1
+        }
+      },
+      "Search Mode": {
+        "type": "select",
+        "id": "OxSE",
+        "options": [
+          "KEYWORD",
+          "TAG",
+          "CHART"
+        ],
+        "filled": 1126,
+        "fill_rate": 0.766,
+        "value_counts": {
+          "KEYWORD": 634,
+          "CHART": 492
+        },
+        "unused_options": [
+          "TAG"
+        ],
+        "undeclared_values": []
+      },
+      "Author Display Name": {
+        "type": "rich_text",
+        "id": "PP%60Q",
+        "filled": 215,
+        "fill_rate": 0.1463
+      },
+      "App ID": {
+        "type": "rich_text",
+        "id": "T~r%3B",
+        "filled": 492,
+        "fill_rate": 0.3347
+      },
+      "Author Headline": {
+        "type": "rich_text",
+        "id": "XNza",
+        "filled": 759,
+        "fill_rate": 0.5163
+      },
+      "Is Reply": {
+        "type": "checkbox",
+        "id": "Y%40%3F%40",
+        "filled": 279,
+        "fill_rate": 0.1898,
+        "value_counts": {
+          "false": 1191,
+          "true": 279
+        }
+      },
+      "Axis": {
+        "type": "multi_select",
+        "id": "YgLo",
+        "options": [
+          "early-kr",
+          "flow-new-founder",
+          "gap-practitioner",
+          "kr-tie-global",
+          "posted-early",
+          "recent-job-kr",
+          "stealth-kr",
+          "stealth-us-krschool",
+          "t-ceo",
+          "t-cofounder",
+          "t-cto",
+          "t-eir",
+          "t-founder",
+          "t-kr-changup",
+          "t-kr-daepyo",
+          "t-recently-posted",
+          "t-stealth",
+          "t-stealth-mode"
+        ],
+        "filled": 247,
+        "fill_rate": 0.168,
+        "value_counts": {
+          "t-recently-posted": 25,
+          "kr-tie-global": 25,
+          "t-kr-changup": 25,
+          "t-kr-daepyo": 25,
+          "t-eir": 25,
+          "t-stealth-mode": 25,
+          "t-stealth": 25,
+          "t-cto": 25,
+          "t-ceo": 25,
+          "t-cofounder": 25,
+          "t-founder": 25,
+          "recent-job-kr": 25
+        },
+        "unused_options": [
+          "early-kr",
+          "flow-new-founder",
+          "gap-practitioner",
+          "posted-early",
+          "stealth-kr",
+          "stealth-us-krschool"
+        ],
+        "undeclared_values": []
+      },
+      "Sourcing Layers": {
+        "type": "multi_select",
+        "id": "Z%3BMx",
+        "options": [
+          "keyword_search",
+          "watchlist",
+          "following_graph",
+          "reply_crawl"
+        ],
+        "filled": 540,
+        "fill_rate": 0.3673,
+        "value_counts": {
+          "keyword_search": 323,
+          "following_graph": 120,
+          "reply_crawl": 98,
+          "watchlist": 6
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "Tenure Months": {
+        "type": "number",
+        "id": "ZTVq",
+        "format": "number",
+        "filled": 246,
+        "fill_rate": 0.1673
+      },
+      "Likes": {
+        "type": "number",
+        "id": "Zx%5DQ",
+        "format": "number",
+        "filled": 490,
+        "fill_rate": 0.3333
+      },
+      "Media Type": {
+        "type": "select",
+        "id": "%5Dgea",
+        "options": [
+          "TEXT",
+          "IMAGE",
+          "VIDEO",
+          "CAROUSEL_ALBUM"
+        ],
+        "filled": 634,
+        "fill_rate": 0.4313,
+        "value_counts": {
+          "TEXT": 477,
+          "IMAGE": 106,
+          "VIDEO": 51
+        },
+        "unused_options": [
+          "CAROUSEL_ALBUM"
+        ],
+        "undeclared_values": []
+      },
+      "Post Count": {
+        "type": "number",
+        "id": "%5E%5BFS",
+        "format": "number",
+        "filled": 540,
+        "fill_rate": 0.3673
+      },
+      "Developer": {
+        "type": "rich_text",
+        "id": "%5EfjP",
+        "filled": 485,
+        "fill_rate": 0.3299
+      },
+      "점수 근거": {
+        "type": "rich_text",
+        "id": "%5EgP%3C",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "타깃": {
+        "type": "checkbox",
+        "id": "%60QfQ",
+        "filled": 42,
+        "fill_rate": 0.0286,
+        "value_counts": {
+          "false": 1428,
+          "true": 42
+        }
+      },
+      "Korea Signal": {
+        "type": "multi_select",
+        "id": "aI%5Dr",
+        "options": [
+          "Pass1-한글비율",
+          "Pass2-표지어",
+          "Pass3-한국어키워드",
+          "KR-거주",
+          "KR-학교"
+        ],
+        "filled": 245,
+        "fill_rate": 0.1667,
+        "value_counts": {
+          "KR-거주": 225,
+          "KR-학교": 93
+        },
+        "unused_options": [
+          "Pass1-한글비율",
+          "Pass2-표지어",
+          "Pass3-한국어키워드"
+        ],
+        "undeclared_values": []
+      },
+      "프로필 점수": {
+        "type": "number",
+        "id": "bf%3D%7C",
+        "format": "number",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "Genre": {
+        "type": "multi_select",
+        "id": "b%7Cju",
+        "options": [
+          "통합",
+          "엔터",
+          "생산성",
+          "쇼핑",
+          "금융",
+          "소셜",
+          "건강피트니스",
+          "뉴스",
+          "비즈니스",
+          "날씨",
+          "유틸리티",
+          "스포츠",
+          "참고",
+          "사진비디오",
+          "내비게이션",
+          "엔터테인먼트",
+          "교육",
+          "의료",
+          "잡지신문",
+          "전체",
+          "게임",
+          "식음료",
+          "라이프스타일",
+          "음악",
+          "여행",
+          "도서",
+          "개발자도구",
+          "그래픽디자인"
+        ],
+        "filled": 492,
+        "fill_rate": 0.3347,
+        "value_counts": {
+          "개발자도구": 55,
+          "전체": 36,
+          "게임": 34,
+          "유틸리티": 33,
+          "그래픽디자인": 32,
+          "사진비디오": 32,
+          "날씨": 29,
+          "음악": 24,
+          "스포츠": 20,
+          "참고": 20,
+          "엔터테인먼트": 17,
+          "라이프스타일": 16,
+          "생산성": 14,
+          "내비게이션": 13,
+          "도서": 12,
+          "여행": 12,
+          "금융": 12,
+          "잡지신문": 12,
+          "소셜": 11,
+          "건강피트니스": 11,
+          "교육": 11,
+          "뉴스": 10,
+          "의료": 8,
+          "식음료": 7,
+          "비즈니스": 6,
+          "쇼핑": 6
+        },
+        "unused_options": [
+          "엔터",
+          "통합"
+        ],
+        "undeclared_values": []
+      },
+      "Author Username": {
+        "type": "rich_text",
+        "id": "cT%7Bd",
+        "filled": 978,
+        "fill_rate": 0.6653
+      },
+      "AI Reason": {
+        "type": "rich_text",
+        "id": "dEZe",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "Content Type": {
+        "type": "select",
+        "id": "dKJu",
+        "options": [
+          "article",
+          "job",
+          "image",
+          "text",
+          "video"
+        ],
+        "filled": 634,
+        "fill_rate": 0.4313,
+        "value_counts": {
+          "text": 477,
+          "image": 106,
+          "video": 51
+        },
+        "unused_options": [
+          "article",
+          "job"
+        ],
+        "undeclared_values": []
+      },
+      "Seed": {
+        "type": "multi_select",
+        "id": "dsON",
+        "options": [
+          "820_nam",
+          "disquiet_io",
+          "eostudio.kr",
+          "indiehack.kr",
+          "jakecoldbyte",
+          "programmingzombie",
+          "sunday_builders",
+          "syde.kr",
+          "zenonplane"
+        ],
+        "filled": 120,
+        "fill_rate": 0.0816,
+        "value_counts": {
+          "sunday_builders": 41,
+          "zenonplane": 35,
+          "820_nam": 28,
+          "jakecoldbyte": 16
+        },
+        "unused_options": [
+          "disquiet_io",
+          "eostudio.kr",
+          "indiehack.kr",
+          "programmingzombie",
+          "syde.kr"
+        ],
+        "undeclared_values": []
+      },
+      "Shares": {
+        "type": "number",
+        "id": "efb%7D",
+        "format": "number",
+        "filled": 455,
+        "fill_rate": 0.3095
+      },
+      "Matched Keyword": {
+        "type": "multi_select",
+        "id": "fA%3FP",
+        "options": [
+          "1인 개발",
+          "1인개발",
+          "개인앱",
+          "공동창업자",
+          "런칭했어요",
+          "만들었습니다",
+          "바이브 코딩",
+          "바이브코딩",
+          "법인 설립",
+          "베타 오픈",
+          "비공개 테스터",
+          "사이드프로젝트",
+          "심사 리젝",
+          "앱스토어 심사",
+          "앱인토스",
+          "웨이팅리스트",
+          "유저 인터뷰",
+          "인디개발자",
+          "인디해커",
+          "창업 멤버",
+          "창업했습니다",
+          "첫 유저",
+          "출시했습니다",
+          "테스트플라이트",
+          "피드백",
+          "피드백 부탁"
+        ],
+        "filled": 386,
+        "fill_rate": 0.2626,
+        "value_counts": {
+          "만들었습니다": 50,
+          "출시했습니다": 38,
+          "사이드프로젝트": 33,
+          "피드백": 30,
+          "1인 개발": 28,
+          "유저 인터뷰": 28,
+          "창업 멤버": 27,
+          "법인 설립": 22,
+          "첫 유저": 20,
+          "바이브 코딩": 19,
+          "바이브코딩": 19,
+          "앱스토어 심사": 18,
+          "심사 리젝": 17,
+          "인디해커": 16,
+          "런칭했어요": 16,
+          "베타 오픈": 14,
+          "창업했습니다": 3,
+          "공동창업자": 2
+        },
+        "unused_options": [
+          "1인개발",
+          "개인앱",
+          "비공개 테스터",
+          "앱인토스",
+          "웨이팅리스트",
+          "인디개발자",
+          "테스트플라이트",
+          "피드백 부탁"
+        ],
+        "undeclared_values": []
+      },
+      "Chart Rank": {
+        "type": "number",
+        "id": "f%7CHG",
+        "format": "number",
+        "filled": 492,
+        "fill_rate": 0.3347
+      },
+      "변화 요약": {
+        "type": "rich_text",
+        "id": "hCV%3D",
+        "filled": 5,
+        "fill_rate": 0.0034
+      },
+      "Post URL": {
+        "type": "url",
+        "id": "iN%3D%3B",
+        "filled": 1470,
+        "fill_rate": 1.0
+      },
+      "주차": {
+        "type": "select",
+        "id": "n_ML",
+        "options": [
+          "2026-W14",
+          "2026-W15",
+          "2026-W16",
+          "2026-W17",
+          "2026-W18",
+          "2026-W19",
+          "2026-W20",
+          "2026-W21",
+          "2026-W22",
+          "2026-W23",
+          "2026-W24",
+          "2026-W25",
+          "2026-W26",
+          "2026-W27",
+          "2026-W28",
+          "2026-W29",
+          "2026-W30",
+          "2026-W31",
+          "2026-W32",
+          "2026-W33",
+          "2026-W34",
+          "2026-W35",
+          "2026-W36",
+          "2026-W37",
+          "2026-W38",
+          "2026-W39",
+          "2026-W40",
+          "2026-W41",
+          "2026-W42",
+          "2026-W43",
+          "2026-W44",
+          "2026-W45",
+          "2026-W46",
+          "2026-W47",
+          "2026-W48",
+          "2026-W49",
+          "2026-W50",
+          "2026-W51",
+          "2026-W52",
+          "2026-W53",
+          "2027-W01",
+          "2027-W02",
+          "2027-W03",
+          "2027-W04",
+          "2027-W05",
+          "2027-W06",
+          "2027-W07",
+          "2027-W08",
+          "2027-W09",
+          "2027-W10",
+          "2027-W11",
+          "2027-W12",
+          "2027-W13",
+          "2027-W14",
+          "2027-W15",
+          "2027-W16",
+          "2027-W17",
+          "2027-W18",
+          "2027-W19",
+          "2027-W20",
+          "2027-W21",
+          "2027-W22",
+          "2027-W23",
+          "2027-W24",
+          "2027-W25",
+          "2027-W26",
+          "2027-W27",
+          "2027-W28",
+          "2027-W29",
+          "2027-W30",
+          "2027-W31",
+          "2027-W32",
+          "2027-W33",
+          "2027-W34",
+          "2027-W35"
+        ],
+        "filled": 1470,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "2026-W29": 989,
+          "2026-W28": 481
+        },
+        "unused_options": [
+          "2026-W14",
+          "2026-W15",
+          "2026-W16",
+          "2026-W17",
+          "2026-W18",
+          "2026-W19",
+          "2026-W20",
+          "2026-W21",
+          "2026-W22",
+          "2026-W23",
+          "2026-W24",
+          "2026-W25",
+          "2026-W26",
+          "2026-W27",
+          "2026-W30",
+          "2026-W31",
+          "2026-W32",
+          "2026-W33",
+          "2026-W34",
+          "2026-W35",
+          "2026-W36",
+          "2026-W37",
+          "2026-W38",
+          "2026-W39",
+          "2026-W40",
+          "2026-W41",
+          "2026-W42",
+          "2026-W43",
+          "2026-W44",
+          "2026-W45",
+          "2026-W46",
+          "2026-W47",
+          "2026-W48",
+          "2026-W49",
+          "2026-W50",
+          "2026-W51",
+          "2026-W52",
+          "2026-W53",
+          "2027-W01",
+          "2027-W02",
+          "2027-W03",
+          "2027-W04",
+          "2027-W05",
+          "2027-W06",
+          "2027-W07",
+          "2027-W08",
+          "2027-W09",
+          "2027-W10",
+          "2027-W11",
+          "2027-W12",
+          "2027-W13",
+          "2027-W14",
+          "2027-W15",
+          "2027-W16",
+          "2027-W17",
+          "2027-W18",
+          "2027-W19",
+          "2027-W20",
+          "2027-W21",
+          "2027-W22",
+          "2027-W23",
+          "2027-W24",
+          "2027-W25",
+          "2027-W26",
+          "2027-W27",
+          "2027-W28",
+          "2027-W29",
+          "2027-W30",
+          "2027-W31",
+          "2027-W32",
+          "2027-W33",
+          "2027-W34",
+          "2027-W35"
+        ],
+        "undeclared_values": []
+      },
+      "Last Checked": {
+        "type": "date",
+        "id": "nfKY",
+        "filled": 7,
+        "fill_rate": 0.0048
+      },
+      "One Liner": {
+        "type": "rich_text",
+        "id": "nup%60",
+        "filled": 1027,
+        "fill_rate": 0.6986
+      },
+      "Run ID": {
+        "type": "rich_text",
+        "id": "q%7C~S",
+        "filled": 1470,
+        "fill_rate": 1.0
+      },
+      "Captured At": {
+        "type": "date",
+        "id": "rXl%60",
+        "filled": 1470,
+        "fill_rate": 1.0
+      },
+      "Search Type": {
+        "type": "select",
+        "id": "tdIK",
+        "options": [
+          "TOP",
+          "RECENT",
+          "CHART_NEW",
+          "NEW_RELEASE"
+        ],
+        "filled": 1126,
+        "fill_rate": 0.766,
+        "value_counts": {
+          "RECENT": 634,
+          "CHART_NEW": 492
+        },
+        "unused_options": [
+          "NEW_RELEASE",
+          "TOP"
+        ],
+        "undeclared_values": []
+      },
+      "Entry Type": {
+        "type": "select",
+        "id": "uKqt",
+        "options": [
+          "chart_new",
+          "new_release",
+          "both",
+          "chart_existing"
+        ],
+        "filled": 492,
+        "fill_rate": 0.3347,
+        "value_counts": {
+          "chart_new": 492
+        },
+        "unused_options": [
+          "both",
+          "chart_existing",
+          "new_release"
+        ],
+        "undeclared_values": []
+      },
+      "Last Seen": {
+        "type": "date",
+        "id": "yGw%60",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "API Query": {
+        "type": "rich_text",
+        "id": "yZS%7C",
+        "filled": 415,
+        "fill_rate": 0.2823
+      },
+      "Release Date": {
+        "type": "date",
+        "id": "ywH%5C",
+        "filled": 484,
+        "fill_rate": 0.3293
+      },
+      "Channel": {
+        "type": "select",
+        "id": "%7C%7B%5Ci",
+        "options": [
+          "Threads",
+          "LinkedIn",
+          "App Store"
+        ],
+        "filled": 1470,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "Threads": 634,
+          "App Store": 492,
+          "LinkedIn": 344
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "서비스명": {
+        "type": "title",
+        "id": "title",
+        "filled": 1463,
+        "fill_rate": 0.9952
+      }
+    }
+  },
+  "ch_링크드인": {
+    "database_id": "00000000-0000-0000-0000-8702f7cc7f34",
+    "title": "그물망 링크드인 소싱 DB(링크드인)",
+    "created_time": "2026-07-15T04:12:00.000Z",
+    "last_edited_time": "2026-08-15T08:23:00.000Z",
+    "row_count": 1151,
+    "prop_count": 41,
+    "properties": {
+      "LinkedIn URL": {
+        "type": "url",
+        "id": "%3AJy%3A",
+        "filled": 1150,
+        "fill_rate": 0.9991
+      },
+      "Tenure Months": {
+        "type": "number",
+        "id": "%3B%5Df~",
+        "format": "number",
+        "filled": 1072,
+        "fill_rate": 0.9314
+      },
+      "Author Display Name": {
+        "type": "rich_text",
+        "id": "%3CYNR",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "재검토 사유": {
+        "type": "select",
+        "id": "%3DG%5CC",
+        "options": [
+          "프로필변화",
+          "새글",
+          "이탈임박"
+        ],
+        "filled": 22,
+        "fill_rate": 0.0191,
+        "value_counts": {
+          "프로필변화": 22
+        },
+        "unused_options": [
+          "새글",
+          "이탈임박"
+        ],
+        "undeclared_values": []
+      },
+      "Followers": {
+        "type": "number",
+        "id": "%3EF%3Ag",
+        "format": "number",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "주차": {
+        "type": "select",
+        "id": "%3FUyu",
+        "options": [
+          "2026-W14",
+          "2026-W15",
+          "2026-W16",
+          "2026-W17",
+          "2026-W18",
+          "2026-W19",
+          "2026-W20",
+          "2026-W21",
+          "2026-W22",
+          "2026-W23",
+          "2026-W24",
+          "2026-W25",
+          "2026-W26",
+          "2026-W27",
+          "2026-W28",
+          "2026-W29",
+          "2026-W30",
+          "2026-W31",
+          "2026-W32",
+          "2026-W33",
+          "2026-W34",
+          "2026-W35",
+          "2026-W36",
+          "2026-W37",
+          "2026-W38",
+          "2026-W39",
+          "2026-W40",
+          "2026-W41",
+          "2026-W42",
+          "2026-W43",
+          "2026-W44",
+          "2026-W45",
+          "2026-W46",
+          "2026-W47",
+          "2026-W48",
+          "2026-W49",
+          "2026-W50",
+          "2026-W51",
+          "2026-W52",
+          "2026-W53",
+          "2027-W01",
+          "2027-W02",
+          "2027-W03",
+          "2027-W04",
+          "2027-W05",
+          "2027-W06",
+          "2027-W07",
+          "2027-W08",
+          "2027-W09",
+          "2027-W10",
+          "2027-W11",
+          "2027-W12",
+          "2027-W13",
+          "2027-W14",
+          "2027-W15",
+          "2027-W16",
+          "2027-W17",
+          "2027-W18",
+          "2027-W19",
+          "2027-W20",
+          "2027-W21",
+          "2027-W22",
+          "2027-W23",
+          "2027-W24",
+          "2027-W25",
+          "2027-W26",
+          "2027-W27",
+          "2027-W28",
+          "2027-W29",
+          "2027-W30",
+          "2027-W31",
+          "2027-W32",
+          "2027-W33",
+          "2027-W34",
+          "2027-W35"
+        ],
+        "filled": 1150,
+        "fill_rate": 0.9991,
+        "value_counts": {
+          "2026-W31": 487,
+          "2026-W33": 281,
+          "2026-W29": 247,
+          "2026-W32": 122,
+          "2026-W28": 13
+        },
+        "unused_options": [
+          "2026-W14",
+          "2026-W15",
+          "2026-W16",
+          "2026-W17",
+          "2026-W18",
+          "2026-W19",
+          "2026-W20",
+          "2026-W21",
+          "2026-W22",
+          "2026-W23",
+          "2026-W24",
+          "2026-W25",
+          "2026-W26",
+          "2026-W27",
+          "2026-W30",
+          "2026-W34",
+          "2026-W35",
+          "2026-W36",
+          "2026-W37",
+          "2026-W38",
+          "2026-W39",
+          "2026-W40",
+          "2026-W41",
+          "2026-W42",
+          "2026-W43",
+          "2026-W44",
+          "2026-W45",
+          "2026-W46",
+          "2026-W47",
+          "2026-W48",
+          "2026-W49",
+          "2026-W50",
+          "2026-W51",
+          "2026-W52",
+          "2026-W53",
+          "2027-W01",
+          "2027-W02",
+          "2027-W03",
+          "2027-W04",
+          "2027-W05",
+          "2027-W06",
+          "2027-W07",
+          "2027-W08",
+          "2027-W09",
+          "2027-W10",
+          "2027-W11",
+          "2027-W12",
+          "2027-W13",
+          "2027-W14",
+          "2027-W15",
+          "2027-W16",
+          "2027-W17",
+          "2027-W18",
+          "2027-W19",
+          "2027-W20",
+          "2027-W21",
+          "2027-W22",
+          "2027-W23",
+          "2027-W24",
+          "2027-W25",
+          "2027-W26",
+          "2027-W27",
+          "2027-W28",
+          "2027-W29",
+          "2027-W30",
+          "2027-W31",
+          "2027-W32",
+          "2027-W33",
+          "2027-W34",
+          "2027-W35"
+        ],
+        "undeclared_values": []
+      },
+      "Axis": {
+        "type": "multi_select",
+        "id": "CL%7B%5E",
+        "options": [
+          "early-kr",
+          "flow-new-founder",
+          "gap-practitioner",
+          "kr-tie-global",
+          "posted-early",
+          "recent-job-kr",
+          "stealth-kr",
+          "stealth-us-krschool",
+          "t-ceo",
+          "t-cofounder",
+          "t-cto",
+          "t-eir",
+          "t-founder",
+          "t-kr-changup",
+          "t-kr-daepyo",
+          "t-recently-posted",
+          "t-stealth",
+          "t-stealth-mode"
+        ],
+        "filled": 1137,
+        "fill_rate": 0.9878,
+        "value_counts": {
+          "flow-new-founder": 331,
+          "stealth-kr": 196,
+          "early-kr": 142,
+          "stealth-us-krschool": 123,
+          "posted-early": 105,
+          "gap-practitioner": 96,
+          "t-stealth-mode": 25,
+          "t-eir": 25,
+          "t-cofounder": 25,
+          "t-ceo": 25,
+          "t-cto": 25,
+          "t-kr-daepyo": 25,
+          "t-founder": 24,
+          "t-recently-posted": 24,
+          "kr-tie-global": 24,
+          "t-kr-changup": 23,
+          "t-stealth": 21,
+          "recent-job-kr": 20
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "API Query": {
+        "type": "rich_text",
+        "id": "CoBw",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "공백 개월": {
+        "type": "number",
+        "id": "EOCU",
+        "format": "number",
+        "filled": 1133,
+        "fill_rate": 0.9844
+      },
+      "Author Username": {
+        "type": "rich_text",
+        "id": "FqDN",
+        "filled": 1150,
+        "fill_rate": 0.9991
+      },
+      "재검토": {
+        "type": "checkbox",
+        "id": "IC~b",
+        "filled": 22,
+        "fill_rate": 0.0191,
+        "value_counts": {
+          "false": 1129,
+          "true": 22
+        }
+      },
+      "Raw Text": {
+        "type": "rich_text",
+        "id": "J%5Cm%5C",
+        "filled": 1150,
+        "fill_rate": 0.9991
+      },
+      "타깃": {
+        "type": "checkbox",
+        "id": "LBsy",
+        "filled": 19,
+        "fill_rate": 0.0165,
+        "value_counts": {
+          "false": 1132,
+          "true": 19
+        }
+      },
+      "DB로 업데이트": {
+        "type": "checkbox",
+        "id": "O%3Bsn",
+        "filled": 18,
+        "fill_rate": 0.0156,
+        "value_counts": {
+          "false": 1133,
+          "true": 18
+        }
+      },
+      "판단 점수": {
+        "type": "number",
+        "id": "Tzx%5D",
+        "format": "number",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "빌더": {
+        "type": "checkbox",
+        "id": "UaW%5C",
+        "filled": 0,
+        "fill_rate": 0.0,
+        "value_counts": {
+          "false": 1151
+        }
+      },
+      "과거 스텔스": {
+        "type": "checkbox",
+        "id": "Wj%3Ft",
+        "filled": 164,
+        "fill_rate": 0.1425,
+        "value_counts": {
+          "false": 987,
+          "true": 164
+        }
+      },
+      "Sourcing Method": {
+        "type": "select",
+        "id": "Wmek",
+        "options": [
+          "keyword_search",
+          "tag_search",
+          "manual",
+          "appstore_chart_kr",
+          "skill_ai_judged",
+          "appstore_rss_new",
+          "watchlist",
+          "following_graph",
+          "reply_crawl"
+        ],
+        "filled": 0,
+        "fill_rate": 0.0,
+        "unused_options": [
+          "appstore_chart_kr",
+          "appstore_rss_new",
+          "following_graph",
+          "keyword_search",
+          "manual",
+          "reply_crawl",
+          "skill_ai_judged",
+          "tag_search",
+          "watchlist"
+        ],
+        "undeclared_values": []
+      },
+      "프로필 점수": {
+        "type": "number",
+        "id": "Xu%60%3A",
+        "format": "number",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "Homepage": {
+        "type": "url",
+        "id": "Ycll",
+        "filled": 1072,
+        "fill_rate": 0.9314
+      },
+      "Tier": {
+        "type": "select",
+        "id": "Zua%7D",
+        "options": [
+          "Catch",
+          "Trend",
+          "Wait",
+          "Cut"
+        ],
+        "filled": 1149,
+        "fill_rate": 0.9983,
+        "value_counts": {
+          "Wait": 409,
+          "Trend": 295,
+          "Cut": 239,
+          "Catch": 206
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "회사": {
+        "type": "formula",
+        "id": "%5DEa~",
+        "expression": "if(contains(prop(\"Homepage\"), \"/company/\"), replaceAll(prop(\"Homepage\"), \"(^.*/company/)|(/.*$)\", \"\"), \"\")",
+        "filled": 975,
+        "fill_rate": 0.8471
+      },
+      "대표 콘텐츠": {
+        "type": "rich_text",
+        "id": "%5ESyb",
+        "filled": 178,
+        "fill_rate": 0.1546
+      },
+      "One Liner": {
+        "type": "rich_text",
+        "id": "%5Eq%60l",
+        "filled": 1151,
+        "fill_rate": 1.0
+      },
+      "본업 공백": {
+        "type": "number",
+        "id": "_HbF",
+        "format": "number",
+        "filled": 1130,
+        "fill_rate": 0.9818
+      },
+      "Status": {
+        "type": "select",
+        "id": "_%5CO%3E",
+        "options": [
+          "New",
+          "Reviewing",
+          "Promising",
+          "Contacted",
+          "Passed"
+        ],
+        "filled": 1150,
+        "fill_rate": 0.9991,
+        "value_counts": {
+          "New": 1150
+        },
+        "unused_options": [
+          "Contacted",
+          "Passed",
+          "Promising",
+          "Reviewing"
+        ],
+        "undeclared_values": []
+      },
+      "Captured At": {
+        "type": "date",
+        "id": "_~%7DC",
+        "filled": 1150,
+        "fill_rate": 0.9991
+      },
+      "Run ID": {
+        "type": "rich_text",
+        "id": "a%40_~",
+        "filled": 1150,
+        "fill_rate": 0.9991
+      },
+      "Match Reason": {
+        "type": "rich_text",
+        "id": "aoCk",
+        "filled": 1137,
+        "fill_rate": 0.9878
+      },
+      "Author Headline": {
+        "type": "rich_text",
+        "id": "evm_",
+        "filled": 1137,
+        "fill_rate": 0.9878
+      },
+      "판단 이유": {
+        "type": "rich_text",
+        "id": "f~_k",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "Last Checked": {
+        "type": "date",
+        "id": "jCVR",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "Post URL": {
+        "type": "url",
+        "id": "kcUM",
+        "filled": 1150,
+        "fill_rate": 0.9991
+      },
+      "AI Reason": {
+        "type": "rich_text",
+        "id": "uBUP",
+        "filled": 1149,
+        "fill_rate": 0.9983
+      },
+      "편향검증": {
+        "type": "checkbox",
+        "id": "w%7Duq",
+        "filled": 20,
+        "fill_rate": 0.0174,
+        "value_counts": {
+          "false": 1131,
+          "true": 20
+        }
+      },
+      "Korea Signal": {
+        "type": "multi_select",
+        "id": "yXx%3B",
+        "options": [
+          "Pass1-한글비율",
+          "Pass2-표지어",
+          "Pass3-한국어키워드",
+          "KR-거주",
+          "KR-학교"
+        ],
+        "filled": 1123,
+        "fill_rate": 0.9757,
+        "value_counts": {
+          "KR-거주": 987,
+          "KR-학교": 449
+        },
+        "unused_options": [
+          "Pass1-한글비율",
+          "Pass2-표지어",
+          "Pass3-한국어키워드"
+        ],
+        "undeclared_values": []
+      },
+      "점수 근거": {
+        "type": "rich_text",
+        "id": "ylet",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "창업 개월": {
+        "type": "number",
+        "id": "z%3F%3Ae",
+        "format": "number",
+        "filled": 847,
+        "fill_rate": 0.7359
+      },
+      "Last Seen": {
+        "type": "date",
+        "id": "%7CtC~",
+        "filled": 22,
+        "fill_rate": 0.0191
+      },
+      "변화 요약": {
+        "type": "rich_text",
+        "id": "%7DZpB",
+        "filled": 22,
+        "fill_rate": 0.0191
+      },
+      "서비스명": {
+        "type": "title",
+        "id": "title",
+        "filled": 1150,
+        "fill_rate": 0.9991
+      }
+    }
+  },
+  "ch_스레드": {
+    "database_id": "00000000-0000-0000-0000-a258370d87f8",
+    "title": "그물망 스레드 소싱 DB (스레드)",
+    "created_time": "2026-07-15T04:12:00.000Z",
+    "last_edited_time": "2026-07-28T03:33:00.000Z",
+    "row_count": 635,
+    "prop_count": 41,
+    "properties": {
+      "DB로 업데이트": {
+        "type": "checkbox",
+        "id": "%3AGeQ",
+        "filled": 2,
+        "fill_rate": 0.0031,
+        "value_counts": {
+          "false": 633,
+          "true": 2
+        }
+      },
+      "Likes": {
+        "type": "number",
+        "id": "%3B%5C_g",
+        "format": "number",
+        "filled": 491,
+        "fill_rate": 0.7732
+      },
+      "Raw Text": {
+        "type": "rich_text",
+        "id": "%3CeHu",
+        "filled": 535,
+        "fill_rate": 0.8425
+      },
+      "Last Checked": {
+        "type": "date",
+        "id": "%3E%7BRd",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "Post Count": {
+        "type": "number",
+        "id": "%3F%7BE%3B",
+        "format": "number",
+        "filled": 541,
+        "fill_rate": 0.852
+      },
+      "Post URL": {
+        "type": "url",
+        "id": "AEwG",
+        "filled": 635,
+        "fill_rate": 1.0
+      },
+      "Tier": {
+        "type": "select",
+        "id": "EC_q",
+        "options": [
+          "Catch",
+          "Trend",
+          "Wait",
+          "Cut"
+        ],
+        "filled": 635,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "Cut": 518,
+          "Trend": 57,
+          "Wait": 53,
+          "Catch": 7
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "Run ID": {
+        "type": "rich_text",
+        "id": "I_G%7C",
+        "filled": 635,
+        "fill_rate": 1.0
+      },
+      "변화 요약": {
+        "type": "rich_text",
+        "id": "KBtd",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "Captured At": {
+        "type": "date",
+        "id": "LuXC",
+        "filled": 635,
+        "fill_rate": 1.0
+      },
+      "Author Display Name": {
+        "type": "rich_text",
+        "id": "Nd%5Ev",
+        "filled": 215,
+        "fill_rate": 0.3386
+      },
+      "타깃": {
+        "type": "checkbox",
+        "id": "RGqs",
+        "filled": 23,
+        "fill_rate": 0.0362,
+        "value_counts": {
+          "false": 612,
+          "true": 23
+        }
+      },
+      "One Liner": {
+        "type": "rich_text",
+        "id": "SDob",
+        "filled": 635,
+        "fill_rate": 1.0
+      },
+      "Content Type": {
+        "type": "select",
+        "id": "Sb%3AP",
+        "options": [
+          "article",
+          "job",
+          "image",
+          "text",
+          "video"
+        ],
+        "filled": 635,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "text": 477,
+          "image": 107,
+          "video": 51
+        },
+        "unused_options": [
+          "article",
+          "job"
+        ],
+        "undeclared_values": []
+      },
+      "Last Seen": {
+        "type": "date",
+        "id": "VtT%60",
+        "filled": 0,
+        "fill_rate": 0.0
+      },
+      "Korea Signal": {
+        "type": "multi_select",
+        "id": "%5CbTg",
+        "options": [
+          "Pass1-한글비율",
+          "Pass2-표지어",
+          "Pass3-한국어키워드",
+          "KR-거주",
+          "KR-학교"
+        ],
+        "filled": 0,
+        "fill_rate": 0.0,
+        "unused_options": [
+          "KR-거주",
+          "KR-학교",
+          "Pass1-한글비율",
+          "Pass2-표지어",
+          "Pass3-한국어키워드"
+        ],
+        "undeclared_values": []
+      },
+      "Comments": {
+        "type": "number",
+        "id": "%5E%3Dsq",
+        "format": "number",
+        "filled": 472,
+        "fill_rate": 0.7433
+      },
+      "Media Type": {
+        "type": "select",
+        "id": "%5EBjL",
+        "options": [
+          "TEXT",
+          "IMAGE",
+          "VIDEO",
+          "CAROUSEL_ALBUM"
+        ],
+        "filled": 635,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "TEXT": 477,
+          "IMAGE": 107,
+          "VIDEO": 51
+        },
+        "unused_options": [
+          "CAROUSEL_ALBUM"
+        ],
+        "undeclared_values": []
+      },
+      "Author Headline": {
+        "type": "rich_text",
+        "id": "_uAR",
+        "filled": 513,
+        "fill_rate": 0.8079
+      },
+      "Shares": {
+        "type": "number",
+        "id": "bQnb",
+        "format": "number",
+        "filled": 456,
+        "fill_rate": 0.7181
+      },
+      "Is Quote Post": {
+        "type": "checkbox",
+        "id": "c~hi",
+        "filled": 1,
+        "fill_rate": 0.0016,
+        "value_counts": {
+          "false": 634,
+          "true": 1
+        }
+      },
+      "Author Username": {
+        "type": "rich_text",
+        "id": "dE%40%3D",
+        "filled": 635,
+        "fill_rate": 1.0
+      },
+      "AI Reason": {
+        "type": "rich_text",
+        "id": "eAH%3C",
+        "filled": 635,
+        "fill_rate": 1.0
+      },
+      "주차": {
+        "type": "select",
+        "id": "f%3F%5D%3F",
+        "options": [
+          "2026-W14",
+          "2026-W15",
+          "2026-W16",
+          "2026-W17",
+          "2026-W18",
+          "2026-W19",
+          "2026-W20",
+          "2026-W21",
+          "2026-W22",
+          "2026-W23",
+          "2026-W24",
+          "2026-W25",
+          "2026-W26",
+          "2026-W27",
+          "2026-W28",
+          "2026-W29",
+          "2026-W30",
+          "2026-W31",
+          "2026-W32",
+          "2026-W33",
+          "2026-W34",
+          "2026-W35",
+          "2026-W36",
+          "2026-W37",
+          "2026-W38",
+          "2026-W39",
+          "2026-W40",
+          "2026-W41",
+          "2026-W42",
+          "2026-W43",
+          "2026-W44",
+          "2026-W45",
+          "2026-W46",
+          "2026-W47",
+          "2026-W48",
+          "2026-W49",
+          "2026-W50",
+          "2026-W51",
+          "2026-W52",
+          "2026-W53",
+          "2027-W01",
+          "2027-W02",
+          "2027-W03",
+          "2027-W04",
+          "2027-W05",
+          "2027-W06",
+          "2027-W07",
+          "2027-W08",
+          "2027-W09",
+          "2027-W10",
+          "2027-W11",
+          "2027-W12",
+          "2027-W13",
+          "2027-W14",
+          "2027-W15",
+          "2027-W16",
+          "2027-W17",
+          "2027-W18",
+          "2027-W19",
+          "2027-W20",
+          "2027-W21",
+          "2027-W22",
+          "2027-W23",
+          "2027-W24",
+          "2027-W25",
+          "2027-W26",
+          "2027-W27",
+          "2027-W28",
+          "2027-W29",
+          "2027-W30",
+          "2027-W31",
+          "2027-W32",
+          "2027-W33",
+          "2027-W34",
+          "2027-W35"
+        ],
+        "filled": 635,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "2026-W29": 536,
+          "2026-W28": 99
+        },
+        "unused_options": [
+          "2026-W14",
+          "2026-W15",
+          "2026-W16",
+          "2026-W17",
+          "2026-W18",
+          "2026-W19",
+          "2026-W20",
+          "2026-W21",
+          "2026-W22",
+          "2026-W23",
+          "2026-W24",
+          "2026-W25",
+          "2026-W26",
+          "2026-W27",
+          "2026-W30",
+          "2026-W31",
+          "2026-W32",
+          "2026-W33",
+          "2026-W34",
+          "2026-W35",
+          "2026-W36",
+          "2026-W37",
+          "2026-W38",
+          "2026-W39",
+          "2026-W40",
+          "2026-W41",
+          "2026-W42",
+          "2026-W43",
+          "2026-W44",
+          "2026-W45",
+          "2026-W46",
+          "2026-W47",
+          "2026-W48",
+          "2026-W49",
+          "2026-W50",
+          "2026-W51",
+          "2026-W52",
+          "2026-W53",
+          "2027-W01",
+          "2027-W02",
+          "2027-W03",
+          "2027-W04",
+          "2027-W05",
+          "2027-W06",
+          "2027-W07",
+          "2027-W08",
+          "2027-W09",
+          "2027-W10",
+          "2027-W11",
+          "2027-W12",
+          "2027-W13",
+          "2027-W14",
+          "2027-W15",
+          "2027-W16",
+          "2027-W17",
+          "2027-W18",
+          "2027-W19",
+          "2027-W20",
+          "2027-W21",
+          "2027-W22",
+          "2027-W23",
+          "2027-W24",
+          "2027-W25",
+          "2027-W26",
+          "2027-W27",
+          "2027-W28",
+          "2027-W29",
+          "2027-W30",
+          "2027-W31",
+          "2027-W32",
+          "2027-W33",
+          "2027-W34",
+          "2027-W35"
+        ],
+        "undeclared_values": []
+      },
+      "Followers": {
+        "type": "number",
+        "id": "fpBi",
+        "format": "number",
+        "filled": 620,
+        "fill_rate": 0.9764
+      },
+      "Search Mode": {
+        "type": "select",
+        "id": "hj%60B",
+        "options": [
+          "KEYWORD",
+          "TAG",
+          "CHART"
+        ],
+        "filled": 635,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "KEYWORD": 635
+        },
+        "unused_options": [
+          "CHART",
+          "TAG"
+        ],
+        "undeclared_values": []
+      },
+      "Posted At": {
+        "type": "date",
+        "id": "kjkT",
+        "filled": 535,
+        "fill_rate": 0.8425
+      },
+      "재검토 사유": {
+        "type": "select",
+        "id": "nI%7Dk",
+        "options": [
+          "프로필변화",
+          "새글",
+          "이탈임박"
+        ],
+        "filled": 0,
+        "fill_rate": 0.0,
+        "unused_options": [
+          "새글",
+          "이탈임박",
+          "프로필변화"
+        ],
+        "undeclared_values": []
+      },
+      "Status": {
+        "type": "select",
+        "id": "oG%7B_",
+        "options": [
+          "New",
+          "Reviewing",
+          "Promising",
+          "Contacted",
+          "Passed"
+        ],
+        "filled": 635,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "New": 635
+        },
+        "unused_options": [
+          "Contacted",
+          "Passed",
+          "Promising",
+          "Reviewing"
+        ],
+        "undeclared_values": []
+      },
+      "Search Type": {
+        "type": "select",
+        "id": "o%5DWO",
+        "options": [
+          "TOP",
+          "RECENT",
+          "CHART_NEW",
+          "NEW_RELEASE"
+        ],
+        "filled": 635,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "RECENT": 635
+        },
+        "unused_options": [
+          "CHART_NEW",
+          "NEW_RELEASE",
+          "TOP"
+        ],
+        "undeclared_values": []
+      },
+      "빌더": {
+        "type": "checkbox",
+        "id": "qIuP",
+        "filled": 60,
+        "fill_rate": 0.0945,
+        "value_counts": {
+          "false": 575,
+          "true": 60
+        }
+      },
+      "재검토": {
+        "type": "checkbox",
+        "id": "qQgU",
+        "filled": 0,
+        "fill_rate": 0.0,
+        "value_counts": {
+          "false": 635
+        }
+      },
+      "Is Reply": {
+        "type": "checkbox",
+        "id": "ryh%3F",
+        "filled": 279,
+        "fill_rate": 0.4394,
+        "value_counts": {
+          "false": 356,
+          "true": 279
+        }
+      },
+      "API Query": {
+        "type": "rich_text",
+        "id": "sdOZ",
+        "filled": 416,
+        "fill_rate": 0.6551
+      },
+      "Sourcing Method": {
+        "type": "select",
+        "id": "xg%5EC",
+        "options": [
+          "keyword_search",
+          "tag_search",
+          "manual",
+          "appstore_chart_kr",
+          "skill_ai_judged",
+          "appstore_rss_new",
+          "watchlist",
+          "following_graph",
+          "reply_crawl"
+        ],
+        "filled": 635,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "keyword_search": 418,
+          "following_graph": 120,
+          "reply_crawl": 96,
+          "watchlist": 1
+        },
+        "unused_options": [
+          "appstore_chart_kr",
+          "appstore_rss_new",
+          "manual",
+          "skill_ai_judged",
+          "tag_search"
+        ],
+        "undeclared_values": []
+      },
+      "Seed": {
+        "type": "multi_select",
+        "id": "yTen",
+        "options": [
+          "820_nam",
+          "disquiet_io",
+          "eostudio.kr",
+          "indiehack.kr",
+          "jakecoldbyte",
+          "programmingzombie",
+          "sunday_builders",
+          "syde.kr",
+          "zenonplane"
+        ],
+        "filled": 120,
+        "fill_rate": 0.189,
+        "value_counts": {
+          "sunday_builders": 41,
+          "zenonplane": 35,
+          "820_nam": 28,
+          "jakecoldbyte": 16
+        },
+        "unused_options": [
+          "disquiet_io",
+          "eostudio.kr",
+          "indiehack.kr",
+          "programmingzombie",
+          "syde.kr"
+        ],
+        "undeclared_values": []
+      },
+      "Sourcing Layers": {
+        "type": "multi_select",
+        "id": "%7B%3AXF",
+        "options": [
+          "keyword_search",
+          "watchlist",
+          "following_graph",
+          "reply_crawl"
+        ],
+        "filled": 541,
+        "fill_rate": 0.852,
+        "value_counts": {
+          "keyword_search": 324,
+          "following_graph": 120,
+          "reply_crawl": 98,
+          "watchlist": 6
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "Author Verified": {
+        "type": "checkbox",
+        "id": "%7C%3FSN",
+        "filled": 50,
+        "fill_rate": 0.0787,
+        "value_counts": {
+          "false": 585,
+          "true": 50
+        }
+      },
+      "Matched Keyword": {
+        "type": "multi_select",
+        "id": "%7CPnU",
+        "options": [
+          "1인 개발",
+          "1인개발",
+          "개인앱",
+          "공동창업자",
+          "런칭했어요",
+          "만들었습니다",
+          "바이브 코딩",
+          "바이브코딩",
+          "법인 설립",
+          "베타 오픈",
+          "비공개 테스터",
+          "사이드프로젝트",
+          "심사 리젝",
+          "앱스토어 심사",
+          "앱인토스",
+          "웨이팅리스트",
+          "유저 인터뷰",
+          "인디개발자",
+          "인디해커",
+          "창업 멤버",
+          "창업했습니다",
+          "첫 유저",
+          "출시했습니다",
+          "테스트플라이트",
+          "피드백",
+          "피드백 부탁"
+        ],
+        "filled": 387,
+        "fill_rate": 0.6094,
+        "value_counts": {
+          "만들었습니다": 50,
+          "출시했습니다": 39,
+          "사이드프로젝트": 33,
+          "피드백": 30,
+          "1인 개발": 28,
+          "유저 인터뷰": 28,
+          "창업 멤버": 27,
+          "법인 설립": 22,
+          "첫 유저": 20,
+          "바이브 코딩": 19,
+          "바이브코딩": 19,
+          "앱스토어 심사": 18,
+          "심사 리젝": 17,
+          "인디해커": 16,
+          "런칭했어요": 16,
+          "베타 오픈": 14,
+          "창업했습니다": 3,
+          "공동창업자": 2
+        },
+        "unused_options": [
+          "1인개발",
+          "개인앱",
+          "비공개 테스터",
+          "앱인토스",
+          "웨이팅리스트",
+          "인디개발자",
+          "테스트플라이트",
+          "피드백 부탁"
+        ],
+        "undeclared_values": []
+      },
+      "Match Reason": {
+        "type": "rich_text",
+        "id": "%7CTVo",
+        "filled": 224,
+        "fill_rate": 0.3528
+      },
+      "서비스명": {
+        "type": "title",
+        "id": "title",
+        "filled": 635,
+        "fill_rate": 1.0
+      }
+    }
+  },
+  "ch_앱스토어": {
+    "database_id": "00000000-0000-0000-0000-30deea8edcc5",
+    "title": "그물망 앱스토어 소싱 DB (앱스토어)",
+    "created_time": "2026-07-14T05:51:00.000Z",
+    "last_edited_time": "2026-07-28T06:36:00.000Z",
+    "row_count": 2671,
+    "prop_count": 21,
+    "properties": {
+      "Review Count": {
+        "type": "number",
+        "id": "%3C%3Dkb",
+        "format": "number",
+        "filled": 1222,
+        "fill_rate": 0.4575
+      },
+      "Captured At": {
+        "type": "date",
+        "id": "%3EC~V",
+        "filled": 2671,
+        "fill_rate": 1.0
+      },
+      "Rating": {
+        "type": "number",
+        "id": "%3EuSI",
+        "format": "number",
+        "filled": 2427,
+        "fill_rate": 0.9086
+      },
+      "Homepage": {
+        "type": "url",
+        "id": "%3FlpN",
+        "filled": 1487,
+        "fill_rate": 0.5567
+      },
+      "Match Reason": {
+        "type": "rich_text",
+        "id": "B%3DqV",
+        "filled": 2671,
+        "fill_rate": 1.0
+      },
+      "Developer": {
+        "type": "rich_text",
+        "id": "DEQd",
+        "filled": 2664,
+        "fill_rate": 0.9974
+      },
+      "Run ID": {
+        "type": "rich_text",
+        "id": "FFI~",
+        "filled": 2671,
+        "fill_rate": 1.0
+      },
+      "DB로 업데이트": {
+        "type": "checkbox",
+        "id": "VEei",
+        "filled": 14,
+        "fill_rate": 0.0052,
+        "value_counts": {
+          "false": 2657,
+          "true": 14
+        }
+      },
+      "주차": {
+        "type": "select",
+        "id": "WDsV",
+        "options": [
+          "2026-W14",
+          "2026-W15",
+          "2026-W16",
+          "2026-W17",
+          "2026-W18",
+          "2026-W19",
+          "2026-W20",
+          "2026-W21",
+          "2026-W22",
+          "2026-W23",
+          "2026-W24",
+          "2026-W25",
+          "2026-W26",
+          "2026-W27",
+          "2026-W28",
+          "2026-W29",
+          "2026-W30",
+          "2026-W31",
+          "2026-W32",
+          "2026-W33",
+          "2026-W34",
+          "2026-W35",
+          "2026-W36",
+          "2026-W37",
+          "2026-W38",
+          "2026-W39",
+          "2026-W40",
+          "2026-W41",
+          "2026-W42",
+          "2026-W43",
+          "2026-W44",
+          "2026-W45",
+          "2026-W46",
+          "2026-W47",
+          "2026-W48",
+          "2026-W49",
+          "2026-W50",
+          "2026-W51",
+          "2026-W52",
+          "2026-W53",
+          "2027-W01",
+          "2027-W02",
+          "2027-W03",
+          "2027-W04",
+          "2027-W05",
+          "2027-W06",
+          "2027-W07",
+          "2027-W08",
+          "2027-W09",
+          "2027-W10",
+          "2027-W11",
+          "2027-W12",
+          "2027-W13",
+          "2027-W14",
+          "2027-W15",
+          "2027-W16",
+          "2027-W17",
+          "2027-W18",
+          "2027-W19",
+          "2027-W20",
+          "2027-W21",
+          "2027-W22",
+          "2027-W23",
+          "2027-W24",
+          "2027-W25",
+          "2027-W26",
+          "2027-W27",
+          "2027-W28",
+          "2027-W29",
+          "2027-W30",
+          "2027-W31",
+          "2027-W32",
+          "2027-W33",
+          "2027-W34",
+          "2027-W35"
+        ],
+        "filled": 2671,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "2026-W29": 851,
+          "2026-W30": 465,
+          "2026-W32": 437,
+          "2026-W33": 344,
+          "2026-W31": 289,
+          "2026-W28": 285
+        },
+        "unused_options": [
+          "2026-W14",
+          "2026-W15",
+          "2026-W16",
+          "2026-W17",
+          "2026-W18",
+          "2026-W19",
+          "2026-W20",
+          "2026-W21",
+          "2026-W22",
+          "2026-W23",
+          "2026-W24",
+          "2026-W25",
+          "2026-W26",
+          "2026-W27",
+          "2026-W34",
+          "2026-W35",
+          "2026-W36",
+          "2026-W37",
+          "2026-W38",
+          "2026-W39",
+          "2026-W40",
+          "2026-W41",
+          "2026-W42",
+          "2026-W43",
+          "2026-W44",
+          "2026-W45",
+          "2026-W46",
+          "2026-W47",
+          "2026-W48",
+          "2026-W49",
+          "2026-W50",
+          "2026-W51",
+          "2026-W52",
+          "2026-W53",
+          "2027-W01",
+          "2027-W02",
+          "2027-W03",
+          "2027-W04",
+          "2027-W05",
+          "2027-W06",
+          "2027-W07",
+          "2027-W08",
+          "2027-W09",
+          "2027-W10",
+          "2027-W11",
+          "2027-W12",
+          "2027-W13",
+          "2027-W14",
+          "2027-W15",
+          "2027-W16",
+          "2027-W17",
+          "2027-W18",
+          "2027-W19",
+          "2027-W20",
+          "2027-W21",
+          "2027-W22",
+          "2027-W23",
+          "2027-W24",
+          "2027-W25",
+          "2027-W26",
+          "2027-W27",
+          "2027-W28",
+          "2027-W29",
+          "2027-W30",
+          "2027-W31",
+          "2027-W32",
+          "2027-W33",
+          "2027-W34",
+          "2027-W35"
+        ],
+        "undeclared_values": []
+      },
+      "Entry Type": {
+        "type": "select",
+        "id": "XaIJ",
+        "options": [
+          "chart_new",
+          "chart_existing",
+          "new_release"
+        ],
+        "filled": 2671,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "chart_new": 1624,
+          "chart_existing": 940,
+          "new_release": 107
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "App ID": {
+        "type": "rich_text",
+        "id": "ZTXP",
+        "filled": 2671,
+        "fill_rate": 1.0
+      },
+      "Raw Text": {
+        "type": "rich_text",
+        "id": "%5BnXD",
+        "filled": 2664,
+        "fill_rate": 0.9974
+      },
+      "One Liner": {
+        "type": "rich_text",
+        "id": "e%5BOR",
+        "filled": 2426,
+        "fill_rate": 0.9083
+      },
+      "Genre": {
+        "type": "multi_select",
+        "id": "j%3Bq%3D",
+        "options": [
+          "게임",
+          "엔터테인먼트",
+          "사진비디오",
+          "생산성",
+          "교육",
+          "소셜",
+          "금융",
+          "식음료",
+          "쇼핑",
+          "라이프스타일",
+          "건강피트니스",
+          "비즈니스",
+          "유틸리티",
+          "음악",
+          "뉴스",
+          "여행",
+          "도서",
+          "스포츠",
+          "참고",
+          "내비게이션",
+          "날씨",
+          "의료",
+          "잡지신문",
+          "개발자도구",
+          "그래픽디자인",
+          "전체"
+        ],
+        "filled": 2671,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "개발자도구": 269,
+          "게임": 197,
+          "유틸리티": 178,
+          "전체": 143,
+          "날씨": 133,
+          "사진비디오": 133,
+          "교육": 132,
+          "그래픽디자인": 124,
+          "스포츠": 116,
+          "엔터테인먼트": 109,
+          "라이프스타일": 105,
+          "생산성": 101,
+          "음악": 97,
+          "건강피트니스": 92,
+          "참고": 88,
+          "내비게이션": 84,
+          "잡지신문": 71,
+          "도서": 68,
+          "금융": 66,
+          "식음료": 63,
+          "여행": 57,
+          "비즈니스": 56,
+          "소셜": 53,
+          "의료": 49,
+          "뉴스": 49,
+          "쇼핑": 44
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "Post URL": {
+        "type": "url",
+        "id": "jXH_",
+        "filled": 2671,
+        "fill_rate": 1.0
+      },
+      "Release Date": {
+        "type": "date",
+        "id": "oJHS",
+        "filled": 2663,
+        "fill_rate": 0.997
+      },
+      "Chart": {
+        "type": "select",
+        "id": "qpSU",
+        "options": [
+          "무료",
+          "유료",
+          "매출",
+          "최신출시"
+        ],
+        "filled": 2635,
+        "fill_rate": 0.9865,
+        "value_counts": {
+          "무료": 1584,
+          "유료": 495,
+          "매출": 449,
+          "최신출시": 107
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "Chart Rank": {
+        "type": "number",
+        "id": "xX%60N",
+        "format": "number",
+        "filled": 2671,
+        "fill_rate": 1.0
+      },
+      "판정": {
+        "type": "select",
+        "id": "x%5E%3Ck",
+        "options": [
+          "Pass",
+          "Drop"
+        ],
+        "filled": 0,
+        "fill_rate": 0.0,
+        "unused_options": [
+          "Drop",
+          "Pass"
+        ],
+        "undeclared_values": []
+      },
+      "Artwork": {
+        "type": "url",
+        "id": "%7Do%7Dk",
+        "filled": 2664,
+        "fill_rate": 0.9974
+      },
+      "서비스명": {
+        "type": "title",
+        "id": "title",
+        "filled": 2664,
+        "fill_rate": 0.9974
+      }
+    }
+  },
+  "dedup_bplan2": {
+    "database_id": "00000000-0000-0000-0000-ef5f37517c6a",
+    "title": "Bplan 2.0 DB (1)",
+    "created_time": "2026-03-23T01:05:00.000Z",
+    "last_edited_time": "2026-03-23T01:05:00.000Z",
+    "row_count": 0,
+    "prop_count": 14,
+    "properties": {
+      "작성자": {
+        "type": "created_by",
+        "id": "9A0f",
+        "filled": 0,
+        "fill_rate": null
+      },
+      "Property": {
+        "type": "rich_text",
+        "id": "BYLw",
+        "filled": 0,
+        "fill_rate": null
+      },
+      "Status": {
+        "type": "select",
+        "id": "Dw'I",
+        "options": [
+          "미팅 예정",
+          "미팅 후 미결정",
+          "Fwd 후 미결정",
+          "Drop 완료",
+          "투자 완료",
+          "리서치 후 논의"
+        ],
+        "filled": 0,
+        "fill_rate": null,
+        "unused_options": [
+          "Drop 완료",
+          "Fwd 후 미결정",
+          "리서치 후 논의",
+          "미팅 예정",
+          "미팅 후 미결정",
+          "투자 완료"
+        ],
+        "undeclared_values": []
+      },
+      "점수": {
+        "type": "select",
+        "id": "HKR%5E",
+        "options": [
+          "Green",
+          "Orange",
+          "Red",
+          "칼드랍"
+        ],
+        "filled": 0,
+        "fill_rate": null,
+        "unused_options": [
+          "Green",
+          "Orange",
+          "Red",
+          "칼드랍"
+        ],
+        "undeclared_values": []
+      },
+      "아쉬운 이유": {
+        "type": "rich_text",
+        "id": "T6T(",
+        "filled": 0,
+        "fill_rate": null
+      },
+      "주차": {
+        "type": "created_time",
+        "id": "V%3DFQ",
+        "filled": 0,
+        "fill_rate": null
+      },
+      "좋은 이유": {
+        "type": "rich_text",
+        "id": "%5E%3Bz*",
+        "filled": 0,
+        "fill_rate": null
+      },
+      "To do": {
+        "type": "select",
+        "id": "_MqW",
+        "options": [
+          "To Drop",
+          "Fwd",
+          "미팅요청",
+          "Q&A",
+          "Hold",
+          "자료조사",
+          "Toss deal",
+          "기존 검토중",
+          "기존에 검토중",
+          "기존 검토 건"
+        ],
+        "filled": 0,
+        "fill_rate": null,
+        "unused_options": [
+          "Fwd",
+          "Hold",
+          "Q&A",
+          "To Drop",
+          "Toss deal",
+          "기존 검토 건",
+          "기존 검토중",
+          "기존에 검토중",
+          "미팅요청",
+          "자료조사"
+        ],
+        "undeclared_values": []
+      },
+      "Files": {
+        "type": "files",
+        "id": "j4nn",
+        "filled": 0,
+        "fill_rate": null
+      },
+      "Why?": {
+        "type": "rich_text",
+        "id": "si_%3E",
+        "filled": 0,
+        "fill_rate": null
+      },
+      "회사소개": {
+        "type": "rich_text",
+        "id": "tykj",
+        "filled": 0,
+        "fill_rate": null
+      },
+      "담당 심사역": {
+        "type": "people",
+        "id": "wq%5CG",
+        "filled": 0,
+        "fill_rate": null
+      },
+      "팀": {
+        "type": "rich_text",
+        "id": "%7Cp%5E9",
+        "filled": 0,
+        "fill_rate": null
+      },
+      "회사명(서비스명)": {
+        "type": "title",
+        "id": "title",
+        "filled": 0,
+        "fill_rate": null
+      }
+    }
+  },
+  "dedup_bplan3": {
+    "database_id": "00000000-0000-0000-0000-36ea38d63b9f",
+    "title": "Bplan 3.0 DB(3.23 ~ing)",
+    "created_time": "2026-03-23T01:05:00.000Z",
+    "last_edited_time": "2026-08-14T07:58:00.000Z",
+    "row_count": 562,
+    "prop_count": 23,
+    "properties": {
+      "대표명": {
+        "type": "rich_text",
+        "id": "9A0f",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "Status": {
+        "type": "select",
+        "id": "Dw'I",
+        "options": [
+          "Fwd 후 미결정",
+          "미팅 예정",
+          "미팅 후 미결정",
+          "Drop 완료",
+          "투자 완료",
+          "리서치 후 논의",
+          "Fwd to Slack"
+        ],
+        "filled": 387,
+        "fill_rate": 0.6886,
+        "value_counts": {
+          "Drop 완료": 385,
+          "미팅 예정": 1,
+          "Fwd 후 미결정": 1
+        },
+        "unused_options": [
+          "Fwd to Slack",
+          "리서치 후 논의",
+          "미팅 후 미결정",
+          "투자 완료"
+        ],
+        "undeclared_values": []
+      },
+      "팀이력": {
+        "type": "rich_text",
+        "id": "GfEX",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "이메일": {
+        "type": "rich_text",
+        "id": "HKR%5E",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "접수키": {
+        "type": "rich_text",
+        "id": "KW~%7B",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "드랍메일": {
+        "type": "checkbox",
+        "id": "LicT",
+        "filled": 503,
+        "fill_rate": 0.895,
+        "value_counts": {
+          "true": 503,
+          "false": 59
+        }
+      },
+      "담당자": {
+        "type": "select",
+        "id": "NZ%5Dn",
+        "options": [
+          "소피아 Sofia",
+          "김명준Jayden Kim",
+          "에반 Evan"
+        ],
+        "filled": 562,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "소피아 Sofia": 225,
+          "에반 Evan": 172,
+          "김명준Jayden Kim": 165
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "비즈니스모델": {
+        "type": "rich_text",
+        "id": "OrAg",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "DB 업데이트 시간": {
+        "type": "created_time",
+        "id": "QWRK",
+        "filled": 562,
+        "fill_rate": 1.0
+      },
+      "솔루션": {
+        "type": "rich_text",
+        "id": "T6T(",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "fwd to whom?": {
+        "type": "select",
+        "id": "UPD%5C",
+        "options": [
+          "ReviewerTwo",
+          "ReviewerOne",
+          "zero"
+        ],
+        "filled": 21,
+        "fill_rate": 0.0374,
+        "value_counts": {
+          "ReviewerTwo": 15,
+          "ReviewerOne": 5,
+          "zero": 1
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "점수": {
+        "type": "select",
+        "id": "Wapd",
+        "options": [
+          "칼드랍",
+          "Red",
+          "Orange",
+          "Green",
+          "?"
+        ],
+        "filled": 562,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "Red": 508,
+          "칼드랍": 32,
+          "Orange": 15,
+          "?": 6,
+          "Green": 1
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "문제정의": {
+        "type": "rich_text",
+        "id": "%5E%3Bz*",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "to do": {
+        "type": "select",
+        "id": "_MqW",
+        "options": [
+          "Newly Added",
+          "Review Done",
+          "Mail Fwd",
+          "To Drop",
+          "미팅요청",
+          "Q&A",
+          "Hold"
+        ],
+        "filled": 562,
+        "fill_rate": 1.0,
+        "value_counts": {
+          "To Drop": 460,
+          "Newly Added": 43,
+          "Review Done": 43,
+          "Mail Fwd": 12,
+          "미팅요청": 3,
+          "Hold": 1
+        },
+        "unused_options": [
+          "Q&A"
+        ],
+        "undeclared_values": []
+      },
+      "사업계획서": {
+        "type": "url",
+        "id": "j4nn",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "포워드 이유": {
+        "type": "rich_text",
+        "id": "lNZg",
+        "filled": 39,
+        "fill_rate": 0.0694
+      },
+      "추가내용": {
+        "type": "rich_text",
+        "id": "mHt%3F",
+        "filled": 557,
+        "fill_rate": 0.9911
+      },
+      "담당심사역": {
+        "type": "people",
+        "id": "sYzt",
+        "filled": 2,
+        "fill_rate": 0.0036
+      },
+      "연락처": {
+        "type": "rich_text",
+        "id": "tykj",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "경쟁사": {
+        "type": "rich_text",
+        "id": "wq%5CG",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "경쟁력": {
+        "type": "rich_text",
+        "id": "x%3EW%3F",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "서비스정의": {
+        "type": "rich_text",
+        "id": "%7Cp%5E9",
+        "filled": 561,
+        "fill_rate": 0.9982
+      },
+      "기업명": {
+        "type": "title",
+        "id": "title",
+        "filled": 561,
+        "fill_rate": 0.9982
+      }
+    }
+  },
+  "dedup_극초기": {
+    "database_id": "00000000-0000-0000-0000-72b2b8579963",
+    "title": "극초기 스타트업 DB",
+    "created_time": "2021-02-21T15:03:00.000Z",
+    "last_edited_time": "2026-08-13T02:14:00.000Z",
+    "row_count": 1298,
+    "prop_count": 16,
+    "properties": {
+      "다운로드수": {
+        "type": "rich_text",
+        "id": "%3Cd%5Ca",
+        "filled": 208,
+        "fill_rate": 0.1602
+      },
+      "슬랙 발송?": {
+        "type": "checkbox",
+        "id": "%3EzEL",
+        "filled": 1079,
+        "fill_rate": 0.8313,
+        "value_counts": {
+          "true": 1079,
+          "false": 219
+        }
+      },
+      "한 줄 설명": {
+        "type": "rich_text",
+        "id": "Cdut",
+        "filled": 1267,
+        "fill_rate": 0.9761
+      },
+      "발굴": {
+        "type": "select",
+        "id": "DaXR",
+        "options": [
+          "앱스토어",
+          "플레이스토어",
+          "디스콰이엇",
+          "비긴메이트",
+          "더히트(thehit)",
+          "마루180",
+          "디캠프",
+          "롯데벤처스",
+          "넥스트유니콘",
+          "피칫",
+          "패스트벤처스:텍스트북",
+          "Travis Bot",
+          "일상 속 관심사",
+          "토스 Found",
+          "채용 플랫폼",
+          "SNU 유니콘",
+          "프로덕트헌트",
+          "seezak",
+          "데모데이",
+          "Crypto Fundraising",
+          "플래텀",
+          "혁신의숲",
+          "인스타그램",
+          "링크드인",
+          "앤틀러",
+          "긱뉴스",
+          "인프런",
+          "해커뉴스",
+          "스레드",
+          "eoplanet",
+          "linkit",
+          "Brianimpact",
+          "GitHub",
+          "클로드코드"
+        ],
+        "filled": 965,
+        "fill_rate": 0.7435,
+        "value_counts": {
+          "앱스토어": 205,
+          "디스콰이엇": 159,
+          "비긴메이트": 141,
+          "플레이스토어": 139,
+          "프로덕트헌트": 95,
+          "일상 속 관심사": 52,
+          "해커뉴스": 38,
+          "링크드인": 30,
+          "더히트(thehit)": 18,
+          "스레드": 12,
+          "혁신의숲": 10,
+          "플래텀": 8,
+          "데모데이": 7,
+          "패스트벤처스:텍스트북": 6,
+          "인스타그램": 5,
+          "Travis Bot": 5,
+          "Crypto Fundraising": 4,
+          "넥스트유니콘": 4,
+          "피칫": 4,
+          "seezak": 3,
+          "SNU 유니콘": 3,
+          "채용 플랫폼": 3,
+          "eoplanet": 2,
+          "긱뉴스": 2,
+          "마루180": 2,
+          "클로드코드": 1,
+          "GitHub": 1,
+          "Brianimpact": 1,
+          "linkit": 1,
+          "인프런": 1,
+          "토스 Found": 1,
+          "롯데벤처스": 1,
+          "디캠프": 1
+        },
+        "unused_options": [
+          "앤틀러"
+        ],
+        "undeclared_values": []
+      },
+      "DB 확인": {
+        "type": "checkbox",
+        "id": "F%5ELL",
+        "filled": 30,
+        "fill_rate": 0.0231,
+        "value_counts": {
+          "false": 1268,
+          "true": 30
+        }
+      },
+      "To do ": {
+        "type": "select",
+        "id": "O%60TR",
+        "options": [
+          "1. 미팅요청",
+          "2. Q&A하기",
+          "3. 드랍하기"
+        ],
+        "filled": 46,
+        "fill_rate": 0.0354,
+        "value_counts": {
+          "1. 미팅요청": 38,
+          "3. 드랍하기": 6,
+          "2. Q&A하기": 2
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "Status": {
+        "type": "select",
+        "id": "OtJJ",
+        "options": [
+          "0. 미팅 X",
+          "1. 미팅여부 결정전",
+          "2. 미팅요청",
+          "3. 미팅회신 대기중",
+          "4. 미팅예정",
+          "5. 미팅 후 미결정",
+          "6. (소프트 포함) 드랍완료",
+          "7. 투자완료",
+          "8. 스타트업 DB로 포팅",
+          "메일 작성(앤)",
+          "메일 작성(마이크)",
+          "메일 작성(Reviewer C)",
+          "초안 메일 작성 완료(AI)"
+        ],
+        "filled": 934,
+        "fill_rate": 0.7196,
+        "value_counts": {
+          "6. (소프트 포함) 드랍완료": 476,
+          "0. 미팅 X": 427,
+          "8. 스타트업 DB로 포팅": 10,
+          "2. 미팅요청": 8,
+          "4. 미팅예정": 4,
+          "7. 투자완료": 4,
+          "3. 미팅회신 대기중": 3,
+          "1. 미팅여부 결정전": 1,
+          "5. 미팅 후 미결정": 1
+        },
+        "unused_options": [
+          "메일 작성(마이크)",
+          "메일 작성(앤)",
+          "메일 작성(Reviewer C)",
+          "초안 메일 작성 완료(AI)"
+        ],
+        "undeclared_values": []
+      },
+      "만나요": {
+        "type": "people",
+        "id": "RNO%3F",
+        "filled": 174,
+        "fill_rate": 0.1341
+      },
+      "발굴자": {
+        "type": "people",
+        "id": "S%3D%3Ev",
+        "filled": 307,
+        "fill_rate": 0.2365
+      },
+      "Created time": {
+        "type": "created_time",
+        "id": "%5Bbpv",
+        "filled": 1298,
+        "fill_rate": 1.0
+      },
+      "논의 포인트": {
+        "type": "rich_text",
+        "id": "%5BqY%7C",
+        "filled": 1202,
+        "fill_rate": 0.926
+      },
+      "링크": {
+        "type": "url",
+        "id": "rYjV",
+        "filled": 798,
+        "fill_rate": 0.6148
+      },
+      "영역": {
+        "type": "multi_select",
+        "id": "vvpW",
+        "options": [
+          "지식정보",
+          "비즈니스",
+          "교육",
+          "엔터테인먼트",
+          "금융",
+          "식음료",
+          "헬스케어 & 건강",
+          "라이프스타일",
+          "부동산/인테리어",
+          "뉴스/잡지",
+          "소셜 & 데이팅",
+          "여성향",
+          "커머스",
+          "여행",
+          "모빌리티",
+          "키즈",
+          "스포츠",
+          "물류",
+          "뷰티",
+          "반려동물",
+          "기록",
+          "리걸테크",
+          "애드테크",
+          "실버",
+          "O2O",
+          "컨텐츠제작",
+          "커뮤니티",
+          "육아",
+          "SaaS",
+          "패션",
+          "기타",
+          "예술/디자인",
+          "스마트팜",
+          "AI",
+          "건축",
+          "축산",
+          "채용",
+          "시니어",
+          "low-code",
+          "B2B",
+          "솔루션",
+          "건설",
+          "컨텐츠",
+          "생산성",
+          "캠핑",
+          "유틸리티",
+          "플랫폼",
+          "NFT",
+          "소재",
+          "친환경",
+          "중고거래",
+          "핀테크",
+          "HR",
+          "크로스보더",
+          "팀빌딩",
+          "게임",
+          "오프라인",
+          "리테일",
+          "하이퍼로컬",
+          "비건",
+          "투자",
+          "SNS",
+          "개발자",
+          "CRM",
+          "커리어",
+          "배송",
+          "가전제품",
+          "침구류",
+          "멘탈케어",
+          "배달",
+          "반찬",
+          "챗봇",
+          "영어회화",
+          "4050",
+          "SME",
+          "크리에이터",
+          "식물",
+          "생활서비스",
+          "운동",
+          "축산물",
+          "소셜",
+          "숏폼",
+          "웹툰",
+          "채팅",
+          "프롭테크",
+          "이사견적",
+          "블록체인",
+          "프롭",
+          "이커머스",
+          "남성향",
+          "웹쓰리",
+          "음향",
+          "노코드",
+          "디지털굿즈",
+          "인플루언서",
+          "재무",
+          "\bO2O",
+          "제조",
+          "ESG",
+          "analytics",
+          "RPA",
+          "광고",
+          "외국인",
+          "채ㅇ",
+          "이미지생성",
+          "Social",
+          "브랜드",
+          "사주",
+          "컨",
+          "세일즈",
+          "일정관리",
+          "구매대행",
+          "에이전트",
+          "마케팅",
+          "일기",
+          "Voice",
+          "검색",
+          "Agent",
+          "프롬프트",
+          "LLM",
+          "미팅록",
+          "온보딩",
+          "앱 빌더",
+          "Vertical",
+          "설문조사",
+          "캔버스",
+          "테스팅",
+          "비디오",
+          "자동화",
+          "브라우저",
+          "IoT",
+          "음성 AI",
+          "개발도구",
+          "API",
+          "문서화",
+          "머신러늽",
+          "심리",
+          "애드인",
+          "개발자 도구",
+          "소프트웨어 엔지니어링",
+          "뉴스",
+          "노트",
+          "회의",
+          "시간 관리",
+          "대화형 인터페이스",
+          "사진",
+          "어시스턴트",
+          "오디오",
+          "노트테이킹",
+          "아바타",
+          "\bai",
+          "영업",
+          "이미지",
+          "UI",
+          "텍스트",
+          "바이브코딩",
+          "언어학습",
+          "면접",
+          "크리에이티브",
+          "멀티모달",
+          "영상 AI",
+          "자아탐색",
+          "리서치",
+          "UI/UX",
+          "데이터 분석",
+          "CS",
+          "미팅",
+          "AI 미팅",
+          "DB",
+          "워크플로우",
+          "디자인",
+          "음악 AI",
+          "AI 브라우저",
+          "노코드앱빌더",
+          "AI 비서",
+          "AI 에이전트",
+          "프로젝트 관리",
+          "목표 관리",
+          "이메일",
+          "AI 코딩",
+          "생성형 AI",
+          "QA",
+          "글쓰기",
+          "SEO",
+          "SMB",
+          "데모",
+          "사모펀드",
+          "AI컴패니언",
+          "보안",
+          "AX",
+          "도서"
+        ],
+        "filled": 1163,
+        "fill_rate": 0.896,
+        "value_counts": {
+          "\bai": 163,
+          "헬스케어 & 건강": 107,
+          "교육": 72,
+          "SaaS": 70,
+          "커머스": 59,
+          "생산성": 58,
+          "비즈니스": 54,
+          "소셜 & 데이팅": 51,
+          "라이프스타일": 48,
+          "금융": 46,
+          "엔터테인먼트": 42,
+          "식음료": 40,
+          "지식정보": 26,
+          "커뮤니티": 26,
+          "반려동물": 25,
+          "여행": 24,
+          "채용": 22,
+          "B2B": 20,
+          "블록체인": 20,
+          "\bO2O": 17,
+          "플랫폼": 17,
+          "컨텐츠": 17,
+          "모빌리티": 17,
+          "패션": 16,
+          "SNS": 15,
+          "Agent": 14,
+          "뉴스/잡지": 14,
+          "소셜": 13,
+          "마케팅": 13,
+          "부동산/인테리어": 13,
+          "뷰티": 12,
+          "노코드": 11,
+          "스포츠": 11,
+          "유틸리티": 10,
+          "음성 AI": 10,
+          "하이퍼로컬": 10,
+          "시니어": 9,
+          "HR": 8,
+          "컨텐츠제작": 8,
+          "예술/디자인": 8,
+          "키즈": 8,
+          "친환경": 8,
+          "운동": 7,
+          "물류": 7,
+          "핀테크": 7,
+          "개발자 도구": 6,
+          "개발자": 6,
+          "육아": 6,
+          "이커머스": 5,
+          "노코드앱빌더": 5,
+          "영상 AI": 5,
+          "개발도구": 5,
+          "챗봇": 5,
+          "기록": 5,
+          "솔루션": 5,
+          "AI 에이전트": 4,
+          "워크플로우": 4,
+          "디자인": 4,
+          "브라우저": 4,
+          "커리어": 4,
+          "analytics": 4,
+          "NFT": 4,
+          "멘탈케어": 4,
+          "여성향": 4,
+          "리걸테크": 3,
+          "비디오": 3,
+          "자동화": 3,
+          "숏폼": 3,
+          "어시스턴트": 3,
+          "이미지생성": 3,
+          "테스팅": 3,
+          "Voice": 3,
+          "CRM": 3,
+          "인플루언서": 3,
+          "건설": 3,
+          "RPA": 3,
+          "중고거래": 3,
+          "AX": 2,
+          "영어회화": 2,
+          "언어학습": 2,
+          "미팅록": 2,
+          "CS": 2,
+          "심리": 2,
+          "문서화": 2,
+          "글쓰기": 2,
+          "AI 비서": 2,
+          "이메일": 2,
+          "앱 빌더": 2,
+          "AI 미팅": 2,
+          "일기": 2,
+          "데이터 분석": 2,
+          "바이브코딩": 2,
+          "자아탐색": 2,
+          "온보딩": 2,
+          "LLM": 2,
+          "설문조사": 2,
+          "광고": 2,
+          "건축": 2,
+          "브랜드": 2,
+          "재무": 2,
+          "리테일": 2,
+          "ESG": 2,
+          "투자": 2,
+          "게임": 2,
+          "웹쓰리": 2,
+          "생활서비스": 2,
+          "애드테크": 2,
+          "실버": 2,
+          "시간 관리": 1,
+          "도서": 1,
+          "AI컴패니언": 1,
+          "뉴스": 1,
+          "사모펀드": 1,
+          "데모": 1,
+          "SMB": 1,
+          "SEO": 1,
+          "QA": 1,
+          "세일즈": 1,
+          "생성형 AI": 1,
+          "AI 코딩": 1,
+          "회의": 1,
+          "목표 관리": 1,
+          "프로젝트 관리": 1,
+          "AI 브라우저": 1,
+          "API": 1,
+          "음악 AI": 1,
+          "DB": 1,
+          "UI/UX": 1,
+          "리서치": 1,
+          "일정관리": 1,
+          "검색": 1,
+          "크리에이티브": 1,
+          "멀티모달": 1,
+          "텍스트": 1,
+          "UI": 1,
+          "이미지": 1,
+          "영업": 1,
+          "아바타": 1,
+          "노트테이킹": 1,
+          "오디오": 1,
+          "소프트웨어 엔지니어링": 1,
+          "애드인": 1,
+          "캔버스": 1,
+          "구매대행": 1,
+          "에이전트": 1,
+          "사주": 1,
+          "배달": 1,
+          "Social": 1,
+          "채팅": 1,
+          "외국인": 1,
+          "제조": 1,
+          "크리에이터": 1,
+          "디지털굿즈": 1,
+          "음향": 1,
+          "남성향": 1,
+          "프롭": 1,
+          "이사견적": 1,
+          "프롭테크": 1,
+          "웹툰": 1,
+          "축산물": 1,
+          "식물": 1,
+          "배송": 1,
+          "비건": 1,
+          "오프라인": 1,
+          "팀빌딩": 1,
+          "크로스보더": 1,
+          "소재": 1,
+          "캠핑": 1,
+          "low-code": 1,
+          "스마트팜": 1,
+          "기타": 1
+        },
+        "unused_options": [
+          "4050",
+          "AI",
+          "IoT",
+          "O2O",
+          "SME",
+          "Vertical",
+          "가전제품",
+          "노트",
+          "대화형 인터페이스",
+          "머신러늽",
+          "면접",
+          "미팅",
+          "반찬",
+          "보안",
+          "사진",
+          "채ㅇ",
+          "축산",
+          "침구류",
+          "컨",
+          "프롬프트"
+        ],
+        "undeclared_values": []
+      },
+      "평점": {
+        "type": "number",
+        "id": "xATf",
+        "format": "number",
+        "filled": 456,
+        "fill_rate": 0.3513
+      },
+      "Tier": {
+        "type": "select",
+        "id": "%7CO%5DL",
+        "options": [
+          "Catch",
+          "Trend",
+          "Wait"
+        ],
+        "filled": 850,
+        "fill_rate": 0.6549,
+        "value_counts": {
+          "Trend": 423,
+          "Catch": 299,
+          "Wait": 128
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "법인(서비스)": {
+        "type": "title",
+        "id": "title",
+        "filled": 1292,
+        "fill_rate": 0.9954
+      }
+    }
+  },
+  "dedup_스타트업본DB": {
+    "database_id": "00000000-0000-0000-0000-3b327e053219",
+    "title": "스타트업 DB ",
+    "created_time": "2019-05-23T11:22:00.000Z",
+    "last_edited_time": "2026-08-14T07:29:00.000Z",
+    "row_count": 2315,
+    "prop_count": 34,
+    "properties": {
+      "✅ 사후관리": {
+        "type": "people",
+        "id": "!e6u",
+        "filled": 250,
+        "fill_rate": 0.108
+      },
+      "수정시간": {
+        "type": "last_edited_time",
+        "id": ".%22%3Eo",
+        "filled": 2315,
+        "fill_rate": 1.0
+      },
+      "✅ 한줄요약": {
+        "type": "rich_text",
+        "id": "14N*",
+        "filled": 1804,
+        "fill_rate": 0.7793
+      },
+      "✅ 서비스/제품": {
+        "type": "rich_text",
+        "id": "1ZpE",
+        "filled": 1175,
+        "fill_rate": 0.5076
+      },
+      "✅ Review Status": {
+        "type": "select",
+        "id": "6i%3B%3D",
+        "options": [
+          "Passive",
+          "Active",
+          "Wired",
+          "IR",
+          "Post IR",
+          "Exit",
+          "후속투자"
+        ],
+        "filled": 2282,
+        "fill_rate": 0.9857,
+        "value_counts": {
+          "Passive": 1802,
+          "Wired": 338,
+          "Active": 104,
+          "Post IR": 19,
+          "IR": 18,
+          "후속투자": 1
+        },
+        "unused_options": [
+          "Exit"
+        ],
+        "undeclared_values": []
+      },
+      "패밀리": {
+        "type": "checkbox",
+        "id": "79i~",
+        "filled": 297,
+        "fill_rate": 0.1283,
+        "value_counts": {
+          "false": 2018,
+          "true": 297
+        }
+      },
+      "Archive": {
+        "type": "checkbox",
+        "id": "%3C%5C%7DY",
+        "filled": 1888,
+        "fill_rate": 0.8156,
+        "value_counts": {
+          "true": 1888,
+          "false": 427
+        }
+      },
+      "✅ 딜소싱 채널 분류": {
+        "type": "select",
+        "id": "B%5B'%5D",
+        "options": [
+          "via investor 소개",
+          "다이렉트(콜드콜)",
+          "다이렉트(인바운드)",
+          "via 스타트업러 소개",
+          "via 기타인맥 소개",
+          "오피스아워",
+          "via KV패밀리 소개",
+          "비플랜",
+          "기타(업계 행사 심사 등)"
+        ],
+        "filled": 1393,
+        "fill_rate": 0.6017,
+        "value_counts": {
+          "via investor 소개": 329,
+          "기타(업계 행사 심사 등)": 195,
+          "다이렉트(콜드콜)": 183,
+          "via 스타트업러 소개": 181,
+          "다이렉트(인바운드)": 151,
+          "via 기타인맥 소개": 148,
+          "via KV패밀리 소개": 133,
+          "비플랜": 60,
+          "오피스아워": 13
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "✅ 발굴시점": {
+        "type": "multi_select",
+        "id": "IHL%3E",
+        "options": [
+          "2026년1월",
+          "2018년",
+          "2019년",
+          "2020년10월",
+          "2020년11월",
+          "2020년12월",
+          "2020년4월",
+          "2020년5월",
+          "2020년6월",
+          "2020년7월",
+          "2020년8월",
+          "2020년9월",
+          "2021년 10월",
+          "2021년 11월",
+          "2021년 12월",
+          "2021년 5월",
+          "2021년 6월",
+          "2021년 7월",
+          "2021년 8월",
+          "2021년 9월",
+          "2021년1월",
+          "2021년2월",
+          "2021년3월",
+          "2021년4월",
+          "2022년 10월",
+          "2022년 11월",
+          "2022년 1월",
+          "2022년 2월",
+          "2022년 3월",
+          "2022년 4월",
+          "2022년 5월",
+          "2022년 6월",
+          "2022년 7월",
+          "2022년 8월",
+          "2022년 9월",
+          "2022년12월",
+          "2023년 10월",
+          "2023년 11월",
+          "2023년 12월",
+          "2023년 1월",
+          "2023년 2월",
+          "2023년 3월",
+          "2023년 4월",
+          "2023년 5월",
+          "2023년 6월",
+          "2023년 7월",
+          "2023년 8월",
+          "2023년 9월",
+          "2024년 10월",
+          "2024년 11월",
+          "2024년 12월",
+          "2024년 1월",
+          "2024년 2월",
+          "2024년 3월",
+          "2024년 4월",
+          "2024년 5월",
+          "2024년 6월",
+          "2024년 7월",
+          "2024년 8월",
+          "2024년 9월",
+          "2025년 1월",
+          "2025년 2월",
+          "2025년 3월",
+          "2025년 4월",
+          "2025년 5월",
+          "2025년 6월",
+          "2025년 7월",
+          "2025년 8월",
+          "2025년 9월",
+          "2025년 10월",
+          "2025년 11월",
+          "2025년 12월",
+          "2026년 1월",
+          "2026년 2월",
+          "2026년 3월",
+          "2026년 1",
+          "2026년 4월",
+          "2026년 5월",
+          "2026년 6월",
+          "2026년 7월",
+          "2026년 8월"
+        ],
+        "filled": 1514,
+        "fill_rate": 0.654,
+        "value_counts": {
+          "2021년3월": 45,
+          "2021년 5월": 42,
+          "2022년 3월": 38,
+          "2021년 9월": 37,
+          "2021년4월": 36,
+          "2025년 9월": 35,
+          "2024년 1월": 35,
+          "2021년 10월": 34,
+          "2022년 10월": 34,
+          "2024년 3월": 29,
+          "2021년 12월": 28,
+          "2022년 1월": 27,
+          "2026년 5월": 26,
+          "2025년 2월": 26,
+          "2021년 7월": 26,
+          "2021년 8월": 25,
+          "2019년": 25,
+          "2021년 6월": 25,
+          "2024년 5월": 24,
+          "2023년 4월": 24,
+          "2022년 9월": 24,
+          "2021년1월": 24,
+          "2020년9월": 24,
+          "2025년 5월": 23,
+          "2022년 6월": 23,
+          "2022년 8월": 23,
+          "2026년 3월": 22,
+          "2022년 2월": 22,
+          "2025년 11월": 21,
+          "2025년 10월": 21,
+          "2025년 7월": 21,
+          "2026년 6월": 20,
+          "2025년 6월": 20,
+          "2022년 5월": 20,
+          "2020년8월": 20,
+          "2026년 1월": 19,
+          "2025년 12월": 19,
+          "2022년 4월": 19,
+          "2023년 3월": 19,
+          "2021년 11월": 19,
+          "2024년 9월": 18,
+          "2023년 6월": 18,
+          "2024년 8월": 18,
+          "2025년 8월": 17,
+          "2023년 11월": 17,
+          "2020년10월": 17,
+          "2025년 1월": 16,
+          "2023년 5월": 16,
+          "2024년 12월": 16,
+          "2023년 1월": 16,
+          "2022년 11월": 15,
+          "2025년 3월": 14,
+          "2023년 7월": 14,
+          "2023년 2월": 14,
+          "2021년2월": 14,
+          "2020년11월": 14,
+          "2024년 10월": 13,
+          "2022년 7월": 13,
+          "2020년6월": 12,
+          "2024년 6월": 12,
+          "2023년 10월": 12,
+          "2023년 8월": 12,
+          "2020년7월": 12,
+          "2026년 2월": 11,
+          "2023년 9월": 11,
+          "2024년 7월": 11,
+          "2020년12월": 11,
+          "2025년 4월": 10,
+          "2022년12월": 10,
+          "2024년 11월": 9,
+          "2024년 4월": 9,
+          "2023년 12월": 9,
+          "2020년5월": 9,
+          "2020년4월": 9,
+          "2026년 4월": 6,
+          "2026년 7월": 6,
+          "2024년 2월": 6,
+          "2026년 8월": 3,
+          "2026년1월": 3,
+          "2018년": 1
+        },
+        "unused_options": [
+          "2026년 1"
+        ],
+        "undeclared_values": []
+      },
+      "Exit": {
+        "type": "checkbox",
+        "id": "K%2B%3FQ",
+        "filled": 41,
+        "fill_rate": 0.0177,
+        "value_counts": {
+          "false": 2274,
+          "true": 41
+        }
+      },
+      "✅ 영역": {
+        "type": "select",
+        "id": "KQvh",
+        "options": [
+          "Service",
+          "Tech",
+          "Contents",
+          "Game",
+          "Healthcare",
+          "Crypto",
+          "Consumer Goods",
+          "AI-Ent."
+        ],
+        "filled": 1959,
+        "fill_rate": 0.8462,
+        "value_counts": {
+          "Service": 996,
+          "Tech": 471,
+          "Healthcare": 268,
+          "Game": 83,
+          "Crypto": 67,
+          "Consumer Goods": 54,
+          "Contents": 18,
+          "AI-Ent.": 2
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "✅ IR자료 드랍박스 저장": {
+        "type": "checkbox",
+        "id": "NBcZ",
+        "filled": 791,
+        "fill_rate": 0.3417,
+        "value_counts": {
+          "false": 1524,
+          "true": 791
+        }
+      },
+      "✅ 심사": {
+        "type": "people",
+        "id": "NG(H",
+        "filled": 2096,
+        "fill_rate": 0.9054
+      },
+      "Created by": {
+        "type": "created_by",
+        "id": "O%3C%3C%3F",
+        "filled": 2315,
+        "fill_rate": 1.0
+      },
+      "✅ 딜소싱 채널": {
+        "type": "rich_text",
+        "id": "Q)x%3D",
+        "filled": 1271,
+        "fill_rate": 0.549
+      },
+      "✅ 대표이사": {
+        "type": "rich_text",
+        "id": "UFl6",
+        "filled": 1848,
+        "fill_rate": 0.7983
+      },
+      "수정자": {
+        "type": "last_edited_by",
+        "id": "_%40%23%26",
+        "filled": 2315,
+        "fill_rate": 1.0
+      },
+      "✅ 홈페이지": {
+        "type": "url",
+        "id": "_mUp",
+        "filled": 585,
+        "fill_rate": 0.2527
+      },
+      "극초기 스타트업 DB": {
+        "type": "relation",
+        "id": "mYMa",
+        "relation": {
+          "database_id": "00000000-0000-0000-0000-72b2b8579963",
+          "data_source_id": "00000000-0000-0000-0000-e3dc926767d1",
+          "type": "single_property",
+          "single_property": {}
+        },
+        "filled": 4,
+        "fill_rate": 0.0017
+      },
+      "드랍 사유": {
+        "type": "rich_text",
+        "id": "uCAc",
+        "filled": 325,
+        "fill_rate": 0.1404
+      },
+      "패밀리 ID": {
+        "type": "number",
+        "id": "w!Ap",
+        "format": "number",
+        "filled": 279,
+        "fill_rate": 0.1205
+      },
+      "현재 결론": {
+        "type": "select",
+        "id": "xZhd",
+        "options": [
+          "Hold",
+          "추가검토"
+        ],
+        "filled": 7,
+        "fill_rate": 0.003,
+        "value_counts": {
+          "추가검토": 5,
+          "Hold": 2
+        },
+        "unused_options": [],
+        "undeclared_values": []
+      },
+      "생성 일시": {
+        "type": "created_time",
+        "id": "~TMs",
+        "filled": 2315,
+        "fill_rate": 1.0
+      },
+      "회사명": {
+        "type": "title",
+        "id": "title",
+        "filled": 2309,
+        "fill_rate": 0.9974
+      },
+      "✅ 발굴": {
+        "type": "people",
+        "id": "prop_2",
+        "filled": 1644,
+        "fill_rate": 0.7102
+      },
+      "Files": {
+        "type": "files",
+        "id": "00000000-0000-0000-0000-1155ae050b93",
+        "filled": 1,
+        "fill_rate": 0.0004
+      },
+      "아쉬운 이유": {
+        "type": "rich_text",
+        "id": "00000000-0000-0000-0000-d6af7962d9df",
+        "filled": 2,
+        "fill_rate": 0.0009
+      },
+      "To do": {
+        "type": "select",
+        "id": "00000000-0000-0000-0000-abf624933e04",
+        "options": [
+          "To Drop",
+          "Fwd",
+          "미팅요청",
+          "Q&A",
+          "Hold",
+          "자료조사",
+          "Toss deal",
+          "기존 검토중",
+          "기존에 검토중",
+          "기존 검토 건"
+        ],
+        "filled": 2,
+        "fill_rate": 0.0009,
+        "value_counts": {
+          "기존 검토 건": 1,
+          "미팅요청": 1
+        },
+        "unused_options": [
+          "Fwd",
+          "Hold",
+          "Q&A",
+          "To Drop",
+          "Toss deal",
+          "기존 검토중",
+          "기존에 검토중",
+          "자료조사"
+        ],
+        "undeclared_values": []
+      },
+      "Status": {
+        "type": "select",
+        "id": "00000000-0000-0000-0000-90acbf7946d5",
+        "options": [
+          "미팅 예정",
+          "미팅 후 미결정",
+          "Fwd 후 미결정",
+          "Drop 완료",
+          "투자 완료",
+          "리서치 후 논의"
+        ],
+        "filled": 2,
+        "fill_rate": 0.0009,
+        "value_counts": {
+          "미팅 예정": 1,
+          "미팅 후 미결정": 1
+        },
+        "unused_options": [
+          "Drop 완료",
+          "Fwd 후 미결정",
+          "리서치 후 논의",
+          "투자 완료"
+        ],
+        "undeclared_values": []
+      },
+      "좋은 이유": {
+        "type": "rich_text",
+        "id": "00000000-0000-0000-0000-0e05ab247a08",
+        "filled": 2,
+        "fill_rate": 0.0009
+      },
+      "점수": {
+        "type": "select",
+        "id": "00000000-0000-0000-0000-57d0777adbff",
+        "options": [
+          "Green",
+          "Orange",
+          "Red",
+          "칼드랍"
+        ],
+        "filled": 1,
+        "fill_rate": 0.0004,
+        "value_counts": {
+          "Orange": 1
+        },
+        "unused_options": [
+          "Green",
+          "Red",
+          "칼드랍"
+        ],
+        "undeclared_values": []
+      },
+      "팀": {
+        "type": "rich_text",
+        "id": "00000000-0000-0000-0000-46448266be99",
+        "filled": 1,
+        "fill_rate": 0.0004
+      },
+      "담당 심사역": {
+        "type": "people",
+        "id": "00000000-0000-0000-0000-0a9d6e70a230",
+        "filled": 3,
+        "fill_rate": 0.0013
+      },
+      "회사소개": {
+        "type": "rich_text",
+        "id": "00000000-0000-0000-0000-e2247d44822a",
+        "filled": 1,
+        "fill_rate": 0.0004
+      }
+    }
+  }
+}

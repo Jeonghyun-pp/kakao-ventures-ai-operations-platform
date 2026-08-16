@@ -1,0 +1,278 @@
+{
+  "object": "database",
+  "id": "00000000-0000-0000-0000-ef5f37517c6a",
+  "cover": null,
+  "icon": {
+    "type": "emoji",
+    "emoji": "📕"
+  },
+  "created_time": "2026-03-23T01:05:00.000Z",
+  "created_by": {
+    "object": "user",
+    "id": "00000000-0000-0000-0000-268641a6e153"
+  },
+  "last_edited_by": {
+    "object": "user",
+    "id": "00000000-0000-0000-0000-268641a6e153"
+  },
+  "last_edited_time": "2026-03-23T01:05:00.000Z",
+  "title": [
+    {
+      "type": "text",
+      "text": {
+        "content": "Bplan 2.0 DB (1)",
+        "link": null
+      },
+      "annotations": {
+        "bold": false,
+        "italic": false,
+        "strikethrough": false,
+        "underline": false,
+        "code": false,
+        "color": "default"
+      },
+      "plain_text": "Bplan 2.0 DB (1)",
+      "href": null
+    }
+  ],
+  "description": [],
+  "is_inline": false,
+  "properties": {
+    "작성자": {
+      "id": "9A0f",
+      "name": "작성자",
+      "description": null,
+      "type": "created_by",
+      "created_by": {}
+    },
+    "Property": {
+      "id": "BYLw",
+      "name": "Property",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "Status": {
+      "id": "Dw'I",
+      "name": "Status",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "!I$?",
+            "name": "미팅 예정",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a0b601f47d9b",
+            "name": "미팅 후 미결정",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-d4fee742e97e",
+            "name": "Fwd 후 미결정",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-02e146f5eb95",
+            "name": "Drop 완료",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-19d40a8e14b6",
+            "name": "투자 완료",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-8f1a54b69095",
+            "name": "리서치 후 논의",
+            "color": "purple",
+            "description": null
+          }
+        ]
+      }
+    },
+    "점수": {
+      "id": "HKR%5E",
+      "name": "점수",
+      "description": "",
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-428799da3da0",
+            "name": "Green",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-ba942e68b1c7",
+            "name": "Orange",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-376005a95eab",
+            "name": "Red",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "y~IM",
+            "name": "칼드랍",
+            "color": "gray",
+            "description": null
+          }
+        ]
+      }
+    },
+    "아쉬운 이유": {
+      "id": "T6T(",
+      "name": "아쉬운 이유",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "주차": {
+      "id": "V%3DFQ",
+      "name": "주차",
+      "description": null,
+      "type": "created_time",
+      "created_time": {}
+    },
+    "좋은 이유": {
+      "id": "%5E%3Bz*",
+      "name": "좋은 이유",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "To do": {
+      "id": "_MqW",
+      "name": "To do",
+      "description": null,
+      "type": "select",
+      "select": {
+        "options": [
+          {
+            "id": "00000000-0000-0000-0000-bdfe46488884",
+            "name": "To Drop",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-a0cd72e7f89b",
+            "name": "Fwd",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-bd19c5921d9d",
+            "name": "미팅요청",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-0c2f9bdc8d2b",
+            "name": "Q&A",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-842ffa5a3db5",
+            "name": "Hold",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-85e4802845b8",
+            "name": "자료조사",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-dc28f81fa87b",
+            "name": "Toss deal",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-2131643bd778",
+            "name": "기존 검토중",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-18a3e52e798f",
+            "name": "기존에 검토중",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "00000000-0000-0000-0000-7361d652d69b",
+            "name": "기존 검토 건",
+            "color": "blue",
+            "description": null
+          }
+        ]
+      }
+    },
+    "Files": {
+      "id": "j4nn",
+      "name": "Files",
+      "description": null,
+      "type": "files",
+      "files": {}
+    },
+    "Why?": {
+      "id": "si_%3E",
+      "name": "Why?",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "회사소개": {
+      "id": "tykj",
+      "name": "회사소개",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "담당 심사역": {
+      "id": "wq%5CG",
+      "name": "담당 심사역",
+      "description": null,
+      "type": "people",
+      "people": {}
+    },
+    "팀": {
+      "id": "%7Cp%5E9",
+      "name": "팀",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "회사명(서비스명)": {
+      "id": "title",
+      "name": "회사명(서비스명)",
+      "description": null,
+      "type": "title",
+      "title": {}
+    }
+  },
+  "parent": {
+    "type": "database_id",
+    "database_id": "00000000-0000-0000-0000-36ea38d63b9f"
+  },
+  "url": "https://app.notion.com/p/00000000000000000000ef5f37517c6a",
+  "public_url": null,
+  "in_trash": false,
+  "archived": false,
+  "request_id": "00000000-0000-0000-0000-167cc6486a99"
+}
