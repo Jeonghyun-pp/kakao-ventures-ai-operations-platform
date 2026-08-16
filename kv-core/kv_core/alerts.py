@@ -488,22 +488,33 @@ def _from_events(today: date, *, lookback_days: int = 2,
                              f"🔴 게이트 차단: {e.get('resource')} — {e.get('reason')}"))
 
     rows.sort(key=lambda r: r[0], reverse=True)  # 최신 우선 — 잘려도 신선한 것이 남는다
-    out: dict[str, str] = {}
+    # 🔴 [2026-08-16 · 결정 ⑪] **관측일을 함께 돌려준다.**
+    #    dispatch 가 이 날짜로 중복억제 마커를 찍는다 — 자세한 근거는 `dispatch` 독스트링.
+    out: dict[str, tuple[str, str]] = {}         # ident → (문구, 관측일)
     for _ts, ident, text in rows:
         if ident not in out:
-            out[ident] = text                    # 같은 identity 는 **가장 최신** 문구로
+            out[ident] = (text, _ts[:10])        # 같은 identity 는 **가장 최신** 문구·관측일
         if len(out) >= cap:
             break
     dropped = len({r[1] for r in rows}) - len(out)
-    items = sorted(out.items())
+    items = [(i, txt, day) for i, (txt, day) in sorted(out.items())]
     if dropped > 0:
+        # 절단은 **지금** 일어난 사실이라 관측일이 오늘이다(과거 이벤트의 재등장이 아니다).
         items.append(("alerts-events-truncated",
                       f"⚠️ 관측 사실이 많아 {dropped}건을 이번 틱에서 생략했다(상한 {cap}) — "
-                      f"$KV_DATA/_alerts/events-*.jsonl 확인 요망."))
+                      f"$KV_DATA/_alerts/events-*.jsonl 확인 요망.", today.isoformat()))
     return items
 
 
 # ─────────────────────────── dispatch (유일한 결정 지점) ───────────────────────────
+
+def _as_date(iso: str, fallback: date) -> date:
+    """`YYYY-MM-DD` → date. 깨진 값이면 fallback — 관측일 파싱 실패가 알림을 죽이면 안 된다."""
+    try:
+        return date.fromisoformat(str(iso)[:10])
+    except (TypeError, ValueError):
+        return fallback
+
 
 def dispatch(state=None, *, today: date | None = None, send_cap: int = 20) -> list[str]:
     """무엇을 알릴지 결정하고 보낸다. 반환: **실제 발송된** identity 목록.
@@ -518,6 +529,39 @@ def dispatch(state=None, *, today: date | None = None, send_cap: int = 20) -> li
     전역적으로 실패하면 후보가 무한 증식해 루프가 끝나지 않고, 그러면 `heavy_slot("approvals")`
     을 쥔 채 프로세스가 살아 있어(flock 은 산 프로세스의 락을 절대 뺏지 않는다) **이후 모든 틱이 SlotBusy 로
     물러나 승인 리컨실러가 영구 정지**한다. 지금은 새 후보를 `extra` 에 모아 루프 밖에서 처리한다.
+
+    ## 🔴 [2026-08-16 · 결정 ⑪] 중복억제·해결판정의 단위를 "발송일"에서 "관측일"로
+
+    장치 두 개가 서로를 몰랐다.
+
+        룩백    `_from_events` 가 최근 **3일** 이벤트를 매 틱 다시 후보로 올린다.
+                이유: 관측과 dispatch 사이에 UTC 자정이 끼면 그 사실이 **영구 유실**된다
+                (실측 6일간 자정 넘긴 공백 3건 · 최대 19.5시간 — 맥 슬립).
+        중복억제 `push` 가 `<identity>-<날짜>` 마커를 O_EXCL 로 선점. 하루 1회.
+
+    그런데 마커의 날짜가 **발송일**이었다. 날이 바뀌면 마커 이름이 바뀌므로 억제가 풀리고,
+    룩백이 다시 올린 **같은 사실**이 또 나간다:
+
+        08-14  관측 → 마커 ident-08-14 → 발송 ✅
+        08-15  🔴 새 관측 없음. 룩백이 08-14 이벤트를 다시 올림
+               마커 ident-08-15 는 없다 → **또 발송**
+
+    실측(`~/kv-data/_alerts` 전수 6일치): 총 발송 17건 중 **4건이 관측 없는 날의 중복**
+    (`approvals-tick-error`·`bplan-sync-vacuum`·`gate-warn-claude`·`meeting-mail-vacuum`,
+    각각 관측 1일 / 발송 2일). 약 24%.
+
+    피해가 하나 더 있었다. `_touch_seen` 이 "후보로 등장했나"로 `last_seen` 을 갱신하는데
+    룩백이 3일간 계속 등장시키므로, `_forget` 의 해결 판정이 **최대 5일 늦었다**
+    (룩백 3 + 유예 2). `_forget` 이 막으려던 게 정확히 *"해결 뒤 재발했을 때 백오프가
+    남아 늦게 알리는 것"* 인데 그 지연을 룩백이 다시 만들고 있었다.
+
+    옛 주석은 *"중복 발송은 push 의 일자별 마커가 이미 막으므로 룩백은 안전하다"* 고
+    적었는데, **그 문장은 하루 안에서만 참이다.**
+
+    → 이제 사실 파생 후보는 **관측일**로 마커를 찍고 `last_seen` 도 관측일로 기록한다.
+      룩백은 목적대로 유실만 막고, "한 번 일어난 일은 한 번 알린다"가 성립한다.
+      상태 파생(`_from_state`·`_from_auth`·`_from_scheduler`)은 `health.compute()` 가
+      **매 틱 다시 판정**한 결과라 오늘이 관측일이다 — 조건이 계속 참이면 매일 알린다.
     """
     today = today or _utc_today()
     sent: list[str] = []
@@ -532,13 +576,24 @@ def dispatch(state=None, *, today: date | None = None, send_cap: int = 20) -> li
             extra.append((f"alerts-{name}-broken", f"🔴 알림 원천 {name} 실패: {e!r}"))
             return None
 
+    _T = today.isoformat()
+
+    def _dated(pairs):
+        """상태 파생 후보에 관측일을 붙인다 — **오늘**이다.
+
+        상태 파생(`_from_state`·`_from_auth`·`_from_scheduler`)은 저장된 사실의 재생이
+        아니라 `health.compute()` 가 **매 틱 다시 판정**한 결과다. 오늘도 조건이 참이면
+        그건 오늘의 사실이므로 매일 알리는 것이 맞다. 사실 파생만 관측일을 따로 갖는다.
+        """
+        return [(i, txt, _T) for i, txt in (pairs or [])]
+
     if state is None:
         from . import health
         state = _try("state", health.compute, today)
     if state is not None:
-        candidates += _try("from_state", _from_state, state) or []
-        candidates += _try("from_auth", _from_auth, state) or []
-        candidates += _try("from_scheduler", _from_scheduler, state) or []
+        candidates += _dated(_try("from_state", _from_state, state))
+        candidates += _dated(_try("from_auth", _from_auth, state))
+        candidates += _dated(_try("from_scheduler", _from_scheduler, state))
     candidates += _try("from_events", _from_events, today) or []
 
     # 설정 자체가 깨졌다는 사실도 알린다 — 기본값으로 도느라 조용해지면 그게 가짜 침묵이다.
@@ -547,13 +602,17 @@ def dispatch(state=None, *, today: date | None = None, send_cap: int = 20) -> li
         extra.append(("alerts-config-broken",
                       f"🔴 alerts.yaml 값 오류 {len(bad)}건 — 기본값으로 동작 중: {', '.join(bad)[:200]}"))
 
-    candidates += extra
+    candidates += _dated(extra)
     extra = []
-    active = {ident for ident, _ in candidates}
-    for ident, _text in candidates:
-        _try("touch_seen", _touch_seen, ident, today)   # [F3] 후보 등장 자체를 기록
+    active = {c[0] for c in candidates}
+    for ident, _text, obs in candidates:
+        # 🔴 [결정 ⑪] `today` 가 아니라 **관측일**을 기록한다. 룩백이 3일간 같은 사실을
+        #    다시 후보로 올리는데 여기에 today 를 찍으면, 한 번 일어난 일이 사흘 내내
+        #    "오늘도 문제 있음"으로 보여 `_forget` 의 해결 판정이 최대 5일 늦어졌다
+        #    (룩백 3 + 유예 2). `_forget` 이 막으려던 게 정확히 그 지연이다.
+        _try("touch_seen", _touch_seen, ident, _as_date(obs, today))
 
-    for ident, text in candidates:
+    for ident, text, obs in candidates:
         if len(sent) >= send_cap:
             # 한 틱에 수백 발을 쏘지 않는다. 남은 건 다음 틱이 집는다(마커가 중복을 막는다).
             print(f"⚠️  alerts: 발송 상한 {send_cap} 도달 — 나머지는 다음 틱")
@@ -565,15 +624,20 @@ def dispatch(state=None, *, today: date | None = None, send_cap: int = 20) -> li
             ok, st = _should_send(ident, today)
             if not ok:
                 continue
-            if push(ident, _escalate(text, ident, today), day=today) == "sent":
+            # 🔴 [결정 ⑪] 마커에 **관측일**을 찍는다. 예전엔 발송일이라, 룩백이 어제
+            #    사실을 다시 올리면 마커 이름이 달라져 억제가 풀리고 **같은 사실이 이틀
+            #    연속 발송**됐다(실측: 총 17건 중 4건 = 24%).
+            if push(ident, _escalate(text, ident, today),
+                    day=_as_date(obs, today)) == "sent":
                 sent.append(ident)   # 발송 이력은 마커가 남긴다 — 따로 적지 않는다
         except Exception as e:                    # noqa: BLE001  한 건이 나머지를 죽이지 않는다
             print(f"🔴 alerts: {ident} 발송 실패 — {e!r}")
             extra.append((f"alerts-send-broken-{_safe_id(ident)[:40]}",
                           f"🔴 알림 발송 경로 실패({ident}): {e!r}"))
 
-    for ident, text in extra:                     # 루프 밖에서 한 번만 — 재귀 증식 없음
+    for ident, text, _obs in _dated(extra):       # 루프 밖에서 한 번만 — 재귀 증식 없음
         try:
+            # 이 후보들은 "지금 알림 경로가 깨졌다"는 **오늘의 사실**이다 — today 가 맞다.
             if push(ident, text, day=today) == "sent":
                 sent.append(ident)
         except Exception as e:                    # noqa: BLE001

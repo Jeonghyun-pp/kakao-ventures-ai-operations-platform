@@ -318,7 +318,7 @@ def _fresh(sub: str):
 _fresh("f1")
 alerts.append_event("orphan_draft", identity="orphan-midnight", text="🔴 고아 초안",
                     ts="2026-08-09T23:50:00+00:00")
-_after = [i for i, _ in alerts._from_events(_D)]
+_after = [c[0] for c in alerts._from_events(_D)]   # [결정 ⑪] 3튜플 (ident, text, 관측일)
 check("F1 UTC 자정을 넘겨도 사실이 살아남는다", "orphan-midnight" in _after, str(_after))
 
 # F2-a: alerts.yaml 값 오타 하나로 dispatch 가 통째로 죽어 그 틱 전 알림이 미발송됐다.
@@ -415,6 +415,59 @@ check("유도: 발송일 목록이 마커와 일치",
       str(alerts.sent_days("derive-test")))
 _n, _age = alerts._history("derive-test", _D)
 check("유도: 횟수·경과일이 마커에서 계산된다", (_n, _age) == (3, 3), f"n={_n} age={_age}")
+
+# ══════════════════════════════════════════════════════════════════════
+# ⑫ [2026-08-16 · 결정 ⑪] 한 번 일어난 일은 **한 번만** 알린다
+#
+# 룩백(최근 3일 이벤트를 매 틱 다시 후보로 올린다 — UTC 자정 유실 방지)과
+# 중복억제(하루 1회)가 서로를 몰랐다. 마커 날짜가 **발송일**이라, 날이 바뀌면 이름이
+# 달라져 억제가 풀리고 어제 사실이 또 나갔다.
+# 실측(`~/kv-data/_alerts` 6일치): 총 발송 17건 중 **4건이 관측 없는 날의 중복**(24%).
+#   approvals-tick-error · bplan-sync-vacuum · gate-warn-claude · meeting-mail-vacuum
+#   — 넷 다 관측 1일 / 발송 2일.
+#
+# 여기서 재는 것은 두 방향이다: 중복이 사라졌는가, 그리고 **진짜 반복은 여전히 알리는가**.
+print("\n=== ⑫ 관측일 단위 중복억제 — 어제 사실이 오늘 또 나가지 않는다 ===\n")
+
+from datetime import date as _date  # noqa: E402
+
+_d1, _d2 = _date(2026, 9, 1), _date(2026, 9, 2)
+_ES1, _ES2 = _SS(now=_d1, tasks=[]), _SS(now=_d2, tasks=[])
+_evd = paths.data("_alerts")
+_evd.mkdir(parents=True, exist_ok=True)
+for _sub in ("events-*.jsonl", "sent/*", "policy/*"):
+    for _f in _evd.glob(_sub):
+        _f.unlink()
+
+
+def _ev_write(day, ident, text):
+    (_evd / f"events-{day}.jsonl").write_text(
+        json.dumps({"ts": f"{day}T09:00:00+00:00", "kind": "vacuum",
+                    "identity": ident, "text": text}, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+
+
+# 9/1 에 사실 하나만 관측된다. 9/2 에는 **아무 일도 안 일어난다.**
+_ev_write(_d1, "syn-once", "🔴 합성 진공")
+_s1 = alerts.dispatch(state=_ES1, today=_d1)
+_s2 = alerts.dispatch(state=_ES2, today=_d2)      # 룩백이 9/1 사실을 다시 올린다
+check("⑫ 9/1 관측 → 9/1 발송", "syn-once" in _s1, str(_s1))
+check("⑫ 🔴 9/2 에는 **재발송 없음**(수정 전엔 여기서 또 나갔다)",
+      "syn-once" not in _s2, str(_s2))
+
+_pol = _evd / "policy" / "syn-once.json"
+check("⑫ last_seen 이 관측일(9/1)이다 — 룩백이 부풀리지 않는다",
+      _pol.exists() and json.loads(_pol.read_text(encoding="utf-8"))["last_seen"] == _d1.isoformat(),
+      str(json.loads(_pol.read_text(encoding="utf-8"))) if _pol.exists() else "정책 없음")
+
+# 🔴 반대 방향 — 매일 새로 관측되는 진짜 반복은 여전히 매일 알려야 한다.
+#    (엄격해진 게 아니라 정확해진 것임을 이 검사가 보증한다)
+_ev_write(_d1, "syn-daily", "🔴 매일 발생")
+_ev_write(_d2, "syn-daily", "🔴 매일 발생")
+_a = alerts.dispatch(state=_ES1, today=_d1)
+_b = alerts.dispatch(state=_ES2, today=_d2)
+check("⑫ 매일 새로 관측되면 매일 알린다(반복을 죽이지 않았다)",
+      "syn-daily" in _a and "syn-daily" in _b, f"{_a} / {_b}")
 
 print()
 if FAIL:
