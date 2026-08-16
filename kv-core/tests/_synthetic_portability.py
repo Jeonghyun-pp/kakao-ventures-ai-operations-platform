@@ -17,6 +17,8 @@
     P2  `.gitignore` 가 소스 디렉토리를 먹지 않는다
     P3  리포 밖 의존이 **선언돼 있다** (부트스트랩 문서가 실제 환경변수를 덮는다)
     P4  스킬 requirements 가 부트스트랩 문서와 어긋나지 않는다
+    P5  자격증명 정본이 하나다 (스킬별 `.env` 부활 금지 — 파일도, 읽는 코드도)
+    P6  백업이 **선언이 아니라 배선**이다 (문서 4곳이 rsync 를 선언했는데 실체가 없었다)
 
 실행: KV_DATA=<스크래치> python kv-core/tests/_synthetic_portability.py
 git 인덱스를 읽기만 한다 — 네트워크·설치 0.
@@ -221,6 +223,50 @@ _inline = sorted(str(p.relative_to(_REPO)) for p in (_REPO / "skills").rglob("*.
                  and re.search(r'\(\s*PROJ\s*/\s*"\.env"\s*\)\s*\.read_text',
                                p.read_text(encoding="utf-8", errors="ignore")))
 check("P5 스킬 로컬 `.env` 를 직접 읽는 코드가 없다", not _inline, f"발견: {_inline}")
+
+# ══════════════════════════════════════════════════════════════════════
+# P6 [2026-08-16] 백업이 **선언이 아니라 배선**이다
+#
+# 문서 4곳(README · kv_core/__init__ · ADR 0001 · W1 교훈)이 `~/kv-data` 를 *"rsync 단위"*
+# 라고 선언하고, `W1-공통-런타임.md` 표는 **"데이터 | 영구 손실 | 없음 | 정기 rsync"** 라고
+# 적어 뒀다. 그런데 2026-08-16 실측 결과 crontab 은 비어 있고 launchd 에도 없고 디스크
+# 어디에도 사본이 없었다 — **981MB 유일본이 4개월간 무방비였다.**
+#
+# 백업은 조용히 멈추는 것이 가장 위험한 종류의 잡이다(멈춰도 증상이 없고, 필요해지는
+# 순간에야 없다는 걸 안다). 그래서 여기서 재는 것은 "백업이 돌았나"가 아니라
+# **"백업이 돌지 않으면 알아챌 구조가 있나"** 다.
+print("\n=== P6: 백업이 배선돼 있다 ===\n")
+
+from kv_core import registry as _reg  # noqa: E402
+from kv_core import workers as _wk  # noqa: E402
+
+_script = _REPO / "scripts" / "backup-kv-data.sh"
+check("P6 백업 스크립트가 리포에 있다(clone 에 딸려온다)", _script.exists(), str(_script.name))
+check("P6 백업 스크립트가 추적된다", "scripts/backup-kv-data.sh" in tracked)
+
+_tasks = {t.name: t for t in _reg.load()}
+check("P6 backup 이 task 로 선언돼 있다", "backup" in _tasks)
+if "backup" in _tasks:
+    _b = _tasks["backup"]
+    check("P6 스케줄러가 실제로 돌린다(runner=local · WIRED)",
+          _b.runner == "local" and "backup" in _wk.WIRED,
+          f"runner={_b.runner} wired={'backup' in _wk.WIRED}")
+    # 🔴 last_attempt 면 rsync 가 실패해도 워터마크가 전진해 **다음날까지 백업이 없고
+    #    아무도 모른다.** 백업에서 이 한 줄은 가드 전체의 유무를 가른다.
+    check("P6 워터마크가 last_success 다(실패가 전진을 못 한다)",
+          _b.watermark == "last_success", f"watermark={_b.watermark}")
+    check("P6 주기와 신선도 SLO 가 선언돼 있다(부재 감지의 근거)",
+          _b.cadence == "daily" and _b.freshness_days, 
+          f"cadence={_b.cadence} freshness_days={_b.freshness_days}")
+    check("P6 외부 자원을 안 쓴다(백업이 쿼터·과금에 얽히지 않는다)",
+          _b.resources == [], f"resources={_b.resources}")
+
+# 🔴 스크립트 자체의 안전장치 — 빈 원본을 성실히 반영하면 그게 오늘 스냅샷이 되고,
+#    보관 기간이 지나면 멀쩡한 스냅샷이 전부 밀려난다. **백업이 데이터를 지우는 경로다.**
+_src = _script.read_text(encoding="utf-8") if _script.exists() else ""
+check("P6 원본 부재 시 중단한다", 'if [ ! -d "$SRC" ]' in _src)
+check("P6 원본 파일 수 급감 시 중단한다", "SRC_FILES" in _src and "-lt 100" in _src)
+check("P6 복사 후 파일 수를 대조한다", "DST_FILES" in _src and "$DST_FILES" in _src)
 
 # ══════════════════════════════════════════════════════════════════════
 print()

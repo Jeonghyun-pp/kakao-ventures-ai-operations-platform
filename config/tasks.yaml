@@ -249,3 +249,25 @@
   covers: [IVC]
   status: slot
   notes: 사용자가 직접 구축 예정
+
+- name: backup                   # [2026-08-16] ~/kv-data 스냅샷 — 유일본을 유일본으로 두지 않는다
+  skill: _core
+  kind: routine
+  cadence: daily
+  # 🔴 coalesce 다(backfill 아님). 어제 백업을 오늘 만들 수는 없다 — 밀린 날짜를
+  #    거슬러 실행하는 건 이 잡에선 의미가 없고, 하루 한 번 최신 상만 있으면 된다.
+  catch_up: coalesce
+  # 🔴 last_success 다. rsync 가 실패했는데 워터마크가 전진하면 **다음날까지 백업이 없고
+  #    아무도 모른다.** 백업은 조용히 멈추는 것이 가장 위험한 종류의 잡이다.
+  watermark: last_success
+  resources: []                  # 외부 자원 0 — claude·notion·apify 어디에도 안 닿는다
+  stages: [snapshot]
+  origin: system
+  runner: local                  # 스케줄러가 돌린다 → 워터마크·부재감지를 기존 규약으로 받는다
+  covers: [기본구조]
+  freshness_days: 2              # 이틀 넘게 백업이 없으면 알림. 하루는 맥이 잠들 수 있다.
+  status: done
+  notes: >-
+    scripts/backup-kv-data.sh (rsync --link-dest 하드링크 스냅샷 7일 보관).
+    🔴 같은 디스크라 **디스크·맥 고장은 못 막는다** — 오프사이트 1벌이 별건으로 필요하다
+    (2026-08-16 현재 이 맥에 클라우드 드라이브가 하나도 마운트돼 있지 않다).

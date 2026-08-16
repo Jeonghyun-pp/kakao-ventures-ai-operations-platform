@@ -199,7 +199,43 @@ def run_mail_triage(task: Task, period: date) -> bool:
     return rc == 0
 
 
+def run_backup(task: Task, period: date) -> bool:
+    """[2026-08-16] `~/kv-data` 스냅샷 백업.
+
+    ## 왜 스케줄러 task 인가 (별도 plist 가 아니라)
+
+    백업은 **조용히 멈추는 것이 가장 위험한 종류의 잡**이다. 멈춰도 아무 증상이 없고,
+    필요해지는 순간에야 없다는 걸 안다. 그래서 실행보다 **부재 감지**가 더 중요하다.
+
+    별도 plist 로 두면 실행은 되지만 워터마크가 없어 `health` 가 "며칠째 안 돌았다"를
+    못 본다(`launchd-direct` task 는 `health_channel` 선언이 필요한데, 백업은 수집
+    채널이 아니라 그 자리에 넣을 것이 없다). 스케줄러 task 로 두면 `last_success`
+    워터마크와 `cadence: daily` 선언만으로 **기존 부재 감지가 그대로 걸린다** —
+    바로 이 리포가 *"선언은 있는데 발동하지 않는 가드"* 를 반복해 만든 자리를,
+    이번엔 선언이 곧 감시가 되게 한다.
+
+    ## 이 잡이 지켜야 하는 것
+
+    🔴 **백업이 데이터를 지우는 경로를 만들지 않는다.** 스크립트가 원본 부재·파일 수
+    급감을 먼저 검사하고 중단한다(빈 원본을 성실히 반영하면 그게 오늘 스냅샷이 되고,
+    보관 기간이 지나면 멀쩡한 스냅샷이 전부 밀려난다). 여기서는 그 스크립트를 부르고
+    **종료코드를 그대로 진위로 쓴다** — 삼키면 워터마크가 헛되이 전진한다.
+    """
+    script = paths.repo_root() / "scripts" / "backup-kv-data.sh"
+    print(f"▶ backup ({period}) — {script.name}")
+    try:
+        rc = subprocess.run(["/bin/bash", str(script)], timeout=3600, check=False).returncode
+    except subprocess.TimeoutExpired:
+        print("🔴 backup: 60분 timeout — 실패 처리")
+        return False
+    if rc != 0:
+        print(f"🔴 backup 실패 rc={rc} — **워터마크를 전진시키지 않는다.** "
+              f"다음 발화가 다시 시도한다.")
+    return rc == 0
+
+
 WIRED: dict[str, Runner] = {
+    "backup": run_backup,
     "bplan-score": run_bplan_score,
     "mail-triage": run_mail_triage,
     "appstore-snapshot": run_appstore_snapshot,

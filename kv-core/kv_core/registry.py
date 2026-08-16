@@ -31,6 +31,12 @@ _STATUS = {"done", "partial", "slot"}
 # 직렬화가 갈라지고, 두 잡이 동시에 claude 세션을 띄운다(ADR 0003 대가 ③).
 # 새 자원을 늘릴 땐 config/resources.yaml 과 함께 고친다.
 _RESOURCES = {"claude", "notion", "notion-bplan", "apify", "gmail-inbox", "sheet-a1"}
+
+# [2026-08-16] `skills/` 아래에 디렉토리가 없어도 되는 skill 이름 — **kv-core 자신이 주인**인
+# 잡이다(첫 사례: `backup`). 스킬을 흉내 내려고 빈 디렉토리를 만드는 것보다, 주인이 코어라는
+# 사실을 이름으로 드러내는 편이 낫다. 화이트리스트인 이유는 오타가 이 검사를 그냥 통과하면
+# 안 되기 때문이다 — `skill: _cor` 는 여전히 죽어야 한다.
+_CORE_SKILLS = {"_core"}
 # local=우리 스케줄러가 실행 · github-actions=GH cron · launchd-direct=개별 plist 가 직접 실행(카탈로그 등재만).
 # local 이 아닌 task 는 스케줄러가 건드리지 않는다(이중실행 방지, 규칙 01) — 단 shadow=true 면 검증용 병행 실행.
 
@@ -126,10 +132,12 @@ def load(path: Path | None = None) -> list[Task]:
                 f"task '{t.name}': kind=routine 인데 cadence 가 없다 — 이 상태는 due 목록에도 "
                 f"미배선 목록에도 안 떠서 **아무 로그 없이 사라진다**. "
                 f"온디맨드면 kind: ondemand 라고 적어라.")
-        if t.status != "slot" and not (paths.repo_root() / "skills" / t.skill).is_dir():
+        if (t.status != "slot" and t.skill not in _CORE_SKILLS
+                and not (paths.repo_root() / "skills" / t.skill).is_dir()):
             # status: slot = 아직 안 만든 자리(설계상 정상). 그 외에는 실재해야 한다.
             raise ValueError(f"task '{t.name}': skill '{t.skill}' 디렉토리가 없다 "
-                             f"(미구현 자리면 status: slot 으로 적어라)")
+                             f"(미구현 자리면 status: slot 으로 적어라. "
+                             f"kv-core 자신이 주인인 잡이면 skill: {sorted(_CORE_SKILLS)[0]})")
         out.append(t)
     _assert_unique_names(out)
     return out
