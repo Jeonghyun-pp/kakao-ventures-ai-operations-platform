@@ -2,6 +2,16 @@
 
 카카오벤처스 인턴 업무 자동화 — 스킬과 공통 런타임.
 
+## 지금 상태를 알려면
+
+**→ [`docs/STATUS.md`](docs/STATUS.md)** — 현황·이번 변경 과정·남은 것·문서 지도.
+이 리포에서 가장 먼저 읽는 문서다.
+
+```
+검증 전량:  .venv/bin/python kv-core/tests/run_suite.py
+정본 둘:    config/tasks.yaml (무슨 일이 언제) · config/contracts.yaml (산출물 계약)
+```
+
 ## 세 개의 루트
 
 ```

@@ -82,6 +82,8 @@ essential = [
     "skills/net-sourcing/references/judge-criteria.md",
     "skills/mail-harness/references/bplan-criteria.md",
     "docs/runbook/00-bootstrap.md",
+    "docs/STATUS.md",          # [2026-08-16] 리포의 진입점 — 사라지면 아무도 어디부터 읽을지 모른다
+    "kv-core/tests/run_suite.py",  # 프로덕션 가드가 붙은 로컬 러너. 빠지면 clone 이 가드 없이 돈다
 ]
 missing = [f for f in essential if f not in tracked]
 check("P1 계약·기준문서·핵심 모듈이 추적된다", not missing, str(missing))
