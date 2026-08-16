@@ -121,12 +121,17 @@ class _Stubs:
                 raise session.SessionError("claude -p timeout(300s) — 권한 프롬프트에 걸렸거나 과부하")
             if outer.mode == "parse_fail" or not outer.verdicts_ok:
                 return "이건 JSON 이 아니다"           # 배치 전체 파싱 실패 (행 귀책 아님)
+            # [2026-08-16] 응답이 **탭 구분**으로 바뀌었다(계약 `wire: tsv`).
+            # 열 순서는 page_id·verdict·one_liner·reason — 자유 텍스트가 맨 뒤.
+            def _line(pid, verdict):
+                # 🔴 reason 에 이스케이프 없는 큰따옴표를 일부러 넣는다 — JSON 시절
+                #    배치 전체를 죽이던 입력이다. 이제 그냥 글자여야 한다.
+                return f'{pid}\t{verdict}\t한 줄 요약\t사례("따옴표 포함")로 판단'
             if outer.mode == "row_bad":
                 # 첫 행만 계약 밖 verdict — **그 행에만** 귀책이 있다
-                return json.dumps(
-                    [{"page_id": ids[0], "verdict": "완전히모르는값", "reason": "r"}]
-                    + [{"page_id": i, "verdict": "Catch", "reason": "r"} for i in ids[1:]])
-            return json.dumps([{"page_id": i, "verdict": "Catch", "reason": "r"} for i in ids])
+                return "\n".join([_line(ids[0], "완전히모르는값")]
+                                 + [_line(i, "Catch") for i in ids[1:]])
+            return "\n".join(_line(i, "Catch") for i in ids)
 
         JJ.session.run_session = fake_session
         JJ._cfg = lambda: dict(_CFG)

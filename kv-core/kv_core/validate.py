@@ -21,7 +21,7 @@ claude 가 "판단을 끝냈다"는 것과 그 판단이 계약을 지켰다는 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 _TYPES = {"str": str, "int": int, "float": (int, float), "bool": bool,
@@ -37,13 +37,135 @@ class Contract:
     schema: dict            # {field: {type, required, enum, nonempty}}
     on_invalid: str = "halt"   # halt | quarantine
     min_records: int = 0    # 통과 레코드 최소 기대치 — 0건 성공(진공 통과)을 침묵 실패와 구분한다(규칙05)
+    # 🔴 [2026-08-16] **전송 형식.** `json` | `tsv`. 자세한 근거는 `parse_tsv` 독스트링.
+    #    한 줄 요약: JSON 은 `"` 가 내용이면서 구분자라 **내용 한 글자가 구조를 깬다**.
+    #    계약 파일이 형식을 선언하고 파서가 그걸 따른다 — 코드에 박으면 두 진실원이 된다.
+    wire: str = "json"
+    # tsv 일 때 열 순서. **자유 텍스트 필드를 반드시 맨 뒤**에 둔다(`parse_tsv` 참조).
+    columns: list = field(default_factory=list)
 
     def __post_init__(self):
         if self.on_invalid not in ("halt", "quarantine"):
             raise ValueError(f"on_invalid 는 halt|quarantine: {self.on_invalid!r}")
+        if self.wire not in ("json", "tsv"):
+            raise ValueError(f"wire 는 json|tsv: {self.wire!r}")
+        if self.wire == "tsv":
+            if not self.columns:
+                raise ValueError("wire: tsv 인데 columns 가 없다 — 열 순서 없이는 파싱이 불가능하다")
+            unknown = [c for c in self.columns if c not in self.schema]
+            if unknown:
+                raise ValueError(
+                    f"columns 에 스키마에 없는 열 {unknown} — 오타면 그 열이 **통째로 버려지고** "
+                    f"필수 필드 누락으로 전건이 위반이 된다. 스키마 필드: {sorted(self.schema)}")
+            missing = [f for f, s in self.schema.items()
+                       if s.get("required") and f not in self.columns]
+            if missing:
+                raise ValueError(
+                    f"필수 필드 {missing} 가 columns 에 없다 — tsv 는 열 순서가 유일한 단서라 "
+                    f"선언에서 빠진 필드는 **영원히 채워지지 않는다**.")
 
 
 # ─────────────────────────── soft 출력 파싱 ───────────────────────────
+
+def wire_instruction(contract: Contract) -> str:
+    """계약 → 모델에게 줄 **출력 형식 지시문**. 형식의 진실원을 하나로 묶는다.
+
+    🔴 프롬프트에 형식을 손으로 적으면 **계약과 프롬프트가 두 진실원**이 된다.
+       계약에서 열을 하나 빼도 프롬프트는 옛 형식을 계속 요구하고, 그 어긋남은
+       "레코드는 오는데 필드가 비어 있다"로 나타나 원인이 안 보인다.
+       이 리포가 반복해 당한 형태라(리뷰 F4 '천장의 진실이 두 곳') 여기서 막는다.
+    """
+    if contract.wire != "tsv":
+        return ("JSON 배열만 출력하라. 각 원소는 "
+                + "{" + ", ".join(f'"{f}": "..."' for f in contract.schema) + "} 형식. "
+                + "프로즈·코드펜스·설명 금지.")
+    cols, last = contract.columns, contract.columns[-1]
+    return (
+        f"출력은 **탭 구분 텍스트**다. 한 줄에 한 건, 열 순서는 정확히 "
+        f"{' <TAB> '.join(cols)} 이다.\n"
+        f"· 열 구분은 **탭 문자 하나**({len(cols)}열이므로 탭 {len(cols)-1}개). 쉼표·파이프 금지.\n"
+        f"· 마지막 열 `{last}` 는 **줄 끝까지**가 내용이다 — 그 안에서는 따옴표·괄호·탭을 "
+        f"자유롭게 써도 되고 **이스케이프하지 마라**.\n"
+        f"· 🔴 `{last}` 안에 **줄바꿈을 넣지 마라.** 줄바꿈이 레코드 구분자다.\n"
+        f"· 헤더 줄·번호·불릿·코드펜스·설명 금지. 데이터 줄만 출력하라.")
+
+
+def parse_tsv(text: str, columns: list[str]) -> tuple[list[dict], list[str]]:
+    """탭 구분 · **자유 텍스트 필드는 맨 뒤**. → (레코드, 못 읽은 줄)
+
+    ## 왜 JSON 을 버렸나 (2026-08-16)
+
+    실측: `judge_dlq.jsonl` 2건이 **같은 결함**으로 죽어 있었다. claude 가 `reason` 안에
+    이스케이프하지 않은 `"` 를 넣었다 — 둘 다 정확히 **column 386**:
+
+        … 이데일리 인터뷰("방산 '무엇을 만드냐'에서 '얼마나 빨리 만드냐'로") …
+        … 티로 사례("아이템은 매력적이지 않지만 짱짱한 팀") …
+
+    그 `"` 가 문자열을 조기 종료시켜 **배열 전체**가 깨졌고, 같은 배치의 나머지 15건이
+    함께 버려졌다. 배치당 16건 · 2회 발생 = **32건 유실**, 배치 기준 약 2.3%
+    (08-11~08-16 판정 적용 1,410건 ≈ 88배치 중 2개).
+
+    ### 문제의 형태
+
+        JSON 에서 `"` 는 **내용이면서 동시에 구분자**다
+            → 내용에 들어간 문자 하나가 구조를 파괴한다
+            → 파괴 범위가 배치 전체다
+
+    파서를 관대하게 만드는 것(깨진 배열에서 읽히는 것만 줍기)은 **파괴가 일어난 뒤**를
+    다루는 대증요법이고, 어느 조각을 주울지 추측이 섞인다. 여기서는 **파괴가 구조에
+    닿지 못하게** 한다 — 형식을 바꾼다.
+
+    ### 이 형식이 그 부류를 없애는 방식
+
+        <page_id>\\t<verdict>\\t<one_liner>\\t<reason 는 줄 끝까지>
+        파싱:  line.split("\\t", len(columns) - 1)
+
+    · `"` `'` `(` `)` `{` `}` `\\` 는 **그냥 글자**다. 이스케이프할 것이 없다.
+    · 자유 텍스트가 맨 뒤 + `maxsplit` 이라, **reason 안의 탭까지 흡수**된다.
+    · 남는 위험은 reason 안의 줄바꿈 하나뿐이고, 그건 **그 레코드만** 깬다.
+    · 한 줄이 깨져도 다른 줄은 **구조적으로** 산다 — 구제 휴리스틱이 아니라 보장이다.
+      (`events.jsonl` 의 torn-tail 규율과 같은 성질 · 불변식 I2)
+
+    ### 이게 가능한 이유
+
+    계약 5개가 **전부 평평한 스칼라**다 — `page_id`·`verdict`·`reason`·`one_liner`·
+    `score`·`fwd`. 중첩이 하나도 없다. **애초에 JSON 이 필요한 구조가 아니었다.**
+    ⚠️ 예외는 `meeting-mail` 의 `body` 다 — 메일 본문이라 줄바꿈이 필수여서 줄 단위
+       형식에 못 담는다. 그 계약만 `wire: json` 을 유지한다.
+
+    ### 이래도 안 되는 것 — 정직하게
+
+    형식은 **구조적 실패**만 없앤다. claude 가 필드를 빠뜨리거나, 없는 `page_id` 를
+    지어내거나, 허용값 밖 verdict 를 내는 **의미적 실패**는 그대로 남는다.
+    그건 `check_record` 의 몫이고 이미 작동한다(위 DLQ 구제분 15/15 계약 통과).
+    완전한 보장은 API 의 tool-use 강제(constrained decoding)뿐인데, 이 시스템은 과금 0
+    을 위해 **구독제 claude CLI** 를 쓴다 — 그 보장이 없다. 비용과 맞바꾼 것이다.
+
+    ## 반환
+
+    `(레코드, 못 읽은 줄)`. **못 읽은 줄을 버리지 않고 돌려준다** — 호출부가 몇 건이
+    유실됐는지 시끄럽게 알리고 DLQ 에 남길 수 있어야 한다. 조용한 유실이 이 결함의 본체였다.
+    """
+    n = len(columns)
+    recs: list[dict] = []
+    broken: list[str] = []
+    for raw_line in (text or "").splitlines():
+        line = raw_line.rstrip("\r")
+        if not line.strip():
+            continue
+        # 코드펜스·프로즈 한두 줄이 섞여도 그 줄만 버린다(전체를 죽이지 않는다).
+        if line.lstrip().startswith("```"):
+            continue
+        parts = line.split("\t", n - 1)
+        if len(parts) != n:
+            broken.append(line)
+            continue
+        rec = {c: p.strip() for c, p in zip(columns, parts)}
+        # 마지막(자유 텍스트) 열만 양끝 공백을 보존한다 — 본문 서식이 판정 근거일 수 있다.
+        rec[columns[-1]] = parts[-1].rstrip()
+        recs.append(rec)
+    return recs, broken
+
 
 def parse_json(text: str):
     """claude 의 soft 텍스트에서 JSON 을 관대하게 꺼낸다. 실패는 ValueError."""
@@ -200,7 +322,35 @@ def validate_text(
     """claude stdout 원문 → 파싱 → 검증. 파싱 실패는 계약 성격대로 처리.
 
     halt: 파싱 실패 = ValidationHalt. quarantine: 전량을 DLQ 로 보내고 ([], all).
+
+    🔴 [2026-08-16] `wire: tsv` 계약은 **줄 단위**로 읽는다. 한 줄이 깨져도 나머지 줄은
+       그대로 살아 검증으로 넘어간다 — 파싱 실패가 배치 전체를 죽이던 구조를 없앴다
+       (근거는 `parse_tsv` 독스트링).
     """
+    if contract.wire == "tsv":
+        records, broken = parse_tsv(text, contract.columns)
+        if broken:
+            # 🔴 조용히 넘어가지 않는다. 유실이 안 보이면 "잘 돌고 있다"로 읽힌다 —
+            #    그게 이 결함이 넉 달 숨어 있던 방식이다.
+            print(f"  ⚠️  형식이 깨진 줄 {len(broken)}건 — 이 줄만 버린다"
+                  f"(나머지 {len(records)}건은 정상 진행). 해당 행은 다음 회차 큐로 돌아간다.")
+            for b in broken[:3]:
+                print(f"      · {b[:120]}")
+            if dlq_path is not None:
+                _dlq_append(dlq_path, [{"parse_error": "tsv 열 수 불일치", "raw": b}
+                                       for b in broken])
+        if not records:
+            # 한 건도 못 읽었다 = 형식 자체가 어긋났다(모델이 옛 JSON 을 냈을 수 있다).
+            # 그 사실을 **파싱 실패로 취급**해 계약 성격대로 처리한다.
+            msg = (f"tsv 로 읽은 레코드 0건(깨진 줄 {len(broken)}) — 출력이 선언한 형식이 "
+                   f"아니다. columns={contract.columns}")
+            if contract.on_invalid == "halt":
+                raise ValidationHalt(f"파싱 실패(halt): {msg}")
+            if dlq_path is not None and not broken:
+                _dlq_append(dlq_path, [{"parse_error": msg, "raw": text}])
+            return [], [({"_raw": text}, [msg])]
+        return validate_records(records, contract, dlq_path=dlq_path)
+
     try:
         data = parse_json(text)
     except ValueError as e:
@@ -225,7 +375,7 @@ def validate_text(
 # 계약 스펙에 쓸 수 있는 키 — **미지 키를 거부**하기 위한 어휘표다.
 # ⚠️ 여기 있는 것만 실제로 존중된다. `check_record` 가 읽는 키와 반드시 같아야 한다
 #    (다르면 "선언했는데 안 도는 계약"이 생기고, 그게 이 결함의 형태다).
-_SPEC_KEYS = {"schema", "on_invalid", "min_records"}
+_SPEC_KEYS = {"schema", "on_invalid", "min_records", "wire", "columns"}
 _FIELD_KEYS = {"type", "required", "enum", "nonempty"}
 
 
@@ -279,7 +429,9 @@ def load_contracts(path: str | Path) -> dict[str, Contract]:
                     f"쓸 수 있는 값: {sorted(_TYPES)}")
         out[stage] = Contract(schema=schema,
                               on_invalid=spec.get("on_invalid", "halt"),
-                              min_records=int(spec.get("min_records", 0)))
+                              min_records=int(spec.get("min_records", 0)),
+                              wire=str(spec.get("wire", "json")),
+                              columns=list(spec.get("columns") or []))
     return out
 
 

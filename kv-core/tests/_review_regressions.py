@@ -378,6 +378,79 @@ def test_optional_blank_is_absent() -> None:
     check("contracts.yaml enum 에 '' 우회책 0건", not leftovers, f"남음={leftovers}")
 
 
+# ── W(2026-08-16): 전송 형식을 JSON → 탭 구분으로 바꿔 결함 부류를 없앴다 ───────
+# 수정 전 실물: `judge_dlq.jsonl` 2건이 **같은 결함**으로 죽어 있었다. claude 가 `reason`
+# 안에 이스케이프하지 않은 `"` 를 넣었고(둘 다 column 386), 그 따옴표가 문자열을 조기
+# 종료시켜 **배열 전체**가 깨졌다. 같은 배치의 나머지 15건이 함께 버려졌다.
+#     … 이데일리 인터뷰("방산 '무엇을 만드냐'에서 '얼마나 빨리 만드냐'로") …
+#     … 티로 사례("아이템은 매력적이지 않지만 짱짱한 팀") …
+# 배치 16건 × 2회 = 32건 유실(88배치 중 2개 ≈ 2.3%).
+#
+# 여기서 재는 것은 **그 부류가 구조적으로 불가능해졌는가** 다.
+
+def test_tsv_wire() -> None:
+    print("[W] 전송 형식 — 내용이 구조를 깰 수 없다")
+    from pathlib import Path
+    from kv_core import validate as v
+
+    cs = v.load_contracts(Path(__file__).resolve().parents[2] / "config" / "contracts.yaml")
+    tier = cs["judge-tier"]
+    check("판정 계약이 tsv 로 선언돼 있다", tier.wire == "tsv", f"wire={tier.wire}")
+    check("자유 텍스트 열이 **맨 뒤**다(이게 성립의 조건)",
+          tier.columns[-1] == "reason", f"columns={tier.columns}")
+
+    # ① 🔴 DLQ 실물을 그대로 재현 — 예전엔 이 문장 하나가 배치 16건을 죽였다
+    killer = ('pg1\tCatch\t요약\t이데일리 인터뷰("방산 \'무엇을 만드냐\'에서 '
+              '\'얼마나 빨리 만드냐\'로")로 시장 서술이 구체적')
+    recs, broken = v.parse_tsv(killer, tier.columns)
+    check("① 이스케이프 없는 큰따옴표가 아무것도 안 깬다", len(recs) == 1 and not broken)
+    check("① 따옴표가 내용으로 온전히 남는다",
+          recs and recs[0]["reason"].count('"') == 2 and "방산" in recs[0]["reason"],
+          recs[0]["reason"][:50] if recs else "")
+
+    # ② 한 줄이 깨져도 **그 줄만** 죽는다 — 구제 휴리스틱이 아니라 구조적 보장
+    mixed = "\n".join([f"pg{i}\tCatch\t요약\t정상 {i}" for i in range(15)]
+                      + ["열이 모자란 깨진 줄"]
+                      + [f"pg{i}\tWait\t요약\t정상 {i}" for i in range(15, 20)])
+    recs, broken = v.parse_tsv(mixed, tier.columns)
+    check("② 깨진 줄 1건이 나머지 20건을 안 죽인다", len(recs) == 20 and len(broken) == 1,
+          f"정상 {len(recs)} · 깨짐 {len(broken)}")
+
+    # ③ reason 안의 **탭**도 흡수된다(maxsplit) — 열이 밀리지 않는다
+    recs, broken = v.parse_tsv("pg1\tCatch\t요약\t앞\t뒤\t또뒤", tier.columns)
+    check("③ 자유 텍스트 안의 탭이 열을 밀지 않는다",
+          len(recs) == 1 and recs[0]["verdict"] == "Catch" and recs[0]["reason"] == "앞\t뒤\t또뒤",
+          recs[0] if recs else "")
+
+    # ④ 깨진 줄을 **버리지 않고 돌려준다** — 조용한 유실이 이 결함의 본체였다
+    check("④ 못 읽은 줄이 호출부로 돌아온다(조용히 사라지지 않는다)",
+          broken == [] and v.parse_tsv("망가진줄", tier.columns)[1] == ["망가진줄"])
+
+    # ⑤ 형식 지시문이 **계약에서 유도**된다 — 프롬프트가 두 번째 진실원이 되지 않는다
+    instr = v.wire_instruction(tier)
+    check("⑤ 지시문이 계약의 열 순서를 그대로 싣는다",
+          all(c in instr for c in tier.columns) and "탭" in instr)
+    check("⑤ 지시문이 이스케이프 금지를 명시한다", "이스케이프하지 마라" in instr)
+    check("⑤ 지시문이 자유 텍스트 안 줄바꿈을 금지한다(줄바꿈이 레코드 구분자다)",
+          "줄바꿈을 넣지 마라" in instr)
+
+    # ⑥ meeting-mail 은 body 에 줄바꿈이 필수라 json 을 유지한다
+    check("⑥ meeting-mail 만 json 유지(body 가 여러 줄이다)",
+          cs["meeting-mail"].wire == "json", cs["meeting-mail"].wire)
+
+    # ⑦ 계약 선언의 오타가 조용히 통과하지 않는다
+    try:
+        v.Contract(schema={"a": {"type": "str", "required": True}}, wire="tsv", columns=["b"])
+        check("⑦ columns 오타를 거부한다", False, "통과해버림")
+    except ValueError as e:
+        check("⑦ columns 오타를 거부한다", "b" in str(e))
+    try:
+        v.Contract(schema={"a": {"type": "str", "required": True}}, wire="tsv", columns=[])
+        check("⑦ columns 누락을 거부한다", False, "통과해버림")
+    except ValueError:
+        check("⑦ columns 누락을 거부한다", True)
+
+
 def test_no_send_guard() -> None:
     """[W9] 실발송 킬 스위치 메타 검증 — 스텁 누락이 실 채널로 새는 것을 **구조로** 막는다.
 
@@ -500,6 +573,8 @@ if __name__ == "__main__":
     test_validate_boundaries()
     print()
     test_optional_blank_is_absent()
+    print()
+    test_tsv_wire()
     print()
     if FAIL:
         print(f"❌ 실패 {len(FAIL)}건: {FAIL}")
