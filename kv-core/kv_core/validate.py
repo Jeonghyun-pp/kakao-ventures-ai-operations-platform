@@ -89,12 +89,24 @@ def check_record(rec: dict, schema: dict) -> list[str]:
     if not isinstance(rec, dict):
         return [f"레코드가 dict 가 아님: {type(rec).__name__}"]
     for field, spec in schema.items():
-        present = field in rec and rec[field] is not None
+        val = rec.get(field)
+        present = field in rec and val is not None
+        # 🔴 [2026-08-16] 필수 아닌 필드의 **빈 문자열은 "없음"과 같이 본다.**
+        #    LLM 은 "값 없음"을 키 생략이 아니라 `""` 로 낸다. 그 둘을 다르게 대우하면
+        #    선언이 아니라 출력 습관이 판정을 가른다. 실제로 DLQ 에 두 건이 그렇게 죽어 있었다:
+        #      · bplan  `{score:"칼드랍", reason:""}` → "reason 가 비어있음" → **판정 유실**
+        #      · 그물망 `{to:"", subject:…, body:…}` → "to 가 비어있음"   → **초안 유실**
+        #    후자가 특히 나쁘다 — W9 C-H3 가 *"`to` 는 코드가 RECIPIENT 로 덮어쓰는 값"* 이라며
+        #    `required: true → false` 로 고쳤는데 `nonempty: true` 를 남겨, 어차피 버릴 값
+        #    하나 때문에 완성된 본문이 그대로 격리됐다. **고침이 절반만 적용돼 있었다.**
+        #    공백만 있는 문자열(`"  "`)도 같이 묶는다 — `""` 는 통과하고 `" "` 는 죽는
+        #    비일관을 만들지 않기 위해서다.
+        if present and not spec.get("required") and isinstance(val, str) and not val.strip():
+            present = False
         if not present:
             if spec.get("required"):
                 errs.append(f"필수 필드 없음: {field}")
             continue
-        val = rec[field]
         want = spec.get("type")
         if want and want in _TYPES and not isinstance(val, _TYPES[want]):
             errs.append(f"{field} 타입 {type(val).__name__} ≠ {want}")

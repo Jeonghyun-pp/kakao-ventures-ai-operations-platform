@@ -316,6 +316,59 @@ def test_validate_boundaries() -> None:
           f"judge={cs['judge'].min_records}, mail={cs['meeting-mail'].min_records}")
 
 
+# ── D(2026-08-16): 필수 아닌 필드의 빈 문자열은 "없음"과 같다 ────────────────
+# 수정 전 DLQ 실물 두 건이 이 형태로 죽어 있었다(둘 다 나머지 필드는 정상):
+#   bplan  {score:"칼드랍", reason:""} → "reason 가 비어있음" → 판정 유실
+#   그물망 {to:"", subject:…, body:…} → "to 가 비어있음"     → 초안 유실
+# 핵심은 **고침이 필수 필드로 새지 않는 것**이다. 그래서 반대 방향을 같이 잰다.
+
+def test_optional_blank_is_absent() -> None:
+    print("[D] 필수 아닌 필드의 빈 문자열 = 없음 (필수 필드로는 안 샌다)")
+    from pathlib import Path
+    from kv_core import validate as v
+
+    # ① DLQ 실물 재현 — 이제 통과해야 한다
+    bplan = {"page_id": "00000000-0000-0000-0000-5e3d22df2ef6",
+             "score": "칼드랍", "fwd": "", "reason": ""}
+    s_bplan = {"page_id": {"type": "str", "required": True, "nonempty": True},
+               "score": {"type": "str", "required": True, "enum": ["칼드랍", "Red", "?"]},
+               "fwd": {"type": "str", "required": False, "enum": ["ReviewerTwo", "ReviewerOne", "zero"]},
+               "reason": {"type": "str", "required": False, "nonempty": True}}
+    check("DLQ 재현 bplan(reason:'' + fwd:'') → 통과", v.check_record(bplan, s_bplan) == [],
+          f"errs={v.check_record(bplan, s_bplan)}")
+
+    mail = {"to": "", "subject": "[카카오벤처스] 미팅 요청의 건", "body": "본문"}
+    s_mail = {"to": {"type": "str", "required": False, "nonempty": True},
+              "subject": {"type": "str", "required": True, "nonempty": True},
+              "body": {"type": "str", "required": True, "nonempty": True}}
+    check("DLQ 재현 meeting-mail(to:'') → 통과", v.check_record(mail, s_mail) == [],
+          f"errs={v.check_record(mail, s_mail)}")
+
+    # ② 공백만 있는 문자열도 같이 묶인다 — ''는 통과 ' '는 실패, 같은 비일관을 만들지 않는다
+    check("필수 아님 + 공백만('   ') → 통과",
+          v.check_record({"page_id": "p", "score": "Red", "reason": "   "}, s_bplan) == [])
+
+    # ③ 🔴 필수 필드로 새지 않는가 — 이게 이 테스트의 목적이다
+    errs = v.check_record({"page_id": "", "score": "Red"}, s_bplan)
+    check("필수 필드의 '' 는 여전히 위반", any("page_id" in e for e in errs), f"errs={errs}")
+    errs = v.check_record({"to": "", "subject": "  ", "body": "본문"}, s_mail)
+    check("필수 필드의 공백만('  ') 도 여전히 위반",
+          any("subject" in e for e in errs), f"errs={errs}")
+    errs = v.check_record({"page_id": "p", "score": ""}, s_bplan)
+    check("필수 + enum 인 필드의 '' 는 여전히 위반", any("score" in e for e in errs), f"errs={errs}")
+
+    # ④ 필수 아닌 필드라도 **값이 있으면** 계약은 그대로 산다
+    errs = v.check_record({"page_id": "p", "score": "Red", "fwd": "Bob"}, s_bplan)
+    check("필수 아님 + 허용값 밖 실값 → 위반(관대해진 게 아니다)",
+          any("fwd" in e for e in errs), f"errs={errs}")
+
+    # ⑤ 정본 contracts.yaml 에 우회책(`""` in enum)이 남아있지 않은가
+    cs = v.load_contracts(Path(__file__).resolve().parents[2] / "config" / "contracts.yaml")
+    leftovers = [f"{st}.{f}" for st, c in cs.items() for f, sp in c.schema.items()
+                 if "" in (sp.get("enum") or [])]
+    check("contracts.yaml enum 에 '' 우회책 0건", not leftovers, f"남음={leftovers}")
+
+
 def test_no_send_guard() -> None:
     """[W9] 실발송 킬 스위치 메타 검증 — 스텁 누락이 실 채널로 새는 것을 **구조로** 막는다.
 
@@ -436,6 +489,8 @@ if __name__ == "__main__":
     test_w12_events_and_cursor()
     print()
     test_validate_boundaries()
+    print()
+    test_optional_blank_is_absent()
     print()
     if FAIL:
         print(f"❌ 실패 {len(FAIL)}건: {FAIL}")

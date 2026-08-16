@@ -44,7 +44,11 @@ bplan-score:
   schema:
     page_id: {type: str, required: true, nonempty: true}
     score:   {type: str, required: true, enum: ["칼드랍", "Red", "Orange", "Green", "?"]}
-    fwd:     {type: str, required: false, enum: ["ReviewerTwo", "ReviewerOne", "zero", ""]}
+    # [2026-08-16] enum 에서 `""` 를 뺐다. 이건 "빈 값도 허용값"이라는 선언이 아니라,
+    # 필수 아닌 필드의 `""` 가 enum 위반으로 잡히던 것을 우회하려 끼워 넣은 값이었다.
+    # 이제 `validate.check_record` 가 **필수 아닌 필드의 빈 문자열을 "없음"으로 본다**.
+    # enum 에는 실제 도메인만 적는다.
+    fwd:     {type: str, required: false, enum: ["ReviewerTwo", "ReviewerOne", "zero"]}
     reason:  {type: str, required: false, nonempty: true}
 
 # ── 앱스토어 판정 (노션 '판정' select = 가역) ── [W6 신규]
