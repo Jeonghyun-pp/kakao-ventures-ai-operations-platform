@@ -79,9 +79,29 @@ CONTRACT_INVARIANTS = ['I5', 'I22']
 
 class _P:
     returncode = 0
+    stdout = ""
+    stderr = ""
 
 
-workers.subprocess.run = lambda *a, **kw: _P()
+# 🔴 [2026-08-16 · 결정 ⑫] 수집기(`board.py`)만 스텁하고 **판정기는 진짜로 돌린다.**
+#    판정이 `kv_core` 에서 `skills/net-sourcing/project/tools/board_health.py` 로
+#    옮겨갔으므로, 여기서 그것도 스텁하면 이 검사는 아무것도 안 재게 된다
+#    (스텁이 스텁을 부르는 초록). 판정기는 실제 subprocess 로 태운다 —
+#    `KV_DATA` 가 상속되므로 아래에서 만드는 스크래치 스냅샷을 그대로 읽는다.
+_real_run = workers.subprocess.run
+
+
+def _run_stub(cmd, *a, **kw):
+    if any("board_health" in str(c) for c in (cmd if isinstance(cmd, (list, tuple)) else [cmd])):
+        return _real_run(cmd, *a, **kw)
+    return _P()
+
+
+workers.subprocess.run = _run_stub
+
+# 판정기를 모듈로도 쓴다(수치 단언용). 같은 프로세스라 SNAP_DIR 이 스크래치를 가리킨다.
+sys.path.insert(0, str(paths.repo_root() / "skills" / "net-sourcing" / "project"))
+from tools import board_health as _bh  # noqa: E402
 snap = paths.data("net-sourcing", "snapshots")
 app_t = Task(name="appstore-snapshot", skill="net-sourcing", cadence="daily",
              catch_up="coalesce", watermark="last_success",
@@ -114,7 +134,7 @@ for i in range(84):
     (snap / f"appstore_board_{i}_top-free_{date.today().isoformat()}.json").write_text(body)
 check("④ 진공: 정당하게 빈 차트 1개는 결손이 아니다(경보 없이 성공)",
       workers.run_appstore_snapshot(app_t, NOW) is True)
-n_v, rows_v, empty_v = workers._board_files_today()
+n_v, rows_v, empty_v = _bh.scan()
 check("④ 진공: 빈 차트를 온전한 것으로 세되 목록으로 남긴다",
       n_v == 84 and len(empty_v) == 1, f"온전 {n_v} · 빈 {empty_v}")
 
@@ -132,8 +152,44 @@ for f in snap.glob("appstore_board_*.json"):
 for i in range(84):
     body = "" if i < 10 else '["app1","app2"]'
     (snap / f"appstore_board_{i}_top-free_{date.today().isoformat()}.json").write_text(body)
-n_t4, _, _ = workers._board_files_today()
+n_t4, _, _ = _bh.scan()
 check("④ T4 보호 유지: 0바이트는 온전한 것으로 세지 않는다", n_t4 == 74, f"온전 {n_t4}(74 기대)")
+
+# 🔴 [결정 ⑫] 층 분리 자체를 잠근다 — 코어가 앱스토어 판정 지식을 다시 갖지 않는다.
+_wsrc = (paths.repo_root() / "kv-core" / "kv_core" / "workers.py").read_text(encoding="utf-8")
+
+
+def _executable_only(src: str) -> str:
+    """주석 **과 독스트링**을 뺀 실행 코드만. 둘 다 빼야 한다 —
+    처음엔 주석만 걸렀더니 "왜 옮겼나"를 설명하는 독스트링이 걸려 거짓 실패가 났다.
+    지식이 **문서로 남는 것**은 옳고, **코드로 남는 것**만 금지다."""
+    import ast as _ast
+    tree = _ast.parse(src)
+    skip = set()
+    for n in _ast.walk(tree):
+        if (isinstance(n, _ast.Expr) and isinstance(n.value, _ast.Constant)
+                and isinstance(n.value.value, str)):
+            skip.update(range(n.lineno, (n.end_lineno or n.lineno) + 1))
+    return "\n".join(l.split("#", 1)[0]
+                     for i, l in enumerate(src.splitlines(), 1) if i not in skip)
+
+
+_code = _executable_only(_wsrc)
+check("④ 코어에 앱스토어 판정 지식이 없다(임계·파일명 패턴·세는 함수)",
+      not any(k in _code for k in ("_board_files_today", "appstore_board_", "MIN_NONEMPTY")),
+      "workers.py 에 도메인 지식이 되돌아왔다")
+check("④ 판정기가 스킬 쪽에 있다",
+      (paths.repo_root() / "skills" / "net-sourcing" / "project" / "tools"
+       / "board_health.py").exists())
+
+# 판정기의 **자체 경계 검사**도 여기서 태운다 — `tools/` 는 CI 의 잡 스캔(`jobs/*.py`)
+# 밖이라, 걸어두지 않으면 그 6개 검사가 로컬에서만 돌고 CI 에선 영영 안 돈다.
+_bhr = _real_run([str(paths.repo_root() / ".venv" / "bin" / "python"),
+                  "tools/board_health.py", "--synthetic"],
+                 cwd=paths.repo_root() / "skills" / "net-sourcing" / "project",
+                 capture_output=True, text=True)
+check("④ 판정기 자체 경계 검사 통과(5경계 + T4)", _bhr.returncode == 0,
+      (_bhr.stdout or _bhr.stderr)[-300:])
 
 print()
 if FAIL:

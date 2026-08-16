@@ -18,7 +18,7 @@
     P3  리포 밖 의존이 **선언돼 있다** (부트스트랩 문서가 실제 환경변수를 덮는다)
     P4  스킬 requirements 가 부트스트랩 문서와 어긋나지 않는다
     P5  자격증명 정본이 하나다 (스킬별 `.env` 부활 금지 — 파일도, 읽는 코드도)
-    P6  백업이 **선언이 아니라 배선**이다 (문서 4곳이 rsync 를 선언했는데 실체가 없었다)
+    P6  백업이 **선언이 아니라 배선**이다 (문서 4곳이 rsync 를 선언했는데 실체가 없었다)\n    P7  **스킬 지식은 [4]에만** — 코어 실행 코드에 도메인 어휘가 없다
 
 실행: KV_DATA=<스크래치> python kv-core/tests/_synthetic_portability.py
 git 인덱스를 읽기만 한다 — 네트워크·설치 0.
@@ -269,6 +269,63 @@ _src = _script.read_text(encoding="utf-8") if _script.exists() else ""
 check("P6 원본 부재 시 중단한다", 'if [ ! -d "$SRC" ]' in _src)
 check("P6 원본 파일 수 급감 시 중단한다", "SRC_FILES" in _src and "-lt 100" in _src)
 check("P6 복사 후 파일 수를 대조한다", "DST_FILES" in _src and "$DST_FILES" in _src)
+
+# ══════════════════════════════════════════════════════════════════════
+# P7 [2026-08-16 · 결정 ⑫] **스킬 지식은 [4]에만 있다**
+#
+# 사용자 결정: *"스킬 관련된 지식은 4인 스킬 레이어에만 있게 하고 싶다."*
+#
+# `kv-core` 는 [2]통로 + [3]컨트롤 플레인이다. 여기에 스킬 도메인이 섞이면 두 가지가 깨진다:
+#   · 스킬 쪽 사실이 바뀔 때(애플이 차트를 84 → 90) **코어를 고쳐야** 한다
+#   · 재빌드 계획의 *"[3]은 유지, [4]는 재빌드"* 가 참이 아니게 된다
+#
+# 실제로 `workers._board_files_today()` 45줄 + 임계 3개(84·80·0.5)가 코어에 있었다
+# (254줄 중 85줄 = 33%). 결정 ⑫ 로 `tools/board_health.py` 에 옮겼다.
+#
+# 🔴 여기서 재는 것은 **인스턴스가 아니라 부류**다 — 앱스토어 하나를 옮긴 것으로 끝내면
+#    다음 도메인이 같은 자리에 다시 자란다.
+#
+# ⚠️ 판정 대상은 **실행되는 코드만**이다. 주석·독스트링에 "왜 옮겼나"를 남기는 것은
+#    옳은 일이고, 그걸 금지하면 근거가 사라진다.
+print("\n=== P7: 스킬 지식이 코어에 없다 ===\n")
+
+
+def _executable_only(src: str) -> str:
+    """주석 **과 독스트링**을 뺀 실행 코드."""
+    tree = ast.parse(src)
+    skip = set()
+    for n in ast.walk(tree):
+        if (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+                and isinstance(n.value.value, str)):
+            skip.update(range(n.lineno, (n.end_lineno or n.lineno) + 1))
+    return "\n".join(ln.split("#", 1)[0]
+                     for i, ln in enumerate(src.splitlines(), 1) if i not in skip)
+
+
+# 스킬 **도메인**의 어휘. 스킬 **이름·경로**는 여기 없다 — 디스패치 표가 "무엇을 부르나"를
+# 아는 것은 [3]의 본질이라 정당하다. 금지하는 것은 "그 산출물을 어떻게 판정하나"다.
+_DOMAIN_TERMS = [
+    "appstore_board", "_board_files", "MIN_NONEMPTY",     # 앱스토어 보드 판정
+    "judge_queue", "judge_verdicts", "linkedin_seen",     # 그물망 산출물 형식
+    "bplan_queue", "bplan_verdicts", "drop_ledger",       # 비플랜 산출물 형식
+    "top-free", "top-paid", "차트",                        # 스토어 어휘
+]
+_KVC = _REPO / "kv-core" / "kv_core"
+_leaks = []
+for _p in sorted(_KVC.glob("*.py")):
+    _code = _executable_only(_p.read_text(encoding="utf-8"))
+    for _i, _ln in enumerate(_code.splitlines(), 1):
+        for _term in _DOMAIN_TERMS:
+            if _term in _ln:
+                _leaks.append(f"{_p.name}:{_i} [{_term}] {_ln.strip()[:60]}")
+check("P7 코어 실행 코드에 스킬 도메인 어휘가 없다", not _leaks, "\n       ".join(_leaks[:5]))
+check("P7 어휘표를 실제로 훑었다(0이면 위 검사가 공허하다)", len(_DOMAIN_TERMS) >= 10)
+
+# 🔴 반대 방향 — 스킬 **이름·경로**는 코어에 있어야 정상이다(디스패치 표).
+#    이걸 같이 금지하면 P7 이 러너를 못 만들게 막는 규칙이 된다.
+_wsrc = (_KVC / "workers.py").read_text(encoding="utf-8")
+check("P7 스킬 경로·task 이름은 코어에 남아 있다(디스패치는 [3]의 일)",
+      "net-sourcing" in _wsrc and "WIRED" in _wsrc)
 
 # ══════════════════════════════════════════════════════════════════════
 print()
