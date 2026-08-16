@@ -127,10 +127,65 @@ def classify(msg: dict, cfg: dict) -> dict | None:
     return None
 
 
+# 사람을 **부르는** 표지. 이름 뒤에 이게 붙어야 지명으로 본다.
+# 한국어 비즈니스 메일에서 사람을 부르는 실제 형태다(`리뷰어일 심사역님께` · `ReviewerOne님`).
+_NAME_MARKER = r"(?:님|씨|께|\s*심사역|\s*파트너|\s*대표|\s*앞)"
+
+
 def find_named_partner(msg: dict, cfg: dict) -> str | None:
-    """제목/본문에 특정 심사역이 지명됐는지. 지명됐으면 그 사람 메일 주소."""
+    """제목/본문에 특정 심사역이 **지명**됐는지. 지명됐으면 그 사람 메일 주소.
+
+    ## 🔴 [2026-08-16 · 결정 ⑩] 부분일치를 버렸다
+
+    예전엔 `if name.lower() in blob` 한 줄이었다. 토큰이 **더 긴 단어 안에** 들어가면
+    엉뚱한 동료 메일함으로 메일이 나간다:
+
+        Cl«reviewer-three»ct · ch«reviewer-three»l              → reviewer-three@      ← 실측으로 걸린 건
+        «제로»넥스(실제 회사명) · «제로»베이스   → zero@
+        j«ade»d · «앤»드류                    → reviewer-one@ / reviewer-three@
+
+    실측(plan 12본 · 고유 메일 156건 · **제목만**): 지명 매칭 1건 → **전부 오탐**
+    (`[카카오벤처스]Clannect 로부터 접수된 사업계획서`), 정당한 지명 0건.
+    ⚠️ 본문 1,500자는 plan 에 저장되지 않아 못 쟀다 — 매칭 표면의 대부분이 거기라 **하한**이다.
+
+    당시 안 터진 건 두 겹이 막고 있어서다 — 카테고리 게이트(EVENT_SPEAKER·PARTNERSHIP·
+    UNKNOWN 만 오버라이드)와 HARD-GATE #1(`apply` 미가동). **컷오버하면 실행된다.**
+
+    ### 왜 엄격한 쪽으로 갔나 — 비용이 비대칭이다
+
+        오탐(잘못 포워드)  동료 메일함에 무관한 메일 → 반복되면 신뢰를 잃는다
+        미탐(지명 놓침)    일반 라우팅을 타고 사람이 큐에서 본다 → **유실이 아니다**
+
+    ### 두 경로
+
+    ① **주소 직접 언급** — 본문에 `reviewer-one@example.vc` 이 있으면 모호함이 0이다.
+    ② **이름 + 호칭/멘션** — 이름이 단어 경계에 서 있고 뒤에 `님/씨/께/심사역/파트너/
+       대표/앞` 이 붙거나, 앞에 `@` 가 붙을 때만.
+
+    ②의 **왼쪽 경계**가 `Clannect`·`제로넥스` 를 막고, **오른쪽 호칭 요구**가
+    `제로 웨이스트`·`zero trust` 같은 띄어쓴 일반어를 막는다. 단어 경계만으로는 후자를
+    못 막는데, `제로`·`zero` 가 흔한 단어라 그게 8토큰 중 4개다.
+
+    ⚠️ 알고 포기한 것: `ReviewerOne, 안녕하세요` 같은 영어식 직접 호칭은 놓친다. 위 비대칭상
+       놓치는 쪽이 싸다 — 그 메일은 일반 라우팅으로 사람에게 간다.
+    """
     blob = f"{msg.get('subject','')}\n{msg.get('body','')[:1500]}".lower()
-    for name, addr in (cfg.get("partners") or {}).items():
-        if str(name).lower() in blob:
+    partners = (cfg.get("partners") or {})
+
+    # ① 주소가 직접 적혀 있으면 그 자체가 지명이다(오탐 여지 없음)
+    for addr in partners.values():
+        if str(addr).lower() in blob:
+            return addr
+
+    # ② 이름 + 호칭/멘션
+    for name, addr in partners.items():
+        n = str(name).lower()
+        if not n:
+            continue
+        # 왼쪽 경계 — 한글 토큰은 앞이 한글이 아니어야, 영문 토큰은 앞이 영숫자가 아니어야.
+        left = r"(?<![가-힣])" if re.search(r"[가-힣]", n) else r"(?<![a-z0-9])"
+        esc = re.escape(n)
+        pat = rf"(?:@{esc}(?![a-z0-9]))|(?:{left}{esc}{_NAME_MARKER})"
+        if re.search(pat, blob):
             return addr
     return None

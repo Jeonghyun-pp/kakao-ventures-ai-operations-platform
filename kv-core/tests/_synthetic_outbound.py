@@ -697,6 +697,83 @@ check("O11 drop 키가 이메일 단위다(page_id 가 아니다)", _ne is not N
       "page_id 로 돌아가면 같은 사람이 접수 횟수만큼 거절 메일을 받는다(실측 최다 5통)")
 
 # ══════════════════════════════════════════════════════════════════════
+# O12 [2026-08-16 · 결정 ⑩] 심사역 지명은 **부분일치가 아니다**
+#
+# 이 검사가 O 계열(외부로 나가는 경로)에 있는 이유: 지명이 걸리면 그 메일은 동료
+# 메일함으로 **포워드**된다. 잘못 걸리면 무관한 메일이 사람에게 나간다.
+#
+# 수정 전 실측(plan 12본 · 고유 메일 156건 · 제목만): 지명 매칭 1건 → **전부 오탐**
+#     `[카카오벤처스]Clannect 로부터 접수된 사업계획서`  →  Cl«reviewer-three»ct  →  reviewer-three@
+# 정당한 지명은 0건이었다. 본문 1,500자는 plan 에 없어 못 쟀다 = 하한.
+#
+# 비용이 비대칭이라 엄격한 쪽으로 갔다 —
+#   오탐은 동료 신뢰를 깎고, 미탐은 그냥 일반 라우팅을 타므로 **유실이 아니다**.
+print("\n=== O12: 심사역 지명이 부분일치로 새지 않는다 ===\n")
+
+import json  # noqa: E402
+import yaml as _yaml  # noqa: E402
+
+_MH = _REPO / "skills" / "mail-harness" / "project"
+sys.path.insert(0, str(_MH))
+from triage.core import rules as _rules  # noqa: E402
+
+_pcfg = _yaml.safe_load((_MH / "config.yaml").read_text(encoding="utf-8"))
+
+
+def _named(subject="", body=""):
+    return _rules.find_named_partner({"subject": subject, "body": body}, _pcfg)
+
+
+# 🔴 막아야 하는 것 — 토큰이 더 긴 단어/일반어 안에 들어간 경우
+_LEAKS = [
+    ("[카카오벤처스]Clannect 로부터 접수된 사업계획서", "실측으로 걸렸던 건"),
+    ("채널 개설 안내 channel partner program", "ch«reviewer-three»l"),
+    ("제로넥스 미팅 요청의 건", "실제 회사명"),
+    ("제로베이스 부트캠프 협업", "한글 합성어"),
+    ("제로 웨이스트 캠페인 제안", "🔴 띄어쓴 일반어 — 단어 경계만으로는 못 막는다"),
+    ("zero trust 보안 세미나", "🔴 띄어쓴 일반어"),
+    ("He seemed jaded about the market", "j«ade»d"),
+    ("앤드류 카네기 인용", "«앤»드류"),
+    ("person-4a5a202c0083@example.com 에서 보냄", "@ 멘션 오탐"),
+]
+_leaked = [(s, why, _named(subject=s)) for s, why in _LEAKS if _named(subject=s)]
+check("O12 부분일치 오탐이 하나도 안 샌다", not _leaked,
+      "; ".join(f"{s[:24]}→{a}" for s, _, a in _leaked))
+
+# ✅ 잡아야 하는 것 — 실제 지명(이름 + 호칭/멘션, 또는 주소 직접 언급)
+_HITS = [
+    ("리뷰어일 심사역님께 전달 부탁드립니다", "reviewer-one@example.vc"),
+    ("ReviewerOne님 안녕하세요", "reviewer-one@example.vc"),
+    ("리뷰어이 파트너 앞으로 보내주세요", "reviewer-two@example.vc"),
+    ("@zero 확인 부탁", "reviewer-a@example.vc"),
+    ("앤님께 문의드립니다", "reviewer-three@example.vc"),
+]
+_missed = [(s, w, _named(subject=s)) for s, w in _HITS if _named(subject=s) != w]
+check("O12 진짜 지명은 여전히 잡는다(엄격해진 게 아니라 정확해진 것)", not _missed,
+      "; ".join(f"{s[:20]}→{g}(기대 {w})" for s, w, g in _missed))
+check("O12 본문의 주소 직접 언급도 지명으로 본다",
+      _named(body="담당은 reviewer-one@example.vc 입니다") == "reviewer-one@example.vc")
+
+# 🔴 실데이터 회귀 — 로컬에서만 성립(CI 에는 ~/kv-data 가 없다)
+_plans = sorted((Path.home() / "kv-data" / "mail-harness" / "triage").glob("plan_*.json")) \
+    if (Path.home() / "kv-data" / "mail-harness" / "triage").exists() else []
+if _plans:
+    _seen, _rows = set(), []
+    for _f in _plans:
+        for _m in json.loads(_f.read_text(encoding="utf-8")):
+            _k = _m.get("thread_id") or _m.get("id")
+            if _k in _seen:
+                continue
+            _seen.add(_k); _rows.append(_m)
+    _fired = [(m.get("subject", ""), _named(subject=m.get("subject", ""))) for m in _rows]
+    _fired = [x for x in _fired if x[1]]
+    check(f"O12 실데이터 {len(_rows)}건에서 오탐 0 (수정 전 1건)", not _fired,
+          "; ".join(f"{s[:30]}→{a}" for s, a in _fired))
+else:
+    print("  ⚠️  실데이터(`~/kv-data/mail-harness/triage/plan_*.json`) 없음 — 회귀 확인은\n"
+          "      로컬에서만 성립한다(CI 정상 경로). 로컬에서는 반드시 돌려라.")
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 외부 발송 경계 실패 {len(FAIL)}건: {', '.join(FAIL)}")
