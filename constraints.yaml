@@ -1,0 +1,98 @@
+# [0] 외부 제약 — 기계가 읽는 판
+#
+# 남의 시스템이 그렇게 생겨서 우리가 어쩔 수 없이 지키는 숫자들이다.
+# **코드에 이 값을 리터럴로 박지 않는다.** 여기서 읽는다.
+# 그래야 제약이 흩어지지 않고, 바뀔 때 한 줄만 고친다.
+#
+# 근거는 ~/kv-automation/docs/contracts/30-external-constraints.md (56항목, 네트워크 0으로 실측)
+
+appstore:
+  # 차트 천장. "200 요청했는데 100 왔다"를 결손으로 오판하지 않기 위해 안다.
+  chart_caps:
+    top-free: 200        # SSR
+    top-paid: 200        # SSR
+    top-grossing: 100    # RSS
+    new: 110             # RSS. 하드캡이고 genre 를 무시한다
+
+  # RSS newapplications 는 genre 파라미터를 무시한다 → 전체 1회만 부른다.
+  # 어기면 25개 장르 × 같은 응답을 25번 받는다.
+  rss_new_ignores_genre: true
+
+  # 빈 배열이 정답인 차트. 카지노 유료는 한국 앱스토어에 원래 없다.
+  # 어기면 "부분 결손" 경보가 매일 뜬다 (실제로 그랬다).
+  empty_is_valid:
+    - "7006/top-paid"
+
+  # 신규진입은 diff 라 안 본 날은 영영 못 본다. 관측 40일 중 8일이 결손이었고 복구 불가.
+  observation_gap_is_permanent: true
+
+  # 출시일 미상 비율이 이걸 넘으면 lookup 장애를 의심한다. 평시 0% (실측 4,971/4,971).
+  unknown_release_date_warn_ratio: 0.05
+
+  # 🔴 [2026-08-17 실측 · 새 제약] 애플 SSR 차트 페이지는 연속 요청에 429 를 준다.
+  #    간격 없이 76요청을 쏘면 39/76 이 429 로 죽었다. 개별로 다시 부르면 전부 200.
+  #    옛 시스템은 "429 는 상대의 답이니 재시도 안 한다"로 404 와 같이 취급했는데,
+  #    429 는 **"천천히 하라"는 재시도 신호**라 404 와 성격이 다르다.
+  #    → 요청 사이에 간격을 두고, 429 는 Retry-After 를 존중해 재시도한다.
+  request_gap_sec: 1.0
+
+  # 신규 판정 기준. 이보다 오래된 앱은 버린다.
+  max_age_days: 180
+
+http:
+  # 망 계열만 재시도한다. 404·429·5xx 는 상대 서버의 답이지 망 문제가 아니다.
+  # RequestException 을 통째로 잡으면 MissingSchema 같은 프로그래밍 오류까지 105초 기다렸다
+  # 재시도한다 — 고쳐야 할 것을 숨긴다.
+  retry_backoff_sec: [15, 30, 60]     # 총 105초. 절전 해제 직후 DNS 미기동 대비 (07-18 착지 229건 유실)
+  timeout_sec: 30
+  # 429·5xx 는 망 계열과 **다른 정책**이다. 429 는 "천천히 하라"는 재시도 신호이고
+  # (Retry-After 를 주면 그걸 따른다), 5xx 는 상대의 일시 장애다.
+  # 404·400 같은 4xx 는 여전히 재시도하지 않는다 — 그건 상대의 확정된 답이다.
+  retry_status: [429, 500, 502, 503, 504]
+  status_backoff_sec: [2, 5, 15]
+  # 회로 차단기: 한 번 끝까지 실패하면 나머지는 즉시 실패시킨다.
+  # 없을 때 76요청 × 105초 = 2시간+ 크론이 잠겼다 (07-19).
+  circuit_breaker: true
+
+notion:
+  rich_text_limit: 2000        # UTF-16 코드유닛. 파이썬 len 이 아니다.
+                               # 이모지 3개로 2000자가 2003유닛 되어 495명 중 7명 착지 실패 (07-27)
+  rich_text_unit: utf16_code_units
+  truncation_mark: "…⟪잘림⟫"    # 잘렸으면 잘렸다고 말한다. 값만으로는 구별이 안 된다.
+  children_max: 100
+  # 🔴 [2026-08-17 실측 · 새 제약] 노션은 유니코드 줄 구분자를 **조용히 제거한다.**
+  #    앱 설명 864자를 보냈더니 862자가 저장됐다(U+2028 두 개가 사라짐).
+  #    되읽기가 없었으면 영영 몰랐을 손실이다 — 옛 시스템엔 되읽기가 없었다.
+  #    → 보내기 전에 개행으로 바꾼다. 그러면 저장된 값이 우리가 의도한 값과 같아진다.
+  strips_chars: [" ", " "]
+  rate_limit_rps: 3            # 공식 한도. 성공해도 잔다.
+  # 200 은 저장을 뜻하지 않는다 — 모르는 select 옵션을 조용히 버리면서 200 을 준다.
+  write_verify: read_back
+  # 옵션 목록의 정본은 항상 라이브 스키마다. 코드 상수를 믿으면 사람이 추가한 옵션을 되돌린다 (07-19).
+  option_source: live_schema
+  # 망 계열 예외 — ChunkedEncodingError 는 ConnectionError 의 서브클래스가 **아니다**.
+  # 헤더는 왔는데 본문 도중 끊긴 경우로, 노션 query 응답에서 가장 흔하다 (08-13 재발).
+  net_errors: [Timeout, ConnectionError, ChunkedEncodingError, ContentDecodingError]
+
+claude:
+  # 구독 세션에는 사용량 API 가 없다 → 호출 수를 프록시로 잰다.
+  daily_calls_warn: 30
+  daily_calls_block: 50
+  timeout_sec: 180             # 권한 프롬프트에 걸리면 무한정 멈춘다.
+  # rc 0 + 빈 출력 = 인증 만료. rc 로 성공을 판정하면 인증 만료가 ok:true 로 기록된다.
+  success_is_output_not_rc: true
+  # 출력은 soft 다. 스키마를 줘도 강제가 아니다 → 되읽어 검증한다.
+  wire: tsv                    # JSON 은 claude 가 " 를 이스케이프 안 해 배치 32건이 유실됐다.
+  forbidden_tools: [Bash, WebFetch, WebSearch]
+
+apify:
+  monthly_cap_usd: 29          # STARTER 실한도. 플랫폼이 정하고 우리가 못 넘긴다.
+  bill_on: request             # 런이 시작되면 과금. 응답을 못 받아도 돈은 나갔다.
+  fallback_memory_mb: 8192     # 메모리 폴백 시 비싼 쪽을 가정한다 (과소계상 방지).
+  archive_raw: true            # 원본을 안 남기면 파싱 버그를 돈 다시 써서 고친다.
+
+slack:
+  # 명시 값만 억제로 인정한다. truthy 판정이면 KV_NO_SEND=0 도 "켜짐"이 된다.
+  suppress_values: ["1", "true", "yes", "on"]
+  # webhook 은 ts 를 안 준다 → 반응 조회 불가. 승인은 bot 토큰 경로로.
+  webhook_returns_ts: false

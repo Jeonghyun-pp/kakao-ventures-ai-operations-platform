@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# 데이터·시크릿은 리포 밖에 산다 (~/kv-data · ~/kv-config)
+# 여기에 심볼릭 링크를 만들지 않는다 — 옛 시스템이 그 링크로 넉 달간
+# 프로덕션 데이터에 썼고, gitignore 라 CI 가 원리적으로 못 보는 결함이었다.
+data
+*.env

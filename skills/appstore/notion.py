@@ -1,0 +1,380 @@
+"""노션 통로 — 노션에 닿는 유일한 경로.
+
+## 이 파일이 지키는 [0] 제약
+
+    2,000 UTF-16 코드유닛   파이썬 len 이 아니다. 이모지 3개로 2000자가 2003유닛 되어
+                           495명 중 7명이 통째로 착지 실패했다 (07-27)
+    잘렸으면 잘렸다고       값만으로는 "원래 그 길이"와 "잘렸다"가 구별이 안 된다
+    3 req/s                성공해도 잔다
+    200 ≠ 저장됨           모르는 select 옵션을 **조용히 버리면서 200** 을 준다
+                           → 쓴 뒤 되읽어 확인한다
+    옵션 정본은 라이브 스키마 코드 상수를 믿으면 사람이 추가한 옵션을 되돌린다 (07-19 실제 발생)
+    망 예외 4종            ChunkedEncodingError 는 ConnectionError 의 서브클래스가 아니다.
+                           헤더는 왔는데 본문 도중 끊긴 경우로, query 응답에서 가장 흔하다
+    절전 해제 직후 DNS      수집 10,112건 성공 → 착지 직전에 죽어 229건 유실 (07-18)
+    403 은 공유 설정        토큰 문제로 오진하고 재발급하며 시간을 버린다
+
+## 두 가지를 새로 한다 (옛 시스템에 없던 것)
+
+    되읽기        옛 코드는 status_code == 200 만 보고 성공으로 쳤다.
+                 "노션이 조용히 버린다"는 걸 주석으로 알면서도 확인은 안 했다.
+    칸 지정 읽기   filter_properties 를 쓰는 곳이 옛 리포에 0곳이었다.
+                 행 하나를 읽으면 246칸이 통째로 온다 → 느리고, 응답이 커서 잘 끊긴다.
+"""
+from __future__ import annotations
+
+import functools
+import time
+
+import requests
+
+from kvlib import Fetched, constraints, secrets
+
+_API = "https://api.notion.com/v1"
+_VERSION = "2022-06-28"
+
+# 🔴 쓰기 허용 DB 명단. 여기 없으면 쓰지 않는다.
+#    옛 시스템은 매핑 없는 채널을 base DB 로 조용히 흘려보냈고, 그 DB엔 그 채널 칸이 없어
+#    값 대부분이 버려진 채 "오염된 대조원"이 됐다.
+WRITABLE = {
+    "ch_앱스토어": "00000000-0000-0000-0000-30deea8edcc5",
+}
+# 읽기 전용 — 대조·조회에만 쓴다
+READ_ONLY = {
+    "base_주간소싱": "00000000-0000-0000-0000-d609b10d8459",
+    "ch_링크드인": "00000000-0000-0000-0000-8702f7cc7f34",
+    "ch_스레드": "00000000-0000-0000-0000-a258370d87f8",
+}
+
+_NET_ERRORS = (
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+    requests.exceptions.ContentDecodingError,
+)
+
+
+class NotionError(RuntimeError):
+    pass
+
+
+class NotWritable(RuntimeError):
+    """쓰기 허용 명단에 없는 DB 다."""
+
+
+# ---------------------------------------------------------------- HTTP
+
+def _headers() -> dict:
+    return {
+        "Authorization": f"Bearer {secrets.get('NOTION_TOKEN')}",
+        "Notion-Version": _VERSION,
+        "Content-Type": "application/json",
+    }
+
+
+def _req(method: str, path: str, *, json_body: dict | None = None, params: dict | None = None) -> dict:
+    """노션 API 한 번. 성공해도 rate limit 만큼 잔다.
+
+    재시도 정책이 계층별로 갈린다:
+      망 계열   15/30/60s (절전 해제 직후 DNS 미기동)
+      429       Retry-After 우선
+      5xx       1s 기반
+      4xx       재시도 없음 — 상대의 답이지 망 문제가 아니다
+    """
+    net_backoff = constraints.get("http.retry_backoff_sec")
+    sleep_after = 1.0 / constraints.get("notion.rate_limit_rps")
+    url = f"{_API}{path}"
+    net_try = 0
+    other_try = 0
+
+    while True:
+        try:
+            r = requests.request(method, url, headers=_headers(), json=json_body,
+                                 params=params, timeout=constraints.get("http.timeout_sec"))
+        except _NET_ERRORS as e:
+            if net_try < len(net_backoff):
+                w = net_backoff[net_try]
+                net_try += 1
+                print(f"  · 노션 망 오류 {type(e).__name__} — {w}s 후 재시도 ({net_try}/{len(net_backoff)})")
+                time.sleep(w)
+                continue
+            raise NotionError(f"망 계열로 끝까지 실패: {type(e).__name__} {path}") from e
+
+        if r.status_code == 429:
+            wait = float(r.headers.get("Retry-After") or 1)
+            other_try += 1
+            if other_try > 4:
+                raise NotionError(f"429 가 계속된다: {path}")
+            print(f"  · 429 — Retry-After {wait}s")
+            time.sleep(wait)
+            continue
+        if 500 <= r.status_code < 600:
+            other_try += 1
+            if other_try > 4:
+                raise NotionError(f"{r.status_code} 가 계속된다: {path}")
+            time.sleep(2 ** other_try)
+            continue
+        if r.status_code == 403:
+            raise NotionError(
+                f"403 {path} — 토큰이 아니라 **공유 설정**을 먼저 의심하라. "
+                f"integration 을 대상 DB에 연결했는지 확인."
+            )
+        if r.status_code >= 400:
+            raise NotionError(f"{r.status_code} {path}: {r.text[:300]}")
+
+        time.sleep(sleep_after)
+        return r.json()
+
+
+# ---------------------------------------------------------------- 스키마
+
+@functools.cache
+def schema(db_id: str) -> dict:
+    """라이브 스키마. **옵션 목록의 정본은 항상 여기다.**"""
+    return _req("GET", f"/databases/{db_id}").get("properties", {})
+
+
+def allowed_options(db_id: str, prop: str) -> list[str]:
+    """select / multi_select 의 허용값을 라이브에서 읽는다."""
+    p = schema(db_id).get(prop)
+    if not p:
+        raise NotionError(f"'{prop}' 칸이 그 DB 에 없다")
+    kind = p.get("type")
+    if kind not in ("select", "multi_select", "status"):
+        raise NotionError(f"'{prop}' 은 {kind} 라 옵션이 없다")
+    return [o["name"] for o in p.get(kind, {}).get("options", [])]
+
+
+def _prop_ids(db_id: str, props: list[str]) -> list[str]:
+    """filter_properties 는 이름이 아니라 property id 를 받는다."""
+    sch = schema(db_id)
+    ids = []
+    for name in props:
+        if name not in sch:
+            raise NotionError(f"'{name}' 칸이 그 DB 에 없다 — 읽으려는 칸을 계약이 모른다")
+        ids.append(sch[name]["id"])
+    return ids
+
+
+# ---------------------------------------------------------------- 절단
+
+def sanitize(text: str) -> str:
+    """노션이 조용히 제거하는 문자를 **보내기 전에** 개행으로 바꾼다.
+
+    🔴 실측(08-17): 앱 설명 864자를 보냈는데 862자가 저장됐다 — U+2028 두 개가 사라졌다.
+    되읽기가 이걸 잡았다. 옛 시스템은 되읽기가 없어서 이런 손실을 영영 몰랐다.
+
+    미리 바꿔두면 저장된 값 = 우리가 의도한 값이 되고, 되읽기 검사를 **느슨하게 하지 않아도**
+    된다. 검사를 느슨하게 하면 다음에 노션이 다른 걸 지울 때 그것도 같이 묻힌다.
+    """
+    for ch in constraints.get("notion.strips_chars"):
+        text = text.replace(ch, "\n")
+    return text
+
+
+def clip16(text: str, *, limit: int | None = None, mark: str | None = None) -> str:
+    """UTF-16 코드유닛 기준 절단. **잘렸을 때만** 표식을 붙인다.
+
+    파이썬 len 으로 자르면 이모지에서 틀린다 — 2,000자가 2,003유닛이 되어 400 이 났다.
+    표식 길이만큼 예산을 줄여 자르므로 결과는 **언제나 한계 이하**다.
+    """
+    limit = limit or constraints.get("notion.rich_text_limit")
+    mark = constraints.get("notion.truncation_mark") if mark is None else mark
+    if _u16(text) <= limit:
+        return text
+    budget = limit - _u16(mark)
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if _u16(text[:mid]) <= budget:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo] + mark
+
+
+def _u16(s: str) -> int:
+    return len(s.encode("utf-16-le")) // 2
+
+
+# ---------------------------------------------------------------- 읽기
+
+def query(db_id: str, props: list[str], *, page_size: int = 100, max_pages: int = 200) -> Fetched:
+    """행을 읽는다. **props 는 필수** — 전량 읽기를 통로가 제공하지 않는다.
+
+    옛 시스템은 filter_properties 를 안 써서 행마다 246칸을 통째로 받았다.
+    응답이 수백 KB 라 ChunkedEncodingError 가 가장 흔한 자리이기도 했다.
+    """
+    if not props:
+        raise ValueError(
+            "읽을 칸을 명시하라. 전량 읽기는 제공하지 않는다 — "
+            "246칸을 통째로 받으면 느리고, 응답이 커서 중간에 잘 끊긴다."
+        )
+    ids = _prop_ids(db_id, props)
+    out: list[dict] = []
+    cursor = None
+    pages = 0
+    try:
+        while True:
+            body = {"page_size": page_size}
+            if cursor:
+                body["start_cursor"] = cursor
+            data = _req("POST", f"/databases/{db_id}/query", json_body=body,
+                        params=[("filter_properties", i) for i in ids])
+            for pg in data.get("results", []):
+                out.append({"_page_id": pg["id"], **{k: _plain(v) for k, v in pg.get("properties", {}).items()}})
+            pages += 1
+            cursor = data.get("next_cursor")
+            if not data.get("has_more"):
+                return Fetched.measured(out, rows=len(out), pages=pages)
+            if pages >= max_pages:
+                # 잘렸다는 사실을 반환한다 — 조용히 적게 주지 않는다
+                return Fetched.measured(out, partial=True, rows=len(out), pages=pages)
+    except NotionError as e:
+        return Fetched.unknown(f"notion:{e}")
+
+
+def _plain(v: dict):
+    """노션 property 값 → 파이썬 값. 모르는 타입은 None (조용히 빈 문자열로 만들지 않는다)."""
+    t = v.get("type")
+    if t == "title" or t == "rich_text":
+        return "".join(x.get("plain_text", "") for x in v.get(t, []))
+    if t == "select":
+        return (v.get("select") or {}).get("name")
+    if t == "multi_select":
+        return [o["name"] for o in v.get("multi_select", [])]
+    if t in ("number", "checkbox", "url", "email", "phone_number"):
+        return v.get(t)
+    if t == "date":
+        return (v.get("date") or {}).get("start")
+    if t in ("created_time", "last_edited_time"):
+        return v.get(t)
+    return None
+
+
+# ---------------------------------------------------------------- 쓰기
+
+def create(db_key: str, props: dict) -> Fetched:
+    """행 하나 생성 → **되읽어 확인**까지 하고 나서 성공이라고 한다.
+
+    db_key 는 WRITABLE 의 키다. id 를 직접 받지 않는다 — 그래야 명단 밖 DB 에
+    쓰는 코드가 표현 불가능해진다.
+    """
+    db_id = _writable_id(db_key)
+    payload = _build(db_id, props)
+    try:
+        page = _req("POST", "/pages", json_body={"parent": {"database_id": db_id}, "properties": payload})
+    except NotionError as e:
+        return Fetched.unknown(f"create:{e}")
+
+    page_id = page["id"]
+    bad = _verify(db_id, page_id, props)
+    if bad:
+        return Fetched.unknown(f"readback_mismatch:{bad}", page_id=page_id)
+    return Fetched.measured(page_id)
+
+
+def update(page_id: str, db_key: str, props: dict) -> Fetched:
+    db_id = _writable_id(db_key)
+    payload = _build(db_id, props)
+    try:
+        _req("PATCH", f"/pages/{page_id}", json_body={"properties": payload})
+    except NotionError as e:
+        return Fetched.unknown(f"update:{e}")
+    bad = _verify(db_id, page_id, props)
+    if bad:
+        return Fetched.unknown(f"readback_mismatch:{bad}", page_id=page_id)
+    return Fetched.measured(page_id)
+
+
+def _writable_id(db_key: str) -> str:
+    if db_key not in WRITABLE:
+        raise NotWritable(
+            f"'{db_key}' 는 쓰기 허용 명단에 없다. 쓸 수 있는 것: {sorted(WRITABLE)}. "
+            f"읽기 전용: {sorted(READ_ONLY)}"
+        )
+    return WRITABLE[db_key]
+
+
+def _build(db_id: str, props: dict) -> dict:
+    """이름→값 dict 를 노션 payload 로. 스키마에 없는 칸은 **조용히 버리지 않고** raise.
+
+    select 값은 쓰기 **전에** 라이브 허용값과 대조한다 — 노션은 모르는 값을 조용히
+    버리면서 200 을 주므로, 보내고 나서 알면 늦다.
+    """
+    sch = schema(db_id)
+    out: dict = {}
+    for name, val in props.items():
+        if name not in sch:
+            raise NotionError(f"'{name}' 칸이 DB 에 없다 — 오타이거나 스키마가 바뀌었다")
+        if val is None:
+            continue
+        t = sch[name]["type"]
+        if t == "title":
+            out[name] = {"title": [{"text": {"content": clip16(sanitize(str(val)))}}]}
+        elif t == "rich_text":
+            out[name] = {"rich_text": [{"text": {"content": clip16(sanitize(str(val)))}}]}
+        elif t == "select":
+            _check_option(db_id, name, str(val))
+            out[name] = {"select": {"name": str(val)}}
+        elif t == "multi_select":
+            vals = val if isinstance(val, list) else [val]
+            for v in vals:
+                _check_option(db_id, name, str(v))
+            out[name] = {"multi_select": [{"name": str(v)} for v in vals]}
+        elif t == "number":
+            out[name] = {"number": val}
+        elif t == "checkbox":
+            out[name] = {"checkbox": bool(val)}
+        elif t == "url":
+            out[name] = {"url": str(val) or None}
+        elif t == "date":
+            out[name] = {"date": {"start": str(val)}}
+        else:
+            raise NotionError(f"'{name}' 타입 {t} 은 아직 안 다룬다 — 필요하면 명시적으로 추가하라")
+    return out
+
+
+def _check_option(db_id: str, prop: str, value: str) -> None:
+    allowed = allowed_options(db_id, prop)
+    if value not in allowed:
+        raise NotionError(
+            f"'{prop}' 에 없는 옵션 '{value}'. 라이브 허용값: {allowed}. "
+            f"노션은 이런 값을 조용히 버리면서 200 을 준다 — 보내기 전에 막는다."
+        )
+
+
+def _verify(db_id: str, page_id: str, props: dict) -> str:
+    """되읽어 대조. 안 맞으면 어떤 칸이 틀렸는지 돌려준다.
+
+    🔴 이게 이 통로의 존재 이유 중 하나다. 200 은 "요청을 받았다"이지
+    "값이 들어갔다"가 아니다.
+    """
+    try:
+        page = _req("GET", f"/pages/{page_id}")
+    except NotionError as e:
+        return f"readback_failed:{e}"
+    live = {k: _plain(v) for k, v in page.get("properties", {}).items()}
+    bad = []
+    for name, want in props.items():
+        if want is None:
+            continue
+        got = live.get(name)
+        t = schema(db_id)[name]["type"]
+        if t in ("title", "rich_text"):
+            if str(got or "") != clip16(sanitize(str(want))):
+                bad.append(name)
+        elif t == "multi_select":
+            wants = want if isinstance(want, list) else [want]
+            if set(got or []) != {str(w) for w in wants}:
+                bad.append(name)
+        elif t == "number":
+            if got != want:
+                bad.append(name)
+        elif t == "checkbox":
+            if bool(got) != bool(want):
+                bad.append(name)
+        else:
+            if str(got or "") != str(want):
+                bad.append(name)
+    return ",".join(bad)
