@@ -163,7 +163,7 @@ def _props(aid: str, v: dict, d: dict, run_id: str) -> dict:
         "Rating": d.get("rating"),
         "Review Count": d.get("review_count"),
         "Match Reason": f"{genre_name} · {chart_label} {v.get('rank')}위",
-        "Captured At": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "Captured At": ledger.today(),   # 로컬(KST) — 사람이 보는 날짜와 맞춘다
         "Run ID": run_id,
         "주차": f"{iso.year}-W{iso.week:02d}",
     }

@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from kvlib import paths
@@ -101,7 +101,7 @@ def rows(task: str, *, ev: str | None = None, day: str | None = None) -> list[di
             ) from e
         if ev and r.get("ev") != ev:
             continue
-        if day and not str(r.get("ts", "")).startswith(day):
+        if day and _local_day(str(r.get("ts", ""))) != day:
             continue
         out.append(r)
     return out
@@ -122,8 +122,24 @@ def last(task: str) -> dict | None:
     return rs[-1] if rs else None
 
 
+# 🔴 판정 기준일은 **로컬(KST)** 이다. [0] 제약:
+#    "스케줄러의 period 는 UTC 라 00~09시 KST 에 하루 어긋난다. UTC 로 세면 매일 아침 오탐."
+#    07:00 KST 는 22:00 UTC(전날)라 UTC 로 날짜를 세면 사람이 보는 날짜와 하루 어긋난다.
+#    ts 는 UTC 로 적되(순서 비교용), **하루의 경계는 로컬**로 센다.
+_KST = timezone(timedelta(hours=9))
+
+
 def today() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(_KST).strftime("%Y-%m-%d")
+
+
+def _local_day(ts: str) -> str:
+    """UTC ts 를 KST 날짜로 옮긴다."""
+    try:
+        return (datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
+                .replace(tzinfo=timezone.utc).astimezone(_KST).strftime("%Y-%m-%d"))
+    except Exception:
+        return ts[:10]
 
 
 def summary(task: str, day: str | None = None) -> dict:
@@ -133,7 +149,9 @@ def summary(task: str, day: str | None = None) -> dict:
     장부를 세서 쓴다.
     """
     day = day or today()
-    rs = rows(task, day=day)
+    # 🔴 seed 로 넣은 건 "오늘 한 일"이 아니다. 섞어 세면 보고가 거짓말을 한다.
+    rs = [r for r in rows(task, day=day) if not str(r.get("src", "")).startswith("seed")]
+    seeded = len(rows(task, day=day)) - len(rs)
     by_ev: dict[str, int] = {}
     for r in rs:
         by_ev[r.get("ev", "?")] = by_ev.get(r.get("ev", "?"), 0) + 1
@@ -142,6 +160,7 @@ def summary(task: str, day: str | None = None) -> dict:
         "day": day,
         "counts": by_ev,
         "total_today": len(rs),
+        "seeded_today": seeded,
         "last_ts": (lastrow or {}).get("ts"),
         "ledger_lines": len(rows(task)),
     }
