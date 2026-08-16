@@ -148,7 +148,10 @@ print("\n=== T4: 아직 안 옮긴 모듈이 목록으로 보인다 ===\n")
 #   · backfill_artwork.py 의 1건 — **iTunes 조회다**(노션 아님). 이 파일이 목록에 뜨는 건
 #                                 `api.notion.com` 문자열을 담고 있어서일 뿐이다.
 # 숫자는 **줄면 내리고 늘면 실패**한다 — 새 파일이 옛 방식으로 태어나는 것을 막는 게 목적이다.
-_DEBT_MAX = 2
+# 🔴 [2026-08-16] 2 → 1. `bplan/main.py` 가 은퇴(`_archive/bplan-automation` 실행 가드 +
+#    실행권한 제거)하면서 목록에서 빠졌다. 남은 1본은 **노션이 아니라 iTunes 조회**다 —
+#    `api.notion.com` 문자열을 담고 있어 목록에 뜰 뿐이다. 규율대로 줄었으니 내린다.
+_DEBT_MAX = 1
 _debt = sorted((str(p.relative_to(_REPO)), _direct_calls(p)) for p in _MODS
                if _direct_calls(p) > 0 and str(p.relative_to(_REPO)) not in _LIVE)
 check("T4 전송 정본을 안 쓰는 모듈이 늘지 않았다", len(_debt) <= _DEBT_MAX,
@@ -159,6 +162,46 @@ for _rel, _n in _debt:
 
 check("T4 노션 모듈을 실제로 훑었다(0이면 위 검사가 공허하다)", len(_MODS) >= 10,
       f"{len(_MODS)}본")
+
+# ══════════════════════════════════════════════════════════════════════
+# T5 [2026-08-16] 잘린 값은 **잘렸다고 말한다**
+#
+# 실측: `ch_링크드인.Raw Text` 가 정확히 2000 UTF-16 유닛인 행이 **33개**(≥1900 은 46개).
+#       `dedup_bplan3` 도 팀이력 5 · 추가내용 10 · 경쟁사 6 · 경쟁력 5 · 비즈니스모델 3 …
+# 마커가 없으면 **"원래 2000인 원문"과 "잘린 원문"이 구별되지 않는다.** 판정은 Raw Text 를
+# 그 사람의 이력 전체로 읽으므로, 잘린 걸 완전한 걸로 읽으면 조용히 오판하고 로그엔 흔적이 없다.
+#
+# 여기서 재는 것은 두 방향이다 — 마커가 **붙는가**, 그리고 마커 때문에 **한계를 넘지 않는가**.
+# 후자가 빠지면 2026-07-27 사고(2000자가 2003유닛이라 400, 링크드인 7건 통째 실패)를 재현한다.
+print("\n=== T5: 잘린 rich_text 는 잘렸다고 말한다 ===\n")
+
+sys.path.insert(0, str(_REPO / "skills" / "net-sourcing" / "project"))
+from core.notion import _clip16, _prop_value, _TRUNC_MARK  # noqa: E402
+
+_u = lambda s: len(s.encode("utf-16-le")) // 2   # noqa: E731
+
+check("T5 안 잘리면 원문 그대로 · 마커 없음", _clip16("짧다", marker=_TRUNC_MARK) == "짧다")
+check("T5 정확히 2000유닛 원문은 안 자르고 마커도 안 붙인다",
+      _clip16("가" * 2000, marker=_TRUNC_MARK) == "가" * 2000)
+
+_long = _clip16("가" * 3000, marker=_TRUNC_MARK)
+check("T5 잘리면 마커가 붙는다", _long.endswith(_TRUNC_MARK), f"끝 {_long[-8:]!r}")
+check("T5 마커를 붙여도 2000유닛을 안 넘는다", _u(_long) <= 2000, f"{_u(_long)}유닛")
+
+# 이모지 = 보조평면(1문자 2유닛). 2026-07-27 에 400 을 낸 바로 그 입력 모양이다.
+_emo = _clip16("🦖" * 1500, marker=_TRUNC_MARK)
+check("T5 보조평면 문자에서도 한계 준수", _u(_emo) <= 2000, f"{_u(_emo)}유닛")
+check("T5 문자 경계가 안 깨진다(대체문자 없음)", "�" not in _emo)
+
+_p = _prop_value("rich_text", "가" * 3000)["rich_text"][0]["text"]["content"]
+check("T5 rich_text 쓰기 목(_prop_value)이 마커를 태운다", _p.endswith(_TRUNC_MARK))
+check("T5 그 결과도 2000유닛 이하", _u(_p) <= 2000, f"{_u(_p)}유닛")
+
+# 제목은 사람이 검색·대조하는 **키 성격**이라(cross_db_overlap 의 제목 교집합) 마커를 안 붙인다.
+_t = _prop_value("title", "가" * 3000)["title"][0]["text"]["content"]
+check("T5 title 에는 마커를 안 붙인다(키 성격 보존)", not _t.endswith(_TRUNC_MARK))
+check("T5 마커조차 안 들어가는 limit 에서도 한계를 지킨다",
+      _u(_clip16("가" * 100, limit=3, marker=_TRUNC_MARK)) <= 3)
 
 # ══════════════════════════════════════════════════════════════════════
 print()

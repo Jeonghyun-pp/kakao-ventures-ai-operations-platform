@@ -395,7 +395,15 @@ JSON array. 레코드 **14필드 전부 100% 등장** — `source` `name` `url` 
   `disquiet_products_<D>` 는 앱ID가 아니라 slug/UUID 혼합 문자열 배열 — **키 공간이 다르다**.
 - `raw/appstore_<D>.json`(26본 317 MB) · `raw/threads_<D>`(7) · `raw/linkedin_harvestapi_<D>`(6) — **셋 다 동일한 정규화 레코드 13필드**(`source name url one_liner founder released_at raw_text app_id ext_id linkedin_url homepage adapter signals`). 🔴 **`adapter` 가 채널 판별 키**(`appstore`/`threads`/`linkedin.harvestapi`), `signals` 만 어댑터별로 다르다. 이게 수집 계층의 실질 계약이다.
   ⚠️ `signals.genre` 가 `list`(186,403) 와 `str`(827) 로 **타입이 섞여 있다**.
-  ⚠️ `raw/{listly,linkedin_listly}_<D>.json` 7본은 전부 `[]`(2바이트) — 죽은 수집기.
+  🔴 **[2026-08-16 정정] `raw/{listly,newchan}_<D>.json` 은 수집기 산출물이 아니라 테스트 누출이었다.**
+  이 줄은 원래 *"7본 전부 `[]` — 죽은 수집기"* 였다. 실측하니 `listly`·`newchan` 은
+  `pipeline._REGISTRY` 에 **없는 이름**이다(존재하는 건 `linkedin_listly` 뿐). 이 파일들은
+  `_synthetic_apify_gate.py` 가 `KV_DATA` 를 우회해 프로덕션에 쓴 것이고, `threads_<D>` 4본도
+  같은 출처다(네 날짜 모두 세 파일 mtime 이 **같은 초**). 12본을 `_quarantine/` 로 격리하고
+  테스트를 고쳤다. **파일이 있다고 수집기가 돌았다고 읽으면 안 된다** — 이 줄 자체가 그
+  오독의 실례다. 남은 `linkedin_listly_<D>` 3본만 진짜 어댑터 산출물이고, 그건 죽은 게 아니라
+  **사람이 xlsx/csv 를 떨궈야 도는 반자동 어댑터**라 드롭 폴더가 비면 `[]` 가 정상이다
+  (`config.yaml: linkedin_listly.enabled=false` · `_synthetic_apify_gate` 의 `no_fetch=True` 계약).
 - `raw/_actor/<actor>_<TS>.json` 136본 168 MB — `{slug, payload, items[]}`. Apify 원문 그대로. `items` 빈 것 4본.
 - `fixtures/*.json` 11본 — 그중 3본이 `[]`(빈 픽스처).
 

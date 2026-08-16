@@ -293,6 +293,24 @@ _pl._monthly_gate = lambda *a, **k: None
 _pl._preflight_cost = lambda *a, **k: None
 _pl._write_health = lambda *a, **k: None
 
+# 🔴 [2026-08-16] **이 한 줄이 없으면 이 테스트가 프로덕션 데이터에 쓴다.**
+#    `pipeline.collect` 는 어댑터마다 `RAW / f"{name}_{오늘}.json"` 을 무조건 쓴다(0건이어도).
+#    그런데 `RAW = PROJ/"data"/"raw"` 이고 `skills/net-sourcing/project/data` 는
+#    **`~/kv-data/net-sourcing` 으로 가는 심볼릭 링크**다. net-sourcing 의 경로는
+#    `kv_core.paths` 를 안 거치므로 **`KV_DATA` 스크래치가 아무 효과가 없었다.**
+#
+#    실측 피해(이 파일이 생긴 2026-08-13 이후 로컬 스위트 4회):
+#      `listly_<D>.json` · `newchan_<D>.json`  ← 레지스트리에 없는 **테스트 픽스처 이름**
+#      `threads_<D>.json`                      ← 🔴 **실채널 이름.** 2바이트 `[]` 가
+#                                                 raw/ 최신본 자리를 차지해, "raw 최신본을
+#                                                 읽는" 하류가 테스트 산물을 진짜 수집
+#                                                 결과로 소비할 수 있었다.
+#    네 날짜(08-13·14·15·16) 모두 세 파일의 mtime 이 **같은 초**다 — 수집이 아니라 이 스위트다.
+#
+#    CI 는 이걸 영원히 못 잡는다: 저 심볼릭 링크는 gitignore 라 러너에 없고, 거기선
+#    `RAW.mkdir` 이 임시 디렉토리를 만들 뿐이다. **로컬 전용 누출이라 초록 CI 뒤에 숨었다.**
+_pl.RAW = Path(os.environ["KV_DATA"]) / "_apify_gate_scratch" / "raw"
+
 _degraded = ""
 try:
     _pl.collect({"channels": {}}, {}, "all")

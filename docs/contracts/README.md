@@ -25,6 +25,7 @@
 | `notion/contract.json` | 8 DB 계약 통합 — **재빌드/변경 시 이 파일 하나로 대조** |
 | `notion/schema_*.json` | DB별 원문 스키마(허용값·formula 전량) |
 | `notion/baseline.md` | 판정 분포 기준선 — "같은 결과인가"를 재는 자 |
+| `60-zero-fill-columns.md` | 0% 컬럼 22개를 **네 성격으로 분류** — 정상 4 / 미배선 5 / 미가동 10 / 제외 |
 | `90-verified.md` | 에이전트 발견 재검증 기록(승격 2·강등 2·반려 1·오판 정정 1) |
 | `13-code-ledger.tsv` | 313본 열람 대장 |
 | `00-PLAN.md` | 진행 계획과 "전량 읽었다"의 정의 |

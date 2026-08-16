@@ -317,16 +317,27 @@ released_at·raw_text·app_id·ext_id·linkedin_url·homepage·adapter·signals)
 `adapters/apify.py` 의 `_ARCHIVE` 주석이 이 사실을 명시한다 — *"data/raw/\*.json 은 파싱이 끝난
 Candidate 다. 어댑터가 필드명을 잘못 읽으면 그 raw 엔 이미 값이 없다."*
 
-채널별: appstore 26본(빈 2) · threads 7본(빈 5) · linkedin_harvestapi 6본(빈 1) ·
-linkedin_listly 3본(**전부 빈**) · listly 4본(**전부 빈**) · newchan 4본(**전부 빈**) ·
-disquiet 1본 · velog 1본.
+채널별(2026-08-16 재실측): appstore 27본(빈 2) · threads 3본(빈 1) ·
+linkedin_harvestapi 6본(빈 1) · linkedin_listly 3본(**전부 빈**) · disquiet 1본 · velog 1본.
+
+🔴 **[2026-08-16 정정] 이전 판의 `listly 4본 · newchan 4본 · threads 빈 5` 는 수집 결과가 아니었다.**
+`listly`·`newchan` 은 `pipeline._REGISTRY` 에 **없는 이름**이다 — `_synthetic_apify_gate.py` 의
+픽스처 이름이다. 그 테스트가 `KV_DATA` 스크래치를 우회해(`project/data` 심볼릭 링크)
+프로덕션 `raw/` 에 직접 썼다. `threads_<D>` 4본도 같은 출처다: 네 날짜(08-13·14·15·16)
+모두 세 파일의 mtime 이 **같은 초**로, 수집 스케줄이 아니라 스위트 실행 시각이다.
+12본을 `_quarantine/2026-08-16-test-leak/` 로 격리하고 테스트를 고쳤다.
 
 ```
-제약        2바이트("[]") 파일이 16본이다 — listly·newchan·linkedin_listly 는 **전량 빈 배열**이다.
-증거        전수. listly 4/4, newchan 4/4, linkedin_listly 3/3, threads 5/7, appstore 2/26.
-우리 대응    채널이 꺼져 있거나 사문인 상태. 빈 배열도 파일을 쓰기 때문에 "돌았다"는 흔적은 남는다.
-어기면      파일 존재만으로 채널 생존을 판정하면 죽은 층이 살아 있는 척한다
-            (appstore.py 가 "받긴 받았는데 emit 0 = 죽은 층이 살아 있는 척" 이라 부르는 패턴).
+제약        2바이트("[]") 파일이 7본이다 — linkedin_listly 3/3 · appstore 2/27 ·
+            linkedin_harvestapi 1/6 · threads 1/3.
+증거        전수 재실측(2026-08-16). 이전 판 16본 중 12본은 테스트 누출이라 제외했다.
+우리 대응    `linkedin_listly` 의 `[]` 는 **고장이 아니라 정상**이다 — 사람이 xlsx/csv 를
+            드롭 폴더에 넣어야 도는 반자동 어댑터이고, 지금은 config 에서 꺼져 있다
+            (`no_fetch=True` 로 선언돼 있어 계측 0 이 degraded 로 안 잡힌다).
+어기면      ① 파일 존재만으로 채널 생존을 판정하면 죽은 층이 살아 있는 척한다
+              (appstore.py 가 "받긴 받았는데 emit 0" 이라 부르는 패턴).
+            ② 🔴 그 역도 성립한다 — **파일이 있다고 그 채널이 돌았다고 읽으면 안 된다.**
+              이 항목의 이전 판이 정확히 그 오독이었다. 이름이 레지스트리에 있는지부터 본다.
 ```
 
 `Candidate` 필드 중 `ext_id`·`linkedin_url`·`homepage`·`adapter` 는 appstore raw 에서
@@ -786,3 +797,50 @@ disquiet 1본 · velog 1본.
 | occupation/position 키 | 0/97 | **0/1,167** | ✅ 그대로 |
 | _meta totalPages 천장 | 100 고정 | **최대 100, 초과 0건** | ✅ 그대로 |
 | URN 형태 | AC?AA + 9자 + 꼬리 | **39자 고정 1종, 접두 ACoAA/ACwAA** | ✅ 정규식이 전부 흡수 |
+
+---
+
+## 추가 [2026-08-16] — base 주간소싱 DB 는 **대조원**이지 착지 대상이 아니다
+
+```
+제약        `notion.db_id`(base 주간소싱 DB, 1,470행)는 아무도 판정하지 않는 축적본이다.
+증거        `Tier` 판정완료 **0/1470** · `프로필 점수` 0/1470 · `AI Reason` 0/1470 ·
+            `Last Seen` 0/1470. 반면 채널 DB 와 크게 겹친다 —
+            핸들 교집합 894 · 제목 1,379 · 링크드인 `/in/` 키 260.
+            `judge_cli._targets` 는 `include_base=False` 가 기본이라 판정 루프가 이 DB 를
+            아예 안 읽는다(결정 10-b: 채널 DB 가 정본, base 는 원본 잔존).
+우리 대응    ① 읽기는 한다 — `notion.landing_dbs()` 가 dedup ①단에서 base 를 포함해 읽는다.
+              빠뜨리면 base 에 이미 있는 사람을 다시 착지시켜 중복 행이 생긴다.
+            ② 🔴 **쓰기는 막는다** — `notion.db_for(cfg, source)` 가 매핑 없는 채널에 대해
+              base 로 조용히 폴백하던 것을 `RuntimeError` 로 바꿨다(2026-08-16).
+              `db_for(cfg, "")` 는 "base 를 명시적으로 달라"는 관용구라 그대로 둔다
+              (`pipeline.land` 이 '채널 분리 착지 중인가' 판별에 쓴다).
+어기면      어댑터 `source` 는 9종인데 `channel_db_ids` 매핑은 3종(앱스토어·스레드·링크드인)
+            뿐이다. 나머지 6종(해커뉴스·디스콰이엇·프로덕트헌트·네이버·X·velog)은 전부 지금
+            config 에서 꺼져 있지만, **켜는 순간 아무 말 없이 base 로 착지한다.**
+            그 DB 에는 그 채널용 칸이 없어 값 대부분이 버려지고, 남는 건 오염된 대조원이다.
+            그러면 dedup 의 기준 자체가 틀어져 **중복 판정이 조용히 늘어난다.**
+예외        `tools/backfill_{artwork,axis,seed}.py` · `mark_builders.py` 4본은 지금도
+            base 에 직접 쓴다(`cfg["notion"]["db_id"]`). 레거시 축적본 정비용 수동 도구라
+            의도된 예외다 — **자동 경로에는 base 쓰기가 없다**는 것이 이 제약의 내용이다.
+```
+
+## 추가 [2026-08-16] — 잘린 텍스트는 잘렸다고 말한다
+
+```
+제약        노션 rich_text 는 2,000 UTF-16 코드유닛이 한계다. 잘라 넣으면 값 자체로는
+            "원래 그 길이"와 "잘렸다"가 구별되지 않는다.
+증거        `ch_링크드인.Raw Text` 가 **정확히 2000 유닛인 행 33개**(≥1900 은 46개).
+            `dedup_bplan3`: 추가내용 10 · 경쟁사 6 · 경쟁력 5 · 팀이력 5 · 비즈니스모델 3 · 솔루션 2.
+우리 대응    `core/notion._clip16(text, marker=...)` — 실제로 잘렸을 때만 끝에 `…⟪잘림⟫` 을
+            붙인다. 마커 길이만큼 예산을 줄여 자르므로 결과는 언제나 한계 이하다.
+            net-sourcing 의 **모든 rich_text 쓰기가 지나는 목**인 `_prop_value` 에 걸었다.
+            `title` 에는 안 붙인다 — 제목은 사람이 검색·대조하는 키 성격이다
+            (`cross_db_overlap.md` 의 제목 교집합이 그 대조를 쓴다).
+어기면      판정은 `Raw Text` 를 그 사람의 이력 **전체**로 읽는다. 잘린 걸 완전한 걸로 읽으면
+            조용히 오판하고, 그 오판은 로그에 아무 흔적도 남기지 않는다.
+            그리고 마커를 붙이면서 한계 계산을 틀리면 2026-07-27 사고가 재현된다 —
+            2,000 **자**가 이모지 때문에 2,003 **유닛**이 되어 400, 링크드인 495건 중 7건이
+            통째로 착지 실패했다. 그래서 검증에 '마커를 붙여도 한계 이하'가 들어 있다
+            (`_synthetic_notion_transport` T5, 10검사).
+```

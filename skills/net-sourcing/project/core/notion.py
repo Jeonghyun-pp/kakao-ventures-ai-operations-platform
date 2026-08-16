@@ -90,8 +90,22 @@ _MAX_TEXT = 1900              # 노션: rich_text 항목당 content 2,000자
 _MAX_POSTS_PER_REQ = _MAX_CHILDREN // 2      # = 50글 (최악의 경우 100블록)
 
 
-def _clip16(text: str, limit: int = 2000) -> str:
+_TRUNC_MARK = "…⟪잘림⟫"          # UTF-16 6유닛. 본문에 자연 발생하지 않는 괄호를 쓴다.
+
+
+def _clip16(text: str, limit: int = 2000, marker: str = "") -> str:
     """노션 길이 제한에 맞춰 자른다. **파이썬 문자 수가 아니라 UTF-16 코드유닛 기준**이다.
+
+    `marker` 를 주면 **실제로 잘렸을 때만** 끝에 붙인다(마커 길이만큼 더 줄여서 넣으므로
+    결과는 언제나 `limit` 이하다). 안 잘렸으면 원문 그대로 — 마커가 붙었다는 사실 자체가
+    "이 값은 완전하지 않다"는 신호가 되게 한다.
+
+    🔴 [2026-08-16] 왜 마커가 필요한가 — 실측:
+       `ch_링크드인.Raw Text` 가 **정확히 2000 유닛인 행이 33개**다(≥1900 은 46개).
+       `dedup_bplan3` 도 `팀이력` 5 · `추가내용` 10 · `경쟁사` 6 · `경쟁력` 5 · `비즈니스모델` 3 …
+       마커가 없으면 **"우연히 딱 2000인 원문"과 "잘린 원문"이 구별되지 않는다.** 판정은
+       Raw Text 를 사람의 이력 전체로 읽으므로, 잘린 걸 완전한 것으로 읽으면 조용히
+       잘못 판정한다 — 그리고 그 오판은 로그에 아무 흔적도 남기지 않는다.
 
     🔴 [2026-07-27 실측] `text[:2000]`으로 잘랐는데 노션이 400을 냈다:
          "content.length should be ≤ 2000, instead was 2003"
@@ -105,15 +119,18 @@ def _clip16(text: str, limit: int = 2000) -> str:
     s = text or ""
     if len(s.encode("utf-16-le")) // 2 <= limit:
         return s
+    budget = limit - (len(marker.encode("utf-16-le")) // 2 if marker else 0)
+    if budget <= 0:                       # 마커조차 안 들어가는 한계 — 마커를 포기하고 자른다
+        marker, budget = "", limit
     # 유닛 기준으로 뒤에서 줄인다(문자 경계는 파이썬 슬라이스가 보장한다)
     lo, hi = 0, len(s)
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if len(s[:mid].encode("utf-16-le")) // 2 <= limit:
+        if len(s[:mid].encode("utf-16-le")) // 2 <= budget:
             lo = mid
         else:
             hi = mid - 1
-    return s[:lo]
+    return s[:lo] + marker
 
 
 def _rt_chunks(text: str) -> list[dict]:
@@ -299,6 +316,28 @@ def db_for(cfg: dict, source: str) -> str:
        스레드는 name 키를 아예 안 만든다. **나눠도 잃는 게 0이다.**
     """
     m = (cfg.get("notion", {}).get("channel_db_ids") or {})
+    # 🔴 [2026-08-16] **매핑 없는 채널의 조용한 base 폴백을 막는다.**
+    #    `notion.db_id`(base 주간소싱 DB)는 **대조원**이다 — 1,470행이 쌓여 있는데
+    #    `Tier` 판정완료 0/1470 · `프로필 점수` 0/1470 으로, 아무도 판정하지 않는다.
+    #    반면 채널 DB 와는 크게 겹친다(핸들 894 · 제목 1379 · 링크드인 /in/ 키 260).
+    #    즉 이 DB 의 현재 쓸모는 **dedup ①단이 읽는 레거시 축적본**이고, 새 행이 들어오면
+    #    그 대조 기준 자체가 오염된다.
+    #
+    #    그런데 어댑터 `source` 는 9종인데 `channel_db_ids` 에는 3종(앱스토어·스레드·
+    #    링크드인)뿐이다. 나머지 6종(해커뉴스·디스콰이엇·프로덕트헌트·네이버·X·velog)은
+    #    전부 지금 config 에서 꺼져 있지만, **켜는 순간 아무 말 없이 base 로 착지한다.**
+    #    그 DB 에는 그 채널용 칸이 없으므로 값 대부분이 버려지고, 대조원만 더러워진다.
+    #
+    #    `db_for(cfg, "")` 는 **"base 를 명시적으로 달라"** 는 뜻이라 그대로 둔다
+    #    (`pipeline.land` 이 그 관용구로 '채널 분리 착지 중인가'를 판별한다).
+    #    구분하는 것은 *명시적 base 요청* 과 *채널이 매핑에서 빠진 것* 이다.
+    if source and source not in m:
+        raise RuntimeError(
+            f"채널 '{source}' 의 착지 DB 매핑이 없다 — base(대조원) 로 조용히 흘려보내지 않는다.\n"
+            f"   → config.yaml `notion.channel_db_ids` 에 '{source}' 를 추가하라.\n"
+            f"     현재 매핑: {sorted(m) or '(없음)'}\n"
+            f"   base(`notion.db_id`)는 dedup 이 읽는 레거시 대조원이다. 새 채널을 여기에\n"
+            f"   착지시키면 그 채널용 칸이 없어 값이 버려지고 대조 기준이 오염된다.")
     raw = str(m.get(source) or cfg["notion"]["db_id"])
     return raw.split("://", 1)[-1]
 
@@ -672,12 +711,17 @@ def _prop_value(ptype: str, value):
         text = str(value or "").strip()
         if not text:
             return None
+        # 제목은 마커를 안 붙인다 — 제목은 사람이 검색·대조하는 **키 성격**이고
+        # (`cross_db_overlap` 의 제목 교집합이 그 대조를 쓴다), 2000유닛 제목은 없다.
         return {"title": [{"text": {"content": _clip16(text)}}]}
     if ptype in ("rich_text", "text"):     # REST=rich_text, 데이터소스 스키마=text (둘 다 허용)
         text = str(value or "").strip()
         if not text:
             return None
-        return {"rich_text": [{"text": {"content": _clip16(text)}}]}
+        # 🔴 [2026-08-16] 여기가 net-sourcing 의 **모든 rich_text 쓰기가 지나는 목**이다.
+        #    잘렸으면 잘렸다고 값 자체에 남긴다 — `Raw Text` 33행이 정확히 2000유닛인데
+        #    지금은 "원래 2000"과 "잘려서 2000"이 구별되지 않는다(자세한 근거는 `_clip16`).
+        return {"rich_text": [{"text": {"content": _clip16(text, marker=_TRUNC_MARK)}}]}
     if ptype == "url":
         text = str(value or "").strip()
         if not text:
