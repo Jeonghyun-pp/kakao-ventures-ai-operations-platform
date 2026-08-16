@@ -61,7 +61,25 @@ def _run_stage(name: str, cmd: list[str]) -> dict:
 
 
 def _latest_plan() -> Path | None:
-    plans = sorted((PROJ / "triage" / "data").glob("plan_*.json"))
+    """가장 최근 triage 계획 파일.
+
+    🔴 [2026-08-16] 예전엔 `PROJ / "triage" / "data"` 를 봤는데 **그 디렉토리는 존재하지 않는다.**
+       계획은 `triage/main.py:_plan_path()` 가 `paths.data("mail-harness","triage")` 에 쓴다
+       (= `$KV_DATA/mail-harness/triage/`). 최초 골격 커밋(2026-07-24) 이래 그대로였고,
+       데이터가 `~/kv-data` 로 이관될 때 이 함수만 안 따라왔다.
+
+       조용한 귀결 — 이 함수가 늘 `None` 을 돌려줘서:
+         · 다이제스트에 **트리아지 절과 🚩 에스컬레이션 목록이 아예 안 찍혔다**
+         · `unknown_ratio > 0.30` 경보가 **원리적으로 발화 불가**였다(SKILL.md 임계값 표)
+         · 무수정 발송률 표본이 영구 0 → P6 승격 근거가 구조적으로 안 쌓였다
+       실측: `~/kv-data/mail-harness/triage/plan_*.json` 12본이 실재하는데
+             같은 실행의 `data/digest_latest.md` 에는 트리아지 절이 없다.
+
+       ⚠️ 경로 정본은 **한 곳**이어야 한다 — `triage.main` 과 같은 `paths.data()` 를 쓴다.
+    """
+    from kv_core import paths
+    d = paths.data("mail-harness", "triage", create=False)
+    plans = sorted(d.glob("plan_*.json")) if d.exists() else []
     return plans[-1] if plans else None
 
 

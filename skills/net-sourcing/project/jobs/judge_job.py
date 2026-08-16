@@ -152,8 +152,18 @@ def _record_strikes(batch: list[dict], ok: list[dict], bad: list[dict]) -> None:
     빠진 행(= 그 행만 반복해서 누락)에만 준다. 배치 전체 실패는 행을 벌하지 않는다.
     """
     from datetime import date
-    bad_ids = {str(b.get("page_id")) for b in (bad or [])
-               if isinstance(b, dict) and b.get("page_id")}
+    # 🔴 [2026-08-16] 여기가 **죽은 코드**였다. `validate.validate_records` 는
+    #    `bad.append((rec, errs))` 로 **튜플**을 담는데(`kv_core/validate.py:124`) 여기는
+    #    `isinstance(b, dict)` 로 걸렀다 → `bad_ids` 는 **항상 빈 집합**.
+    #    즉 이 독스트링이 약속한 ①("bad 에 명시된 행에만 준다")이 한 번도 작동한 적 없고,
+    #    스트라이크는 ②(`responded`) 경로로만 붙었다.
+    #    `_synthetic_judge_paths` J4b 는 통과하지만 그건 ② 를 태운 것이라 이 구멍을 못 본다.
+    #    `validate_text` 의 파싱 실패 경로도 `[({"_raw": …}, [err])]` 튜플이다 — 같은 모양.
+    def _pid(b):
+        rec = b[0] if isinstance(b, (tuple, list)) and b else b
+        return str(rec.get("page_id")) if isinstance(rec, dict) and rec.get("page_id") else ""
+
+    bad_ids = {p for p in (_pid(b) for b in (bad or [])) if p}
     applied_ids = {str(r.get("page_id", "")) for r in (ok or [])}
     responded = bool(ok)                      # 배치가 아예 안 파싱됐으면 False
     st = _strikes()
