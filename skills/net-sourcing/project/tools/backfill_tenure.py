@@ -40,10 +40,12 @@ sys.path.insert(0, str(PROJ))
 
 
 def _load_env() -> None:
-    for line in (PROJ / ".env").read_text(encoding="utf-8").splitlines():
-        if "=" in line and not line.strip().startswith("#"):
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    # 🔴 [2026-08-16] 인라인 `.env` 파서 → `kv_core.secrets`.
+    #    `main.py:28-36` 이 *"자격증명 정본은 `$KV_CONFIG/.env` 하나뿐. 스킬별 `.env` 를
+    #    다시 만들지 마라"* 라고 선언하고 옮겼는데 도구들은 옛 파서를 그대로 들고 있었고,
+    #    `project/.env` 는 **존재하지 않아** 실행 즉시 `FileNotFoundError` 로 죽었다.
+    from kv_core import secrets
+    secrets.load()
 
 
 def main() -> int:

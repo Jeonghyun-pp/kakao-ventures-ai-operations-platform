@@ -17,7 +17,6 @@ meta-threads는 같은 4GB인데 start 단가가 1/8($0.02/런)이고, `keywords
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -33,10 +32,12 @@ META = "futurizerush~meta-threads-scraper"
 def main() -> int:
     query = sys.argv[1] if len(sys.argv) > 1 else "만들었습니다"
 
-    for line in (PROJ / ".env").read_text(encoding="utf-8").splitlines():
-        if line.strip() and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    # 🔴 [2026-08-16] 인라인 `.env` 파서 → `kv_core.secrets`.
+    #    `main.py:28-36` 이 *"자격증명 정본은 `$KV_CONFIG/.env` 하나뿐. 스킬별 `.env` 를
+    #    다시 만들지 마라"* 라고 선언하고 옮겼는데 도구들은 옛 파서를 그대로 들고 있었고,
+    #    `project/.env` 는 **존재하지 않아** 실행 즉시 `FileNotFoundError` 로 죽었다.
+    from kv_core import secrets
+    secrets.load()
 
     from adapters import apify, threads
     cfg = yaml.safe_load((PROJ / "config.yaml").read_text(encoding="utf-8"))

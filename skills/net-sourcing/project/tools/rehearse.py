@@ -23,7 +23,6 @@ Apify 호출만 그걸로 대체하고, 나머지(파싱 → 날짜컷 → dedup
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -35,10 +34,12 @@ FIX = PROJ / "data" / "fixtures"
 
 
 def _env():
-    for line in (PROJ / ".env").read_text(encoding="utf-8").splitlines():
-        if line.strip() and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    # 🔴 [2026-08-16] 인라인 `.env` 파서 → `kv_core.secrets`.
+    #    `main.py:28-36` 이 *"자격증명 정본은 `$KV_CONFIG/.env` 하나뿐. 스킬별 `.env` 를
+    #    다시 만들지 마라"* 라고 선언하고 옮겼는데 도구들은 옛 파서를 그대로 들고 있었고,
+    #    `project/.env` 는 **존재하지 않아** 실행 즉시 `FileNotFoundError` 로 죽었다.
+    from kv_core import secrets
+    secrets.load()
 
 
 def _fx(name: str) -> list:
