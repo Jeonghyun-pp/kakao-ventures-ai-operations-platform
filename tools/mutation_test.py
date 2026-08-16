@@ -23,49 +23,63 @@ sys.path.insert(0, str(ROOT))
 PY = str(ROOT / ".venv/bin/python")
 
 # (이름, 파일, 되돌릴 것, 되돌린 결과)  — 방어를 무력화했을 때 check_intent 가 실패해야 한다
+# (검사ID, 이름, 파일, 되돌릴 것, 되돌린 결과)
 MUTATIONS = [
-    ("A1 통로 단일화",
+    ("A1", "통로 단일화",
      "skills/appstore/run.py",
      "import argparse",
      "import argparse\nimport requests  # 변이: 통로 밖에서 망을 부른다"),
-    ("A3 rc 로 성공 판정 금지",
+    ("A3", "rc 로 성공 판정 금지",
      "skills/appstore/claude.py",
-     "    if r.returncode != 0:",
-     "    if r.returncode == 0 and False:  # 변이: rc 로 판정\n    if r.returncode != 0:"),
-    ("A4 되읽기",
+     '    out = (r.stdout or "").strip()',
+     '    ok = r.returncode == 0  # 변이: rc 로 성공을 판정한다\n    out = (r.stdout or "").strip()'),
+    ("A4", "되읽기",
      "skills/appstore/notion.py",
      "    bad = _verify(db_id, page_id, props)\n    if bad:\n        return Fetched.unknown(f\"readback_mismatch:{bad}\", page_id=page_id)\n    return Fetched.measured(page_id)\n\n\ndef update",
      "    return Fetched.measured(page_id)  # 변이: 되읽기 제거\n\n\ndef update"),
-    ("A6 제약 숫자 하드코딩 금지",
+    ("A6", "제약 숫자 하드코딩 금지",
      "skills/appstore/notion.py",
      "    limit = limit or constraints.get(\"notion.rich_text_limit\")",
      "    limit = limit or 2000  # 변이: 숫자를 코드에 박는다"),
+    ("A0", "검사기가 파싱 오류에 죽지 않는다",
+     "skills/appstore/slack.py",
+     "def _post(text: str) -> bool:",
+     "def _post(text: str) -> bool  # 변이: 문법 오류\ndef _post(text: str) -> bool:"),
 ]
 
 
-def run_check() -> bool:
+def failing() -> set[str]:
+    """지금 실패 중인 검사 ID 집합. 전체 통과 여부가 아니라 **대상 검사가 바뀌는지**를 본다.
+
+    (전체 통과를 전제로 하면, 아직 미설치라 정직하게 실패 중인 항목 하나 때문에
+     변이 테스트 자체가 못 돈다. 기준선을 잡고 차이를 보는 게 맞다.)
+    """
     r = subprocess.run([PY, "check_intent.py"], cwd=ROOT, capture_output=True, text=True)
-    return r.returncode == 0
+    return {ln.split()[1] for ln in r.stdout.splitlines() if ln.strip().startswith("🔴 A")}
 
 
 def main() -> int:
-    if not run_check():
-        print("🔴 변이 전에 이미 검사가 실패한다 — 먼저 그걸 고쳐라")
-        return 1
+    base = failing()
+    if base:
+        print(f"  (기준선: 지금 실패 중인 검사 {sorted(base)} — 이건 변이와 무관하다)\n")
 
     bit, blind = [], []
-    for name, relpath, old, new in MUTATIONS:
+    for cid, name, relpath, old, new in MUTATIONS:
+        label = f"{cid} {name}"
+        if cid in base:
+            blind.append((label, "이미 실패 중이라 변이 효과를 못 본다"))
+            continue
         p = ROOT / relpath
         original = p.read_text(encoding="utf-8")
         if old not in original:
-            blind.append((name, "변이 지점을 못 찾았다 — 코드가 바뀌었다"))
+            blind.append((label, "변이 지점을 못 찾았다 — 코드가 바뀌었다"))
             continue
         try:
             p.write_text(original.replace(old, new, 1), encoding="utf-8")
-            if run_check():
-                blind.append((name, "🔴 방어를 없앴는데 검사가 통과했다 — 이 검사는 안 문다"))
+            if cid in failing():
+                bit.append(label)
             else:
-                bit.append(name)
+                blind.append((label, "🔴 방어를 없앴는데 그 검사가 통과했다 — 안 문다"))
         finally:
             p.write_text(original, encoding="utf-8")
 
@@ -77,10 +91,10 @@ def main() -> int:
     print("=" * 68)
     print(f"  문다 {len(bit)} · 안 문다 {len(blind)}")
 
-    if not run_check():
-        print("🔴 복원 후에도 검사가 실패한다 — 파일이 복구되지 않았다!")
+    if failing() != base:
+        print("🔴 복원 후 상태가 기준선과 다르다 — 파일이 복구되지 않았다!")
         return 1
-    print("  (모든 변이를 되돌렸고 검사가 다시 통과한다)")
+    print("  (모든 변이를 되돌렸고 상태가 기준선으로 돌아왔다)")
     return 1 if blind else 0
 
 

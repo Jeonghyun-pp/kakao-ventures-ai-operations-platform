@@ -48,6 +48,7 @@ FIXTURE_FILES = {
 SPAWN_ALLOWED = {
     "skills/appstore/claude.py": "claude -p 통로. 이게 claude 를 부르는 유일한 자리다",
     "tools/mutation_test.py": "검사 러너. check_intent 를 자식 프로세스로 돌려야 한다",
+    "schedule.py": "launchd 통로. launchctl 을 부르는 유일한 자리다",
 }
 
 PASS, FAIL, SKIP = [], [], []
@@ -59,6 +60,24 @@ def check(cid: str, name: str, ok: bool, detail: str = "") -> None:
 
 def skip(cid: str, name: str, why: str) -> None:
     SKIP.append((cid, name, why))
+
+
+def a0_parseable() -> None:
+    """🔴 모든 파일이 파싱되나.
+
+    검사기가 파싱 오류로 죽으면 아무 실패도 출력되지 않아 **다 통과한 것처럼 보인다.**
+    (08-17 실측: 변이 테스트가 문법 오류를 넣자 check_intent 가 죽었고,
+     그 결과 '방어를 없앴는데 검사가 통과했다'로 잘못 읽혔다.)
+    검사기가 조용히 죽는 것이 검사가 없는 것보다 나쁘다 — 먼저 이걸 센다.
+    """
+    bad = []
+    for p in py_files():
+        try:
+            ast.parse(p.read_text(encoding="utf-8"))
+        except SyntaxError as e:
+            bad.append(f"{rel(p)}:{e.lineno} {e.msg}")
+    check("A0", "모든 파일이 파싱된다", not bad, f"{len(bad)}건: {bad[:3]}" if bad else "")
+    return not bad
 
 
 def py_files() -> list[Path]:
@@ -75,7 +94,10 @@ def a1_single_transport() -> None:
     bad = []
     for p in py_files():
         r = rel(p)
-        tree = ast.parse(p.read_text(encoding="utf-8"))
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue   # A0 가 이미 실패로 셌다
         for node in ast.walk(tree):
             mods = []
             if isinstance(node, ast.Import):
@@ -180,15 +202,26 @@ def a8_no_send() -> None:
 
 
 # ---------------------------------------------------------------- 아직 못 세는 것
+def a9_schedule() -> None:
+    """선언과 실제 설치가 맞나. 어긋나면 그게 '선언은 있는데 발동 안 하는 가드'다."""
+    r = subprocess.run([sys.executable, "schedule.py", "check"], cwd=ROOT,
+                       capture_output=True, text=True)
+    missing = "선언했는데 설치가 안 됐다" in r.stdout
+    check("A9", "스케줄 선언 ↔ 실제 설치 일치", not missing,
+          "선언한 것이 전부 설치돼 있다" if not missing
+          else "선언만 있고 안 도는 항목이 있다 — schedule.py check 로 확인")
+
+
 def not_yet() -> None:
     skip("A7", "유료 호출에 skill 꼬리표 필수", "Apify 통로가 아직 없다 (링크드인 단계)")
-    skip("A9", "스케줄 선언 ↔ 설치 일치", "스케줄 선언·설치가 아직 없다 (A8 단계)")
+
     skip("A10", "검사가 실제로 문다(변이 테스트)", "별도 러너 필요 — 다음 단계")
     skip("A11", "테스트가 망을 안 부른다", "테스트 러너가 아직 없다")
     skip("A12", "테스트가 프로덕션을 안 건드린다", "테스트 러너가 아직 없다")
 
 
 def main() -> int:
+    a0_parseable()
     a1_single_transport()
     a2_fetched_unwrap()
     a3_no_rc_success()
@@ -196,6 +229,7 @@ def main() -> int:
     a5_option_source()
     a6_no_magic_constraints()
     a8_no_send()
+    a9_schedule()
     not_yet()
 
     print("=" * 68)
