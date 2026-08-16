@@ -30,6 +30,7 @@ TRANSPORTS = {
     "skills/appstore/notion.py",
     "skills/appstore/slack.py",
     "skills/appstore/claude.py",
+    "skills/linkedin/apify.py",
 }
 # 외부 접촉 모듈
 NET_MODULES = {"requests", "urllib", "urllib3", "http", "socket", "httpx", "aiohttp"}
@@ -181,7 +182,19 @@ def a6_no_magic_constraints() -> None:
     for p in py_files():
         if "constraints" in p.name or rel(p) in FIXTURE_FILES:
             continue
-        for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+        src = p.read_text(encoding="utf-8")
+        # 🔴 문자열/독스트링 안의 숫자는 코드 상수가 아니다. 설명하려면 실제 숫자를 써야 하고,
+        #    그걸 위반으로 세면 "정확한 문서"가 검사를 실패시킨다.
+        in_string = set()
+        try:
+            for node in ast.walk(ast.parse(src)):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    in_string.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+        except SyntaxError:
+            continue   # A0 가 이미 셌다
+        for i, line in enumerate(src.splitlines(), 1):
+            if i in in_string:
+                continue
             code = line.split("#")[0]
             for m, why in magic.items():
                 if re.search(rf"(?<![\w.]){re.escape(m)}(?![\w.])", code) and "constraints.get" not in code:
@@ -212,8 +225,23 @@ def a9_schedule() -> None:
           else "선언만 있고 안 도는 항목이 있다 — schedule.py check 로 확인")
 
 
+def a7_paid_tag() -> None:
+    """유료 호출은 skill 꼬리표 없이 불가능해야 한다."""
+    src = (ROOT / "skills/linkedin/apify.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    ok = False
+    for fn in ast.walk(tree):
+        if isinstance(fn, ast.FunctionDef) and fn.name == "run_actor":
+            # keyword-only 인자에 skill 이 있고, 기본값이 없어야 한다
+            names = [a.arg for a in fn.args.kwonlyargs]
+            required = [a.arg for a, d in zip(fn.args.kwonlyargs, fn.args.kw_defaults) if d is None]
+            ok = "skill" in names and "skill" in required
+    check("A7", "유료 호출에 skill 꼬리표 필수", ok,
+          "run_actor 가 skill 을 키워드 필수로 받는다" if ok else "skill 이 필수가 아니다")
+
+
 def not_yet() -> None:
-    skip("A7", "유료 호출에 skill 꼬리표 필수", "Apify 통로가 아직 없다 (링크드인 단계)")
+
 
     skip("A10", "검사가 실제로 문다(변이 테스트)", "별도 러너 필요 — 다음 단계")
     skip("A11", "테스트가 망을 안 부른다", "테스트 러너가 아직 없다")
@@ -229,6 +257,7 @@ def main() -> int:
     a5_option_source()
     a6_no_magic_constraints()
     a8_no_send()
+    a7_paid_tag()
     a9_schedule()
     not_yet()
 
