@@ -18,7 +18,7 @@
     P3  리포 밖 의존이 **선언돼 있다** (부트스트랩 문서가 실제 환경변수를 덮는다)
     P4  스킬 requirements 가 부트스트랩 문서와 어긋나지 않는다
     P5  자격증명 정본이 하나다 (스킬별 `.env` 부활 금지 — 파일도, 읽는 코드도)
-    P6  백업이 **선언이 아니라 배선**이다 (문서 4곳이 rsync 를 선언했는데 실체가 없었다)\n    P7  **스킬 지식은 [4]에만** — 코어 실행 코드에 도메인 어휘가 없다\n    P8  `.venv/bin/python` 하드코딩 금지 (CI 에는 그 경로가 없다 · 3회 반복한 함정)
+    P6  백업이 **선언이 아니라 배선**이다 (문서 4곳이 rsync 를 선언했는데 실체가 없었다)\n    P7  **스킬 지식은 [4]에만** — 코어 실행 코드에 도메인 어휘가 없다\n    P8  `.venv/bin/python` 하드코딩 금지 (CI 에는 그 경로가 없다 · 3회 반복한 함정)\n    P9  보존 정책이 **선언이 아니라 배선**이다 (+ 삭제 자동화의 안전장치 3종)
 
 실행: KV_DATA=<스크래치> python kv-core/tests/_synthetic_portability.py
 git 인덱스를 읽기만 한다 — 네트워크·설치 0.
@@ -269,6 +269,53 @@ _src = _script.read_text(encoding="utf-8") if _script.exists() else ""
 check("P6 원본 부재 시 중단한다", 'if [ ! -d "$SRC" ]' in _src)
 check("P6 원본 파일 수 급감 시 중단한다", "SRC_FILES" in _src and "-lt 100" in _src)
 check("P6 복사 후 파일 수를 대조한다", "DST_FILES" in _src and "$DST_FILES" in _src)
+
+# ══════════════════════════════════════════════════════════════════════
+# P9 [2026-08-16] 보존 정책이 **선언이 아니라 배선**이다
+#
+# 계약에 *"981MB · 하루 ~33MB 증가 · 리텐션 정책 없음"* 이라 적혀 있었다. 백업과 같은
+# 부류의 잡이다 — 안 돌아도 증상이 없고, 3개월 뒤 디스크가 5GB 가 됐을 때야 안다.
+#
+# 🔴 이 잡은 파일을 **지운다.** 그래서 배선 여부보다 **안전장치**를 더 세게 검사한다.
+print("\n=== P9: 보존 정책이 배선돼 있다 ===\n")
+
+_pol = _REPO / "config" / "retention.yaml"
+_scr = _REPO / "scripts" / "retention.py"
+check("P9 정책 선언과 집행기가 추적된다",
+      _pol.exists() and _scr.exists()
+      and "config/retention.yaml" in tracked and "scripts/retention.py" in tracked)
+
+import yaml as _y2  # noqa: E402
+
+_rules = (_y2.safe_load(_pol.read_text(encoding="utf-8")) or {}).get("rules") or []
+check("P9 규칙이 비어 있지 않다(빈 정책은 '정리 안 함'과 구별되지 않는다)", len(_rules) >= 1,
+      f"{len(_rules)}개")
+check("P9 모든 규칙에 keep_days 와 min_keep 이 있다",
+      all("keep_days" in r and "min_keep" in r for r in _rules),
+      str([r.get("name") for r in _rules if "min_keep" not in r]))
+check("P9 glob 이 데이터 루트 **상대경로**다(절대경로면 화이트리스트가 무의미)",
+      all(not str(r["glob"]).startswith("/") and ".." not in str(r["glob"]) for r in _rules))
+
+_t = {x.name: x for x in _reg.load()}
+check("P9 retention 이 스케줄러 task 로 배선돼 있다",
+      "retention" in _t and _t["retention"].runner == "local" and "retention" in _wk.WIRED)
+if "retention" in _t:
+    check("P9 워터마크가 last_success 다(실패가 전진을 못 한다)",
+          _t["retention"].watermark == "last_success")
+    check("P9 주기와 신선도 SLO 가 선언돼 있다", bool(_t["retention"].cadence
+                                              and _t["retention"].freshness_days))
+
+# 🔴 안전장치 3종 — 삭제를 자동화한다는 것의 대가
+_src = _scr.read_text(encoding="utf-8")
+check("P9 ① 백업이 최근 성공했을 때만 지운다", "_backup_ok" in _src and ".last-success" in _src)
+check("P9 ② 데이터 루트 밖을 가리키면 중단한다", "root.resolve() not in" in _src)
+check("P9 ③ 남을 개수가 하한 미만이면 아무것도 안 지운다", "min_keep" in _src and "remain <" in _src)
+
+# 압축기도 같이 — 원본을 지우지 않고 격리하는가
+_cc = (_REPO / "scripts" / "compact_cuts.py")
+check("P9 압축기가 원본을 **지우지 않고 격리**한다",
+      _cc.exists() and "_quarantine" in _cc.read_text(encoding="utf-8")
+      and "unlink" not in _cc.read_text(encoding="utf-8"))
 
 # ══════════════════════════════════════════════════════════════════════
 # P7 [2026-08-16 · 결정 ⑫] **스킬 지식은 [4]에만 있다**

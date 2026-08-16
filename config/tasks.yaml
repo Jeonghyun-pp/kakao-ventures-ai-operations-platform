@@ -271,3 +271,20 @@
     scripts/backup-kv-data.sh (rsync --link-dest 하드링크 스냅샷 7일 보관).
     🔴 같은 디스크라 **디스크·맥 고장은 못 막는다** — 오프사이트 1벌이 별건으로 필요하다
     (2026-08-16 현재 이 맥에 클라우드 드라이브가 하나도 마운트돼 있지 않다).
+
+- name: retention                # [2026-08-16] 보존 정책 집행 — config/retention.yaml 이 정본
+  skill: _core
+  kind: routine
+  cadence: weekly                # 하루 ~33MB 증가라 주 1회로 충분하다
+  catch_up: coalesce             # 밀린 주를 거슬러 지울 이유가 없다 — 최신 상태 한 번이면 된다
+  watermark: last_success        # 실패했는데 전진하면 다음 주까지 안 돌고 아무도 모른다
+  resources: []
+  stages: [sweep]
+  origin: system
+  runner: local
+  covers: [기본구조]
+  freshness_days: 10             # 주 1회 + 맥 슬립 여유. 열흘 넘게 안 돌면 알림
+  status: done
+  notes: >-
+    scripts/retention.py — appstore raw 14일 · snapshots 90일. 유료 Apify 원본과 상태
+    정본은 영구. 🔴 백업이 최근 성공했을 때만 지운다(백업 없이 지우는 경로를 만들지 않는다).

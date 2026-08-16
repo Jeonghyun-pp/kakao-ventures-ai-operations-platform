@@ -145,18 +145,35 @@ check("V2 사유를 실제로 추출했다(추출이 죽으면 위 둘이 공허
 # ══════════════════════════════════════════════════════════════════════
 print("\n=== V3: 실데이터에서 경고가 신호인가 ===\n")
 # 경고가 매일 뜨면 아무도 안 읽는다 — 과거 전수에 돌려 비율을 사실로 확인한다.
-_files = sorted((_REPO / "skills/net-sourcing/project/data").glob("cut_*.json"))
+# [2026-08-16] 원본 `cut_*.json`(275MB) 이 압축됐다 — `scripts/compact_cuts.py`.
+# 이 검사가 쓰던 것은 **일별 사유 집계와 그날 돈 소스**뿐이고, 압축본이 둘 다 보존한다.
+# 그래서 압축본을 먼저 보고, 없으면 원본을 본다(압축 전 상태도 계속 돈다).
+_DATA = _REPO / "skills/net-sourcing/project/data"
+_compact = _DATA / "cut_compact.json"
+_days: list[tuple[str, dict, set]] = []      # (날짜, 사유집계, 그날 소스)
+if _compact.exists():
+    _c = json.loads(_compact.read_text(encoding="utf-8"))
+    _src_by_day = _c.get("daily_sources", {})
+    for _day, _t in sorted(_c.get("daily_reason_tally", {}).items()):
+        _days.append((_day, _t, set(_src_by_day.get(_day, []))))
+    _files = [_compact]
+else:
+    _files = sorted(_DATA.glob("cut_*.json"))
+    for _f in _files:
+        _cut = json.loads(_f.read_text(encoding="utf-8"))
+        _days.append((_f.stem[4:],
+                      dict(collections.Counter(
+                          c.get("_cut_reason", "").split("(")[0] for c in _cut)),
+                      {c.get("source") for c in _cut}))
+
 _warn_days: list[str] = []
-for _f in _files:
-    _cut = json.loads(_f.read_text(encoding="utf-8"))
-    _tally = collections.Counter(c.get("_cut_reason", "").split("(")[0] for c in _cut)
-    _seen = {c.get("source") for c in _cut}
+for _day, _tally, _seen in _days:
     for _src_name, _rules in judge.CUT_RULES.items():
         if _src_name not in _seen:
             continue
         for _rule, _rs in _rules.items():
             if not any(any(k.startswith(r.split("{")[0]) for k in _tally) for r in _rs):
-                _warn_days.append(_f.stem[4:])
+                _warn_days.append(_day)
                 break
         else:
             continue
@@ -176,7 +193,7 @@ for _f in _files:
 #    선례는 `_realdata_replay.py:206` — 실데이터가 없으면 **시끄럽게 건너뛰고**, 있으면 잰다.
 #    조용히 건너뛰지 않는 것이 핵심이다: 조용한 스킵은 커버리지가 사라진 걸 숨긴다.
 if not _files:
-    print("  ⚠️  실데이터(`data/cut_*.json`) 없음 — V3 를 건너뛴다(CI 정상 경로).\n"
+    print("  ⚠️  실데이터(`data/cut_compact.json` 또는 `cut_*.json`) 없음 — V3 를 건너뛴다(CI 정상 경로).\n"
           "      이 검사는 과거 전수에 룰을 돌려 '경고가 신호인가'를 재는 것이라\n"
           "      `~/kv-data` 가 있는 로컬에서만 성립한다. 로컬에서는 반드시 돌려라.")
 else:
@@ -186,7 +203,10 @@ else:
           f"회귀 5일 중 {_hit}일 적중 · 경고일 {len(_warn_days)}/{len(_files)}일")
     check("V1 이 수정 이후에는 조용하다", "2026-08-13" not in _warn_days,
           "수정 후 첫 실행에서 대기업컷 1건 발화 확인")
-    check("V3 실데이터를 실제로 읽었다", len(_files) >= 10, f"{len(_files)}일치")
+    # 🔴 **파일 수가 아니라 날짜 수**를 센다. 압축(2026-08-16) 뒤로는 21일치가 파일 1개에
+    #    들어 있어서, 파일을 세면 "1일치"로 보여 거짓 실패가 난다. 이 검사가 지키려는 것은
+    #    "얼마나 많은 날을 실제로 훑었나"이지 파일 개수가 아니다.
+    check("V3 실데이터를 실제로 읽었다", len(_days) >= 10, f"{len(_days)}일치")
 
 # ══════════════════════════════════════════════════════════════════════
 print("\n=== V4: 착지 실패의 폭발 반경이 채널을 안 넘는다 ===\n")

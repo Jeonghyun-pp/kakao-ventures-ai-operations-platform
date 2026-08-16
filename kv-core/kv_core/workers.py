@@ -229,8 +229,31 @@ def run_backup(task: Task, period: date) -> bool:
     return rc == 0
 
 
+def run_retention(task: Task, period: date) -> bool:
+    """[2026-08-16] 보존 정책 집행 — `config/retention.yaml` 이 정본.
+
+    백업과 같은 이유로 스케줄러 task 다: **안 돌아도 증상이 없는 잡**이라 실행보다
+    부재 감지가 중요하다. 3개월 뒤 디스크가 5GB 가 됐을 때 알게 되면 늦다.
+
+    🔴 이 잡은 파일을 **지운다.** 안전장치는 스크립트 안에 있고(백업 성공 확인 ·
+       glob 화이트리스트 · `min_keep` 하한), 여기서는 rc 를 그대로 진위로 쓴다.
+       삼키면 "정리했다"고 워터마크만 전진한다.
+    """
+    script = paths.repo_root() / "scripts" / "retention.py"
+    print(f"▶ retention ({period}) — {script.name}")
+    try:
+        rc = subprocess.run([str(_PY), str(script)], timeout=1800, check=False).returncode
+    except subprocess.TimeoutExpired:
+        print("🔴 retention: 30분 timeout — 실패 처리")
+        return False
+    if rc != 0:
+        print("🔴 retention 실패 — **워터마크를 전진시키지 않는다.** 다음 발화가 재시도한다.")
+    return rc == 0
+
+
 WIRED: dict[str, Runner] = {
     "backup": run_backup,
+    "retention": run_retention,
     "bplan-score": run_bplan_score,
     "mail-triage": run_mail_triage,
     "appstore-snapshot": run_appstore_snapshot,

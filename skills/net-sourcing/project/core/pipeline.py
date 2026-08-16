@@ -614,8 +614,78 @@ def _dump_cut(cut: list[dict], channels: list[str] | None = None) -> None:
         for s in silent:
             print(f"       · {s}")
 
-    path = CAND / f"cut_{date.today().isoformat()}.json"
-    path.write_text(json.dumps(cut, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_cut_compact(cut)
+
+
+# 🔴 [2026-08-16] 예전엔 `cut_<날짜>.json` 에 **컷된 후보 전량을 그대로** 썼다.
+#    21일치가 275MB 가 됐고, 실측하니:
+#
+#        cut 레코드 14필드 = raw/appstore_*.json 13필드 + `_cut_reason` 1개
+#        컷 키 8,697/8,697(100%) 이 같은 날 raw 에 존재
+#        공통 13필드 값 불일치 **0** (앞 2,000행)
+#        연속 이틀 65% 중복 · 165,719행 → 고유 키 15,750개
+#
+#    즉 이 파일이 만들어낸 정보는 **`_cut_reason` 하나**였고 나머지는 raw 의 글자 그대로
+#    사본이었다. 과거분은 `scripts/compact_cuts.py` 로 접었고(275MB → 3.1MB), **여기서
+#    처음부터 접힌 형태로 쓰지 않으면 매일 다시 쌓인다.**
+def _write_cut_compact(cut: list[dict]) -> None:
+    """컷 결과를 누적 압축본(`cut_compact.json`)에 병합한다.
+
+    남기는 것 — 이 파일에만 있는 정보(`reason`) + 압축본을 혼자 읽게 하는 색인
+    (`k`·`name`·`source`·`adapter`) + 접으면서 생기는 정보(`first`·`last`·`n`).
+    버리는 것 — `raw_text`·`signals`·`one_liner`·`founder`·`homepage`·`linkedin_url`·
+    `released_at`. 전부 `raw/` 에 정본이 있다.
+
+    ⚠️ 색인을 남기는 이유: appstore raw 는 14일 뒤 지워진다(`config/retention.yaml`).
+       그 뒤엔 조인할 상대가 없어 키만 있으면 사람이 무엇인지 알 수 없다.
+    """
+    import collections as _c
+    day = date.today().isoformat()
+    path = CAND / "cut_compact.json"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except json.JSONDecodeError:
+        # 파손이면 **덮어쓰지 않고** 보존한다 — 조용한 유실을 만들지 않는다(장부 규율).
+        bad = path.with_suffix(f".corrupt-{int(date.today().strftime('%Y%m%d'))}")
+        path.rename(bad)
+        print(f"    🔴 cut_compact.json 파손 — {bad.name} 로 보존하고 새로 시작한다")
+        doc = {}
+
+    recs = {r["k"]: r for r in doc.get("records", [])}
+    for r in cut:
+        k = str(r.get("ext_id") or r.get("app_id") or r.get("url") or r.get("name") or "")
+        if not k:
+            continue
+        e = recs.get(k)
+        if e is None:
+            recs[k] = {"k": k, "name": r.get("name", ""), "source": r.get("source", ""),
+                       "adapter": r.get("adapter", ""), "reason": str(r.get("_cut_reason", "")),
+                       "first": day, "last": day, "n": 1}
+        else:
+            e["n"] = int(e.get("n", 0)) + 1
+            if day >= e.get("last", ""):
+                e["last"] = day
+                if r.get("_cut_reason"):
+                    e["reason"] = str(r["_cut_reason"])
+            if day < e.get("first", day):
+                e["first"] = day
+
+    tally = dict(doc.get("daily_reason_tally", {}))
+    tally[day] = dict(_c.Counter(
+        str(r.get("_cut_reason", "")).split("(")[0].strip() for r in cut))
+    dsrc = dict(doc.get("daily_sources", {}))
+    dsrc[day] = sorted({str(r.get("source", "")) for r in cut if r.get("source")})
+
+    out = {"records": sorted(recs.values(), key=lambda r: r["k"]),
+           "daily_reason_tally": dict(sorted(tally.items())),
+           "daily_sources": dict(sorted(dsrc.items())),
+           "source_files": doc.get("source_files", []),
+           "compacted_rows": int(doc.get("compacted_rows", 0)) + len(cut)}
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)                                   # 원자 교체
+    print(f"    · 컷 {len(cut):,}건 → cut_compact.json "
+          f"(고유 {len(out['records']):,} · {path.stat().st_size/2**20:.1f}MB)")
 
 
 def _load_raw_for(channels: list[str]) -> list[dict]:
