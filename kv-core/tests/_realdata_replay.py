@@ -47,6 +47,11 @@ assert _SCRATCH != (Path.home() / "kv-data").resolve(), "🔴 운영 KV_DATA 로
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kv_core import alerts, notify, orrery, paths, registry, scheduler  # noqa: E402
 
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I17 state=failed 인 잡이 artifacts 를 보유한 채 남는다(실데이터)
+CONTRACT_INVARIANTS = ['I17']
+
 notify.slack = lambda *a, **k: True                 # 발송 경계 스텁(킬 스위치보다 우선)
 
 FAIL: list[str] = []

@@ -340,6 +340,11 @@ _hfile("appstore", True, "2026-08-13T07:00:00", "2026-08-13T07:00:00")
 check("A-F8 앱스토어가 실제로 복구되면 ✅", _appstore_status() == "ok", _appstore_status())
 
 from kv_core import registry as _reg
+
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I24 naive ts 를 KST 로 정규화(launchd-direct 신선도 판정)
+CONTRACT_INVARIANTS = ['I24']
 _t = next(x for x in _reg.load() if x.name == "appstore-sourcing")
 check("A-F8 task 가 health_channel 을 선언한다(없으면 판정 보류)",
       _t.health_channel == "appstore", str(_t.health_channel))

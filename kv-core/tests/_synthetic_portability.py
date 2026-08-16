@@ -176,6 +176,53 @@ check("P4 requirements 의 패키지가 부트스트랩 문서에 있다", not m
 check("P4 requirements 파일을 실제로 찾았다", len(reqs) >= 4, f"{len(reqs)}개")
 
 # ══════════════════════════════════════════════════════════════════════
+# P5 [2026-08-16] 자격증명 정본이 하나다 — **스킬별 `.env` 부활 금지**
+#
+# 2026-07-27 에 `.env` 6개(NOTION_TOKEN 3벌 · APIFY_TOKEN 2벌)를 `$KV_CONFIG/.env`
+# 하나로 접었다. 그런데 2026-08-16 까지 `net-sourcing/tools/` 10본이 **옛 인라인 파서**
+# (`(PROJ / ".env").read_text()`)를 그대로 들고 있었다. 통합 때 그 파일을 지웠으므로
+# 그 도구들은 **실행 즉시 FileNotFoundError 로 죽는 상태**였고, 손으로 돌리는 도구라
+# 아무도 몰랐다. **사람이 가끔 부르는 경로는 테스트가 아니면 영영 안 드러난다.**
+#
+# `kv_core.secrets` 는 이 리포에서 **어떤 테스트도 안 건드리던 유일한 모듈**이었다
+# (`_synthetic_contract_coverage` X5 가 그 사실을 셌다).
+print("\n=== P5: 자격증명 정본이 하나다 ===\n")
+
+import re  # noqa: E402
+
+from kv_core import paths as _paths  # noqa: E402
+from kv_core import secrets  # noqa: E402
+
+check("P5 `.env` 정본이 `$KV_CONFIG` 아래 하나다",
+      secrets.env_file() == _paths.config_root() / ".env", str(secrets.env_file()))
+
+# `load()` 는 메모이제이션이라 두 번째 호출이 no-op 다. 이걸 모르면 테스트에서 환경변수를
+# 지우고 재호출했을 때 "안 올라온다"로 오진한다(2026-08-16 에 실제로 한 번 그렇게 봤다).
+secrets.load()
+check("P5 load() 는 한 번만 읽는다(두 번째 호출은 no-op)", secrets._loaded)
+
+try:
+    secrets.get("__없는_자격증명__")
+    check("P5 required 자격증명이 없으면 즉시 죽는다", False, "조용히 None 을 줬다")
+except RuntimeError as _e:
+    check("P5 required 자격증명이 없으면 즉시 죽는다", "__없는_자격증명__" in str(_e))
+check("P5 required=False 는 None 을 준다",
+      secrets.get("__없는_자격증명__", required=False) is None)
+
+# 🔴 스킬 디렉토리에 `.env` 가 되살아나면 복제본 시대로 돌아간다(같은 토큰 N벌).
+_revived = sorted(str(p.relative_to(_REPO)) for p in (_REPO / "skills").rglob(".env")
+                  if "_archive" not in str(p))
+check("P5 스킬 안에 `.env` 가 되살아나지 않았다", not _revived, f"발견: {_revived}")
+
+# 🔴 그리고 코드가 스킬 로컬 `.env` 를 **읽으려 하지도** 않아야 한다 — 파일이 없어도
+#    그런 코드는 남아 있을 수 있고, 그게 정확히 위 10본의 상태였다.
+_inline = sorted(str(p.relative_to(_REPO)) for p in (_REPO / "skills").rglob("*.py")
+                 if "_archive" not in str(p)
+                 and re.search(r'\(\s*PROJ\s*/\s*"\.env"\s*\)\s*\.read_text',
+                               p.read_text(encoding="utf-8", errors="ignore")))
+check("P5 스킬 로컬 `.env` 를 직접 읽는 코드가 없다", not _inline, f"발견: {_inline}")
+
+# ══════════════════════════════════════════════════════════════════════
 print()
 if FAIL:
     print(f"🔴 이식성 계약 실패 {len(FAIL)}건: {', '.join(FAIL)}")

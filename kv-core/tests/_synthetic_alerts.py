@@ -338,6 +338,15 @@ alerts._cfg = _saved_cfg
 # 회수 대상이 아니므로, 이후 모든 틱이 SlotBusy 로 물러나 **승인 리컨실러가 영구 정지**한다.
 _fresh("f2b")
 import signal as _sig
+
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I5  first_attempt 최초 기록 후 덮어쓰지 않음 · 잡 흔적 자기치유
+#   I9  (identity, UTC일) 마커 선점 → 발송 0 · 재스캔 dedup
+#   I10 발송 실패 시 claim 반납 → 복구 후 재푸시 성공(영구 유실 없음)
+#   I11 정책 파일은 유도 불가능한 것(last_seen)만 저장 — 마커가 정본
+#   I12 UTC 자정을 넘겨도 사실이 살아남는다
+CONTRACT_INVARIANTS = ['I5', 'I9', 'I10', 'I11', 'I12']
 _orig_ss = alerts._should_send
 alerts._should_send = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("주입"))
 _sig.signal(_sig.SIGALRM, lambda *a: (_ for _ in ()).throw(TimeoutError("무한 루프")))

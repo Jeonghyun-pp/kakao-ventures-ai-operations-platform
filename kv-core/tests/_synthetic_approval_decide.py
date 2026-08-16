@@ -149,6 +149,13 @@ check("A-F12 실행 완료건도 pending 제외",
 # meeting-mail 의 dedup_key 는 page_id 라, 같은 창업자가 다시 Catch 되거나 스모크
 # 뒤처리로 큐 파일을 지운 뒤면 실제로 도달하는 경로다. 프로브로 재현하고 고쳤다.
 import time as _time
+
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I7  파생 6필드(status/channel/target/sent/delivered/modified) 미저장
+#   I8  결정 마커가 created 화신에 묶인다 — 옛 결정이 되살아나지 않는다
+#   I21 구스키마(키 부재)를 '미결'로 해석 — 마이그레이션 불요
+CONTRACT_INVARIANTS = ['I7', 'I8', 'I21']
 _K = "reincarnation"
 approval.request("t", "judgment", {"text": "1차"}, dedup_key=_K)
 approval.decide(_K, "rejected", by="사람1")

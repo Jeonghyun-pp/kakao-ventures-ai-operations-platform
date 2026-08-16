@@ -42,6 +42,11 @@ assert os.environ.get("KV_DATA"), "KV_DATA 스크래치 필수"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kv_core import approval, approvals_tick, gmail, notify, slackbot  # noqa: E402
 
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I8  진짜 프로세스 경합 8회에서 결정이 하나로 수렴 · 파일 파손 0
+CONTRACT_INVARIANTS = ['I8']
+
 FAIL: list[str] = []
 
 

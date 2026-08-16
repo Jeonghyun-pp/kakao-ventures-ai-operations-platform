@@ -245,6 +245,11 @@ print("\n[2026-08-14 실사고] 정체 없는 레코드 1건이 announce 단계�
 #    레코드 파손엔 그 규율이 없었다 — 한쪽만 견디면 견디는 게 아니다.
 import json as _json  # noqa: E402
 
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I17 실행 실패해도 decision 은 유지 + execute_error 기록(부작용 잔존)
+CONTRACT_INVARIANTS = ['I17']
+
 _q = approval._queue_dir()
 for _f in list(_q.glob("*.json")):
     _f.unlink()

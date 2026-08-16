@@ -370,6 +370,11 @@ print("\n=== A9: 커서가 실패한 픽까지 전진하지 않는다 ===\n")
 sys.path.insert(0, str(_REPO / "skills/net-sourcing/project"))
 from adapters import threads as _th  # noqa: E402
 
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I22 계측이 0 인 것과 전멸을 가른다 — 0 이 두 뜻이면 둘을 갈라 본다
+CONTRACT_INVARIANTS = ['I22']
+
 _FAIL: set = set()
 
 

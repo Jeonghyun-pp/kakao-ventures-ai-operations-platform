@@ -41,6 +41,11 @@ assert os.environ.get("KV_DATA"), "KV_DATA 스크래치 필수"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kv_core import promotion as P  # noqa: E402
 
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I18 승격 모듈은 아무것도 켜거나 쓰지 않는다 — 사람 정답지 불변
+CONTRACT_INVARIANTS = ['I18']
+
 FAIL: list[str] = []
 
 

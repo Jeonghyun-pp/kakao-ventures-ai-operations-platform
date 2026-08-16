@@ -21,6 +21,15 @@ assert os.environ.get("KV_DATA"), "KV_DATA 스크래치 경로를 지정하고 �
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kv_core import job  # noqa: E402
 
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I1  cursor↔진실 일치 · done_by_stage 가 가드와 같은 단위
+#   I2  torn tail 절단 후 append — 병합줄 0
+#   I3  validating 재개 · 종단 전이 · run_error 뒤 재개 가능
+#   I13 flock — 7시간 된 락도 회수 안 함 · 정상 종료 후에도 파일 잔존
+#   I21 부재 ≠ 빈 값 — 필수 아닌 필드의 '' 를 '없음'으로 본다
+CONTRACT_INVARIANTS = ['I1', 'I2', 'I3', 'I13', 'I21']
+
 SKILL = "_review-regress"
 FAIL: list[str] = []
 

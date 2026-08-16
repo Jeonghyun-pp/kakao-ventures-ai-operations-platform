@@ -188,6 +188,12 @@ check("⑧b 슬랙이 미해결 2건을 침묵시키지 않는다", "미해결 �
 
 # ── ⑨ [W9] freshness 선언 우선 (판정은 health, 선언은 cadence) ──────────────
 from kv_core import cadence as _cad  # noqa: E402
+
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I6  파손 워터마크는 ⚠️ 강등 — 크래시도 삭제도 아니다
+#   I24 naive ts 를 KST 로 간주해 UTC 변환
+CONTRACT_INVARIANTS = ['I6', 'I24']
 t_decl = Task(name="f-decl", skill="_orrery-d", cadence="daily", catch_up="coalesce",
               watermark="last_success", freshness_days=5)
 t_auto = Task(name="f-auto", skill="_orrery-d", cadence="daily", catch_up="coalesce",

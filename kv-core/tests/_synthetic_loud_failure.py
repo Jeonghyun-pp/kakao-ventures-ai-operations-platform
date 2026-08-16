@@ -220,6 +220,11 @@ print("\n=== L6: '이미 끝난 잡' 재실행이 성공과 구분된다 ===\n")
 import contextlib  # noqa: E402
 import io  # noqa: E402
 
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I6  손상은 원본을 보존하고 시끄럽게 알린다(조용히 {} 를 주지 않는다)
+CONTRACT_INVARIANTS = ['I6']
+
 _ran: list[str] = []
 _st6 = [job.Stage("only", lambda sk, ji: _ran.append(ji))]
 job.create("net-sourcing", {"kind": "l6"}, "l6-job")

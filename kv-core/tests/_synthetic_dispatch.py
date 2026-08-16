@@ -70,6 +70,12 @@ check("③ shadow=due 포함 · 일반 외부러너=제외", names == ["syn-shad
 print()
 import subprocess
 
+# 계약 불변식 대응 — docs/contracts/11-state-schemas.md PART C.
+# 이 파일이 실제로 재는 것만 적는다. 이름만 걸어두면 커버리지 숫자가 거짓말이 된다.
+#   I5  배선 task 실행 후 last_success 전진 · 미배선은 워터마크 미생성
+#   I22 정당하게 빈 차트 1개는 결손이 아니다 — 측정된 0 과 미상을 가른다
+CONTRACT_INVARIANTS = ['I5', 'I22']
+
 
 class _P:
     returncode = 0
