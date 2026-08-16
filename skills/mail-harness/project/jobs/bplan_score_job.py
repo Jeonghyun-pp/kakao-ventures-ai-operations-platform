@@ -354,7 +354,16 @@ def s_score_apply(skill: str, job_id: str) -> None:
             with open(ap, "a", encoding="utf-8") as f:
                 for pid in applied_ids:
                     f.write(pid + "\n")
-            print(f"  · 배치 {done}: {n}건 기입" + ("(dry)" if dry else ""))
+            # 🔴 [2026-08-16] `{n}` 은 이 스코프에 없는 변수였다 — `NameError`.
+            #    W12 의 B-F8 수정이 `_apply` 반환을 개수→id 목록으로 바꾸면서 호출부(:352-356)는
+            #    고쳤는데 **로그 문자열만 옛 이름이 남았다.**
+            #    성질이 나쁘다: 이 줄은 **노션 기입이 끝난 뒤** 터진다. 08-14 base 실행은
+            #    `applied_ids.jsonl` 에 10줄을 남기고(= 노션에 10행을 쓰고) 죽었다.
+            #    귀결 — `_digest()` 미도달로 **그날 무엇을 어떻게 판정했는지 통지가 0**,
+            #    워터마크 정지, attempt-suffix 가 claude 콜을 2배로 태움.
+            #    08-12 배선 이래 이 잡은 **판정을 한 번도 완주한 적이 없다**(08-12·13 은
+            #    미판정 0건이라 조기 return, 대상이 생긴 08-14 부터 매일 실패).
+            print(f"  · 배치 {done}: {len(applied_ids)}건 기입" + ("(dry)" if dry else ""))
 
     _digest(skill, job_id, all_ok, len(rows), skipped, dry)
     if skipped:

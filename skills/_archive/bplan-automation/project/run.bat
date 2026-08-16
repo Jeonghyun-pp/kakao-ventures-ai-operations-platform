@@ -1,4 +1,12 @@
 @echo off
+REM ===== 🔴 [2026-08-16] 이 스크립트는 은퇴했습니다. 실행하지 마세요. =====
+REM  현행 mail-harness 와 같은 노션 Bplan DB / Gmail 인박스를 만집니다.
+REM  되살리면 접수건이 중복 생성됩니다 (mail-harness/SKILL.md HARD-GATE #1).
+echo [!] 이 스크립트는 은퇴했습니다 - 실행하지 않습니다.
+echo     되살리면 현행 mail-harness 와 중복 초안이 생깁니다.
+pause
+exit /b 1
+
 REM ===== Bplan 드랍메일 실행 (Windows) =====
 REM 이 파일을 더블클릭하면 가상환경 준비 + 드랍메일 초안 생성까지 자동으로 됩니다.
 REM (동기화를 실행하려면 터미널에서: .venv\Scripts\python main.py sync)
