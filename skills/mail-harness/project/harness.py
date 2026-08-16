@@ -28,7 +28,11 @@ from core import digest as digest_mod   # noqa: E402
 from core import metrics as metrics_mod  # noqa: E402
 
 # venv도 리포 하나뿐이다 (5벌 → 1벌). 스킬별 .venv 는 더 이상 만들지 않는다.
-PY = paths.repo_root() / ".venv" / "bin" / "python"
+# 🔴 [2026-08-16] 다만 **없을 수도 있다** — CI 는 `setup-python` + `pip install -e` 로 돌아
+#    리포에 `.venv` 가 생기지 않는다. 경로를 그냥 박으면 로컬은 초록인데 CI 에서만
+#    FileNotFoundError 로 죽는다(같은 함정을 하루에 네 번 밟았다 · `_synthetic_portability` P8).
+_VENV_PY = paths.repo_root() / ".venv" / "bin" / "python"
+PY = _VENV_PY if _VENV_PY.exists() else Path(sys.executable)
 DATA = paths.data("mail-harness", "harness")
 STAGE_TIMEOUT = 300
 # 🔴 [2026-08-14] 마커를 여기에 따로 적어두면 잡 쪽과 조용히 갈린다 —

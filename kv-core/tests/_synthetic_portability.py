@@ -18,7 +18,7 @@
     P3  리포 밖 의존이 **선언돼 있다** (부트스트랩 문서가 실제 환경변수를 덮는다)
     P4  스킬 requirements 가 부트스트랩 문서와 어긋나지 않는다
     P5  자격증명 정본이 하나다 (스킬별 `.env` 부활 금지 — 파일도, 읽는 코드도)
-    P6  백업이 **선언이 아니라 배선**이다 (문서 4곳이 rsync 를 선언했는데 실체가 없었다)\n    P7  **스킬 지식은 [4]에만** — 코어 실행 코드에 도메인 어휘가 없다
+    P6  백업이 **선언이 아니라 배선**이다 (문서 4곳이 rsync 를 선언했는데 실체가 없었다)\n    P7  **스킬 지식은 [4]에만** — 코어 실행 코드에 도메인 어휘가 없다\n    P8  `.venv/bin/python` 하드코딩 금지 (CI 에는 그 경로가 없다 · 3회 반복한 함정)
 
 실행: KV_DATA=<스크래치> python kv-core/tests/_synthetic_portability.py
 git 인덱스를 읽기만 한다 — 네트워크·설치 0.
@@ -326,6 +326,59 @@ check("P7 어휘표를 실제로 훑었다(0이면 위 검사가 공허하다)",
 _wsrc = (_KVC / "workers.py").read_text(encoding="utf-8")
 check("P7 스킬 경로·task 이름은 코어에 남아 있다(디스패치는 [3]의 일)",
       "net-sourcing" in _wsrc and "WIRED" in _wsrc)
+
+# ══════════════════════════════════════════════════════════════════════
+# P8 [2026-08-16] `.venv/bin/python` 을 **경로로 박지 않는다**
+#
+# CI 는 `setup-python` + `pip install -e` 로 돌아 리포에 `.venv` 가 생기지 않는다.
+# 그 경로를 하드코딩하면 로컬은 초록인데 **CI 에서만** FileNotFoundError 로 죽는다.
+#
+# 🔴 같은 함정에 **세 번** 빠졌다(전부 2026-08-16 하루에):
+#     ① `_synthetic_loud_failure.py:198` — 첫 푸시를 막았다
+#     ② 결정 ⑫ 의 `workers._PY` — 판정기를 subprocess 로 부르면서
+#     ③ 결정 ⑫ 의 `_synthetic_dispatch` — 판정기 자체 검사를 걸면서
+# 한 번은 실수, 세 번은 부류다. 그래서 인스턴스가 아니라 **부류**를 막는다.
+#
+# 허용: 사람이 읽는 문서·주석의 안내(`.venv/bin/python tools/x.py` 실행 예시).
+# 금지: **실행되는 코드**가 그 경로를 파이썬 인터프리터로 쓰는 것.
+print("\n=== P8: 인터프리터 경로를 하드코딩하지 않는다 ===\n")
+
+_hard = []
+_SELF = Path(__file__).resolve()
+for _p in list((_REPO / "kv-core").rglob("*.py")) + list((_REPO / "skills").rglob("*.py")):
+    # 자기 자신은 뺀다 — 탐지 규칙 자체가 그 패턴 문자열을 담고 있어서 스스로를 잡는다.
+    if "/.venv/" in str(_p) or "_archive" in str(_p) or _p.resolve() == _SELF:
+        continue
+    try:
+        _src = _p.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        continue
+    if ".venv" not in _src:
+        continue
+    for _i, _ln in enumerate(_executable_only(_src).splitlines(), 1):
+        if ".venv" not in _ln:
+            continue
+        # 🔴 규칙을 좁힌다. `.venv` 가 나온다고 다 문제는 아니다 — 처음엔 넓게 잡았다가
+        #    **제외 필터**(`if "/.venv/" in str(p)`)와 **사람에게 주는 실행 안내 문구**까지
+        #    걸려 거짓 실패가 났다. 잡아야 하는 건 딱 하나: **인터프리터 경로를 만들어
+        #    subprocess 에 넘기는 것**이다.
+        _is_pathjoin = '/ ".venv"' in _ln or "/ '.venv'" in _ln
+        _is_cmd = ".venv/bin/python" in _ln and any(
+            k in _ln for k in ("subprocess", "Popen", "run(", "_PY", "cmd", "["))
+        if not (_is_pathjoin or _is_cmd):
+            continue
+        # `.exists()` 로 **존재를 확인한 뒤 폴백**하는 형태는 정당하다(그게 고친 모양이다).
+        if ".exists()" in _ln or "_VENV_PY" in _ln:
+            continue
+        _hard.append(f"{_p.relative_to(_REPO)}:{_i} {_ln.strip()[:70]}")
+check("P8 실행 코드에 `.venv` 인터프리터 경로가 박혀 있지 않다", not _hard,
+      "\n       ".join(_hard[:6]))
+
+# 반대 방향 — 검사가 공허하지 않은지. `.venv` 를 언급하는 파일이 실제로 있어야 한다
+# (문서·주석 안내는 남아 있는 게 정상이다).
+_mentions = sum(1 for _p in (_REPO / "kv-core").rglob("*.py")
+                if ".venv" in _p.read_text(encoding="utf-8", errors="ignore"))
+check("P8 `.venv` 를 언급하는 파일을 실제로 훑었다", _mentions >= 1, f"{_mentions}본")
 
 # ══════════════════════════════════════════════════════════════════════
 print()

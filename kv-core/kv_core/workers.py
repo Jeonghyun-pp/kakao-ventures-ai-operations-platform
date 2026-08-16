@@ -17,7 +17,9 @@ board.py 는 cwd/sys.path 에 취약하다(8일 침묵 장애 전력) — plist�
 from __future__ import annotations
 
 import subprocess
+import sys
 from datetime import date
+from pathlib import Path
 from typing import Callable
 
 from . import paths
@@ -25,7 +27,13 @@ from .registry import Task
 
 _PROJ = paths.repo_root() / "skills" / "net-sourcing" / "project"
 _MAIL_PROJ = paths.repo_root() / "skills" / "mail-harness" / "project"
-_PY = paths.repo_root() / ".venv" / "bin" / "python"
+# 🔴 [2026-08-16] `.venv` 가 **없을 수 있다.** CI 는 `setup-python` + `pip install -e` 로
+#    돌아 리포에 `.venv` 가 생기지 않는다. 예전에 `_synthetic_loud_failure` 가 같은 함정에
+#    빠져 푸시를 막았고(08-16 새벽), 결정 ⑫ 로 판정기를 subprocess 로 부르면서 **같은 실수를
+#    반복했다.** 없으면 지금 돌고 있는 인터프리터를 쓴다 — 그게 이미 kv_core 를 import 한
+#    파이썬이므로 스킬도 같은 환경에서 돈다.
+_VENV_PY = paths.repo_root() / ".venv" / "bin" / "python"
+_PY = _VENV_PY if _VENV_PY.exists() else Path(sys.executable)
 
 
 def _last_json(out: str) -> dict | None:

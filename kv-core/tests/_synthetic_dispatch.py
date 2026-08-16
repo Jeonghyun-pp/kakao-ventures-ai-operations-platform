@@ -184,8 +184,8 @@ check("④ 판정기가 스킬 쪽에 있다",
 
 # 판정기의 **자체 경계 검사**도 여기서 태운다 — `tools/` 는 CI 의 잡 스캔(`jobs/*.py`)
 # 밖이라, 걸어두지 않으면 그 6개 검사가 로컬에서만 돌고 CI 에선 영영 안 돈다.
-_bhr = _real_run([str(paths.repo_root() / ".venv" / "bin" / "python"),
-                  "tools/board_health.py", "--synthetic"],
+# ⚠️ `.venv/bin/python` 을 박지 마라 — CI 에는 그 경로가 없다(setup-python + pip -e).
+_bhr = _real_run([sys.executable, "tools/board_health.py", "--synthetic"],
                  cwd=paths.repo_root() / "skills" / "net-sourcing" / "project",
                  capture_output=True, text=True)
 check("④ 판정기 자체 경계 검사 통과(5경계 + T4)", _bhr.returncode == 0,
