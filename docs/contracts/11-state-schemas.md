@@ -162,7 +162,7 @@ running   → failed      9
 |---|---|---|
 | `key task kind origin partner created payload decision decided_at decided_by` | 11/11 존재 | ✔ 일치 |
 | `slack_ts` `slack_channel` (approvals_tick) | 11/11 존재 | ✔ 일치 |
-| `executing_at` `draft_id` `executed_at` `execute_error` `orphan_draft_id` | **0/11** | ⚠️ 실행 경로 미검증 |
+| `executing_at` `draft_id` `executed_at` `execute_error` `orphan_draft_id` | **0/11** | ✅ 실데이터는 여전히 0/11 이지만 **경로는 합성으로 닫혔다**(40번 §① 5시나리오 + `_synthetic_approvals_tick` ⑤) |
 | 파생(비저장): `channel` `target` `status` `sent` `delivered` `modified` | 0/11 | ✔ 일치 — 파생 필드가 파일에 새지 않았다 |
 
 🔴 **저장 필드 12개 / 파생 필드 6개의 경계가 실데이터에서 정확히 지켜지고 있다.** 재빌드가 `status`·`channel` 을 다시 저장하면 이 경계가 무너진다. `route_of`/`status_of` 는 읽을 때 계산할 것.
@@ -315,7 +315,9 @@ partial-appstore-snapshot   08-08~08-10   policy 파일 없음  ← 정상
 ## B2. `net-sourcing/linkedin_axis_state.json`
 맵(축 slug → `{last_run, next_page, exhausted}`), **6축**. 602 B.
 🔴 `next_page` 는 **전진만**. 실측 flow-new-founder 11 · stealth-kr 13 · stealth-us-krschool 7 · early-kr 10 · gap-practitioner 5 · posted-early 7.
-🔴 `exhausted` 6/6 전부 `false` — **true 인 상태가 실데이터에 없다.** 소진 경로는 미검증.
+🔴 `exhausted` 6/6 전부 `false` — **true 인 상태가 실데이터에 없다.**
+📌 [2026-08-16] 소진 **이후** 경로(rewind/refresh 3분기 + 축별 재도래 주기)는 40번 §③ 에서
+합성으로 닫았다. 남은 미검증은 **`exhausted=true` 가 찍히는 순간**(빈 페이지 판정) 하나뿐이다.
 ⚠️ `stealth-us-krschool` 만 `last_run=2026-07-27` 로 3주 정지, 나머지 5축은 `2026-08-12`. 축 하나가 조용히 멈춰 있다.
 
 ## B3. threads 계열 (커서 3 + 리스트 3)
@@ -324,7 +326,9 @@ partial-appstore-snapshot   08-08~08-10   policy 파일 없음  ← 정상
 - `threads_last_success.json` `{"date": "2026-07-13"}` — **한 달 넘게 정지**.
 - `threads_anchors.json` 16개 문자열 배열 · `threads_watchlist.json` 1개 · `linkedin_watchlist.json` 72개.
 🔴 세 watchlist/anchors 는 **객체가 아니라 순수 문자열 배열**이다. 레코드로 승격하면 기존 파일을 못 읽는다.
-🔴 **`threads_layer_state.json` 은 존재하지 않는다.** 브리핑이 지목했지만 파일이 없다 — 계약에서 빼거나, 있어야 할 것이 유실된 것인지 확인 필요.
+📌 **[해소 2026-08-16] `threads_layer_state.json` 은 지연 생성이다 — 부재가 정상이다.**
+`adapters/threads.py:290` 이 없으면 `{}` 를 돌려주고(전 층 1회 실행 = 도는 쪽), 318-319 줄이
+실행 후 쓴다. 즉 유실이 아니라 **아직 그 경로가 안 돈 것**이다. 계약: 부재 = 전 층 due.
 
 ## B4. `net-sourcing/followup_state.json` / `followup_events.jsonl`
 상태: 맵(`li:<slug>` → `{last_checked, next_due, headline}`), **5건**. `next_due` 는 `last_checked+30일`.
@@ -420,7 +424,7 @@ JSON array. 레코드 **14필드 전부 100% 등장** — `source` `name` `url` 
 | I5 | 워터마크는 락 안에서 `max()` 전진, `first_attempt` 는 1회만 | 5/5 `first ≤ success ≤ attempt` |
 | I6 | 워터마크 파손 시 삭제 금지 — `.corrupt-<epoch>` 로 보존 | 코드 규약(실측 파손 0) |
 | I7 | 승인은 저장 12필드 / 파생 6필드 경계 유지, 파생을 파일에 쓰지 말 것 | 11/11 파생 필드 유출 0 |
-| I8 | 승인 결정은 `decisions/<key>.<created14>.decision` 마커로 1회만, 영구 보존 | 코드 규약(디렉토리 미생성 — 미검증) |
+| I8 | 승인 결정은 `decisions/<key>.<created14>.decision` 마커로 1회만, 영구 보존 | ✅ 합성 검증 — `cc-3.20260816032318.decision → approved\|parent`, 경합 8회에서 마커 1개 |
 | I9 | 알림 중복억제 = (identity, UTC날짜), **파일 존재가 신호**, 내용은 안 읽음 | 18본 전부 58 B 동일 |
 | I10 | 알림 전송 실패 시 마커 unlink(보상) — 안 하면 알림 영구 유실 | 코드 규약 |
 | I11 | `_alerts/sent` 마커는 policy 보다 오래 산다 — policy 없다고 지우지 말 것 | 3/7 identity 가 마커만 보유 |
@@ -446,15 +450,15 @@ JSON array. 레코드 **14필드 전부 100% 등장** — `source` `name` `url` 
 |---|---|---|---|
 | 이벤트 kind | 8종 닫힘 | **10종**(스킬 5종 추가), 코드 3종은 0건 | 계약을 열린 집합으로 |
 | 승인 실행 필드 | `draft_id` `executed_at` `executing_at` `execute_error` `orphan_draft_id` | **0/11** | 합성으로 검증 필요 |
-| 승인 `decisions/` | 마커 규약 상세 | **디렉토리 없음** | 미검증 경로 |
+| 승인 `decisions/` | 마커 규약 상세 | **디렉토리 없음** | ✅ 해소 — 테스트 실행 시 실제 생성 확인(`_concurrency_lab` 경합 8회 → 마커 1개 수렴) |
 | `_alerts/policy` `first`/`count` | setdefault 후 버림 | 파일에 없음 | 죽은 코드 제거 |
 | `_alerts/policy` `last_sent` | 독자만 있음 | 라이터 없음, 파일 0건 | 레거시 폴백 제거 검토 |
 | `_alerts/events.jsonl`(단수) | 아직 읽음 | **없음** | 폴백 제거 |
-| `_usage` `err` | 실패 시 기록 | **0/120**(전부 ok=true) | 실패 경로 확인 필요 |
+| `_usage` `err` | 실패 시 기록 | **0/120**(전부 ok=true) | ✅ 해소 — 합성으로 태움(40번 §②) + `_synthetic_alerts` 상설 검사 |
 | `<skill>/dlq/` 규약 | 프로덕션 라이터 없음(호출자 경로) | **스킬 3본이 실제로 준수** | 규약을 코드로 승격 |
 | `last_run_health.json`(단수) | 역사적, 아무도 안 씀 | **파일 잔존 + 2일 stale** | 삭제 |
 | `cursor.json` 독자 | 테스트만 | 41본 존재 | 유지(운영 진단용) |
 | `request.json` 독자 | 없음 | 41본 존재 | 유지 or 폐기 결정 |
 | 원자쓰기 미적용 | `_alerts/sent`·`events-*`·`_usage`·`last_run_health` | 실측 파손 0 | 위험 잔존 |
 | `bplan/{sync,drop}_ledger` | (브리핑: 은퇴) | **현역 · 29/35건** | 계약에 포함 |
-| `threads_layer_state.json` | (브리핑: 존재) | **없음** | 확인 필요 |
+| `threads_layer_state.json` | (브리핑: 존재) | **없음** | ✅ 해소 — 지연 생성(부재=전 층 due) |

@@ -9,6 +9,12 @@
 **대조 결과: 불일치 0건 · 보강 11건 · 정정 4건 · 미검증 3건.**
 코드가 선언한 규약이 **실데이터에서 반증된 곳은 하나도 없다.** 이게 재빌드가 [2][3] 을 유지하는 근거다.
 
+> 📌 **[2026-08-16 저녁 갱신] 이 문서는 40번(합성 태우기) 이전 상태로 쓰였다.**
+> 아래 §D 의 미검증 3곳은 **그 뒤 전부 닫혔다.** 현재 상태는 §F 를 보라.
+> 그리고 §D 이후에 계약 자체가 두 번 정정됐다(테스트 누출로 인한 "죽은 수집기" 오기재,
+> 빈 파일 16본 → 7본). 그 근거는 `11-state-schemas.md` · `30-external-constraints.md` 안에
+> 정정 블록으로 남겼다.
+
 ---
 
 ## A. 확정 — 3출처가 일치 (그대로 계약으로 굳힌다)
@@ -94,9 +100,42 @@
 ```
 ✅ 확정   kv-core 소유 11종 (워터마크·events·state/cursor·request·artifacts·승인·알림 3종·락·쿼터·DLQ·헬스)
 ✅ 확정   스킬 소유 12종 (linkedin_seen·축상태·threads 계열·judge 큐/판정/컷·labels·mail-harness 5·pulse 5)
-✅ 확정   [0] 7종 외부 제약 48항목
-🔴 미검증 3곳 (승인 결재·실행 / claude 실패 / 축 소진) — 합성으로 채워야 함
-⏸ 대기   사람 결정 8건 → 60-DECISIONS.md
+✅ 확정   [0] 7종 외부 제약 **56항목** (48 + base 대조원 · 절단 표식 · 재실측 정정)
+✅ 확정   0% 컬럼 22개 성격 분류 → `60-zero-fill-columns.md`
 ```
 
-**결정 8건이 닫히면 계약은 확정이다.**
+## [2026-08-16 저녁] 미검증 3곳은 전부 닫혔다
+
+| | 어떻게 닫혔나 | 근거 |
+|---|---|---|
+| 승인 결재·실행 | 합성 5시나리오(정상/거부/동시/**진짜 프로세스 경합**/초안 중 변경) | `40-unverified-paths.md` §① · `probes/probe1_approval.py` |
+| claude 실패 기록 | 네 실패 모양(timeout·empty_output·rc≠0·미설치)을 태워 장부 모양 확보 | `40-unverified-paths.md` §② · `probes/probe2_claude_fail.py` |
+| 축 소진 | rewind/exhausted/refresh 3분기 계약 확보 + 축별 소진 후 주기 실측 | `40-unverified-paths.md` §③ |
+
+**그리고 40번이 "남은 미검증"으로 적은 것 중 둘은 이미 상설 검사가 있었다**(문서가 낡았던 것):
+
+```
+execute_error   _synthetic_approvals_tick:112 「⑤ 실패 보상: decision 유지 + execute_error 기록」
+                _chaos_lab:234 도 같은 보상을 잰다
+_usage err      _synthetic_alerts:63-76 이 ok:false + err(timeout/rc) 를 직접 써서 판정을 잰다
+I8 결정 마커     실행하면 실제로 만들어진다 — `_synthetic_approval_decide` 8개,
+                `_concurrency_lab` 은 `cc-3.20260816032318.decision → approved|parent` 형태로
+                **경합 8회에서 마커 1개 수렴**을 잰다(파일 규약이 그대로 검증된다)
+```
+
+남은 진짜 미검증은 **`exhausted=true` 가 실제로 찍히는 순간**(빈 페이지 판정) 하나이고,
+위험이 낮아 계약에 표시하고 넘긴다.
+
+## 계약 ↔ 테스트 커버리지 (2026-08-16 신설)
+
+계약은 문서라 코드가 어긋나도 조용하다. 그래서 불변식 24개를 테스트에 연결하고 게이트를 세웠다
+(`kv-core/tests/_synthetic_contract_coverage.py`).
+
+```
+검사 17 / 24 · 미검증 7 (상한으로 잠금 — 늘면 CI 실패)
+미검증 7: I4 kind 열린집합 · I14 linkedin_seen 키형식 · I15 지문 v2| ·
+          I16 applied_ids 멱등 · I19 pulse seen==캐시수 · I20 judge_verdicts 이력성 ·
+          I23 raw 13필드 고정
+```
+
+**이 7개가 [1] 층 계약의 현재 미완이다.** 문서로는 확정됐고, **기계가 지키는지는 아직 안 센다.**
