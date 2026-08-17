@@ -33,7 +33,7 @@ def judge_people(people: list[dict]) -> Fetched:
     """반환 [{key, tier, reason}]. 한 줄씩 되읽어 검증하고 어긋난 줄만 DLQ 로."""
     criteria = (Path(__file__).parent / "criteria.md").read_text(encoding="utf-8")
     valid = {p["key"] for p in people}
-    good, bad = [], []
+    good, bad, drift = [], [], []
 
     for i in range(0, len(people), BATCH):
         chunk = people[i:i + BATCH]
@@ -56,18 +56,30 @@ def judge_people(people: list[dict]) -> Fetched:
             line = line.strip()
             if not line or line.startswith(("#", "```")):
                 continue
-            parts = line.split("\t")
+            parts = [x.strip() for x in line.split("\t")]
             if len(parts) < 3:
                 bad.append({"line": line, "why": "필드 부족"})
                 continue
-            key, tier, reason = parts[0].strip(), parts[1].strip(), parts[2].strip()
+            # 🔴 위치가 아니라 **값**으로 Tier 를 찾는다.
+            #    실측(08-17): claude 가 입력의 축 칸을 출력에 그대로 옮겨
+            #    `key⇥축⇥Tier⇥이유` 로 왔고, 위치로 읽던 파서가 116줄(20%)을 버렸다.
+            #    판정 내용은 멀쩡했다 — 파서가 틀린 것이다.
+            #    출력이 soft 인 이상 열 위치는 언제든 흔들린다. 값으로 찾으면 안 흔들린다.
+            ti = next((i for i, x in enumerate(parts[1:], 1) if x in TIERS), None)
+            key = parts[0]
             if key not in valid:
                 bad.append({"line": line, "why": "목록에 없는 key"})
-            elif tier not in TIERS:
-                bad.append({"line": line, "why": f"모르는 Tier '{tier}'"})
+            elif ti is None:
+                bad.append({"line": line, "why": f"Tier 어휘가 줄 안에 없다: {parts[1:3]}"})
             else:
-                good.append({"key": key, "tier": tier, "reason": reason})
+                if ti != 1:
+                    drift.append(ti)          # 예상 위치가 아니었다 — 조용히 넘기지 않는다
+                good.append({"key": key, "tier": parts[ti],
+                             "reason": " ".join(parts[ti + 1:]).strip()})
 
+    if drift:
+        print(f"  ⚠️  Tier 가 예상 위치(2번째)가 아닌 줄 {len(drift)}개 — 값으로 찾아 흡수했다. "
+              f"프롬프트를 손볼 신호다")
     if bad:
         claude.dlq("linkedin", "judge_dlq", bad)
         print(f"  ⚠️  검증 실패 {len(bad)}줄 → DLQ (나머지 {len(good)}줄은 살린다)")

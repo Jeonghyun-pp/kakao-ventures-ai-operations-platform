@@ -185,6 +185,9 @@ def sanitize(text: str) -> str:
     """
     for ch in constraints.get("notion.strips_chars"):
         text = text.replace(ch, "\n")
+    if constraints.get("notion.strips_control_chars"):
+        # C0 제어문자 제거 (\n·\t 는 남긴다). 하나씩 잡으면 계속 나온다 — 부류로 막는다.
+        text = "".join(c for c in text if c >= " " or c in "\n\t")
     return text
 
 
