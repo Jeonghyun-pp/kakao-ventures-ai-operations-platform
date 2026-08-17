@@ -151,3 +151,120 @@ def summarize(item: dict) -> dict:
         "positions": ps,
         "fingerprint": fingerprint(item),
     }
+
+
+# ================================================================ 개월 계산
+#
+# 🔴 우리 판정 기준이 이 숫자 위에 서 있다 (실측: 창업 3~24개월 1.9배 · 재직 60개월+ Catch 0).
+#    계산을 대충 하면 기준이 통째로 어긋난다.
+
+FOUNDER_ROLE_TERMS = (
+    "founder", "co-founder", "cofounder", "ceo", "cto",
+    # 🔴 풀어 쓴 형태를 빠뜨리면 안 된다. `"ceo" in "chief executive officer"` 는 False 다.
+    #    실측에서 Chief Executive Officer 가 창업 직함으로 안 잡혀, 그 사람의 재직기간을
+    #    옆에 있던 파트타임 자문이 다시 가렸다(9명). Example Person F 사고와 같은 계열이다.
+    "chief executive", "chief technology",
+    "대표", "창업자", "공동창업자", "창업",
+)
+
+_MON = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+
+
+def _today_m() -> int:
+    from datetime import date
+    t = date.today()
+    return t.year * 12 + t.month
+
+
+def is_founder_role(pos: dict) -> bool:
+    t = str(pos.get("position") or pos.get("title") or "").lower()
+    return any(term in t for term in FOUNDER_ROLE_TERMS)
+
+
+def _pos_months(pos: dict) -> int | None:
+    """포지션 하나의 재직 개월. **스크래퍼 모드마다 키가 다르다.**
+
+        Short  tenureAtCompany = {"numYears": 2, "numMonths": 4}
+        Full   startDate = {"month": "Jan", "year": 2026}  ·  duration = "1 yr 3 mos"
+
+    🔴 Full 로 바꾼 뒤 tenureAtCompany 가 사라졌는데 코드가 그것만 읽고 있었다
+       → Tenure Months 가 0/24 로 비었고 재직 기반 판정이 통째로 죽었다.
+       **액터가 주는 키 이름을 추측하지 마라** — 이 스킬의 단골 실패다.
+    """
+    t = pos.get("tenureAtCompany")
+    if isinstance(t, dict) and (t.get("numYears") is not None or t.get("numMonths") is not None):
+        return int(t.get("numYears") or 0) * 12 + int(t.get("numMonths") or 0)
+
+    sd = pos.get("startDate")          # duration 문자열보다 신뢰도가 높다
+    if isinstance(sd, dict) and sd.get("year"):
+        m = (_today_m()
+             - int(sd["year"]) * 12
+             - _MON.get(str(sd.get("month", "")).strip()[:3].lower(), 1))
+        if m >= 0:
+            return m
+
+    import re
+    dur = str(pos.get("duration") or "")
+    yrs, mos = re.search(r"(\d+)\s*yr", dur), re.search(r"(\d+)\s*mo", dur)
+    if yrs or mos:
+        return int(yrs.group(1) if yrs else 0) * 12 + int(mos.group(1) if mos else 0)
+    return None
+
+
+def tenure_months(item: dict) -> int | None:
+    """현 포지션 중 **가장 짧은** 재직 개월. 없으면 None.
+
+    왜 min 인가: 동시 포지션을 가진 사람(97명 중 12명)은 [0]=삼성 10년, [1]=Founder 3개월
+    처럼 온다. 알고 싶은 건 "**새로 시작한 일**이 얼마나 됐나"라 짧은 쪽이다.
+    [0]이나 max 를 보면 대기업 10년으로 읽혀 창업 신호가 정반대로 뒤집힌다.
+
+    🔴🔴 **창업 직함이 하나라도 있으면 그중에서만 고른다.** 그냥 min 을 쓰면 파트타임
+       자문·멘토가 "가장 짧은 일"로 잡혀 창업 시점을 덮어쓴다.
+       실측 피해: 행정안전부 자문(5개월)이 AIM Intelligence 창업(27개월)을 가렸다.
+       271명 재계산에서 **21명(7.7%)** 이 "코드상 12개월 미만"인데 실제 창업은 24개월 이상이었다.
+       창업 직함이 **없는** 사람은 전체 min 이 맞다(대기업 재직 중 창업 준비자 등).
+    """
+    ps = _raw_positions(item)
+    founders = [x for x in ps if is_founder_role(x)]
+    vals = [m for m in (_pos_months(x) for x in (founders or ps)) if m is not None]
+    return min(vals) if vals else None
+
+
+def founding_months(item: dict) -> int | None:
+    """**창업자로 산 기간** — 현 창업 포지션 중 가장 **긴** 것. 없으면 None.
+
+    tenure_months 와 짝이다. 둘을 같이 봐야 갈린다:
+        tenure 2 · founding 2   → 갓 시작한 창업자
+        tenure 2 · founding 84  → 7년차가 법인을 하나 더 세운 것
+    """
+    vals = [m for m in (_pos_months(x) for x in _raw_positions(item) if is_founder_role(x))
+            if m is not None]
+    return max(vals) if vals else None
+
+
+def gap_months(item: dict) -> int | None:
+    """마지막 직장 종료 후 공백 개월.
+
+    세 상태가 **전부 다르다** — 섞으면 안 된다:
+        0     진행 중인 포지션이 있다 → 공백 없음 (확인된 사실)
+        N     마지막 경력이 N개월 전에 끝났고 그 뒤가 비었다
+        None  경력에 날짜가 없어 **판정 불가** (미확인이지 "공백 없음"이 아니다)
+    """
+    exp = [e for e in (item.get("experience") or []) if isinstance(e, dict)]
+    if any(is_present(e) for e in exp):
+        return 0
+    ends = [int(e["endDate"]["year"]) * 12
+            + _MON.get(str(e["endDate"].get("month", "")).strip()[:3].lower(), 1)
+            for e in exp
+            if isinstance(e.get("endDate"), dict) and e["endDate"].get("year")]
+    return (_today_m() - max(ends)) if ends else None
+
+
+def _raw_positions(item: dict) -> list[dict]:
+    """개월 계산용 원본 포지션(dict 그대로). positions() 는 표시용으로 평평하게 만든다."""
+    out = []
+    for key in ("currentPosition", "currentPositions", "positions"):
+        out += [p for p in (item.get(key) or []) if isinstance(p, dict)]
+    out += [e for e in (item.get("experience") or []) if isinstance(e, dict) and is_present(e)]
+    return out

@@ -26,7 +26,7 @@ from kvlib import Fetched, constraints
 from kvlib import ledger
 from kv_transport import itunes, notion, slack
 
-from . import judge
+from . import card as card_fmt, judge
 
 # 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.** 통로는 명단을 안 들고 있다.
 notion.register_writable("ch_앱스토어", "00000000-0000-0000-0000-30deea8edcc5")
@@ -228,7 +228,7 @@ def card(*, dry_run: bool = False) -> int:
     if not passed:
         print("· Pass 가 없다 — 카드를 안 보낸다")
         return 0
-    return 0 if slack.send_card(passed, dry_run=dry_run) else 1
+    return 0 if card_fmt.send(passed, dry_run=dry_run) else 1
 
 
 # ---------------------------------------------------------------- 보고

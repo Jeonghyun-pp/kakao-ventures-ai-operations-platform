@@ -47,22 +47,11 @@ def notify_owner(msg: str) -> bool:
     return _post(f":inbox_tray: {msg}")
 
 
-def send_card(rows: list[dict], *, dry_run: bool = False) -> bool:
-    """오늘의 앱 카드. 뭘 하는 앱인지 한 줄 + 링크."""
-    lines = [f"*오늘의 앱스토어 {len(rows)}개*"]
-    for r in rows:
-        name = r.get("서비스명") or r.get("App ID")
-        dev = r.get("Developer") or ""
-        one = (r.get("One Liner") or "").strip().replace("\n", " ")[:90]
-        site = r.get("Homepage") or ""
-        aid = r.get("App ID")
-        lines.append(
-            f"\n• *{name}* — {dev}\n  {one}\n  "
-            f"<https://apps.apple.com/kr/app/id{aid}|앱스토어>"
-            + (f" · <{site}|개발사>" if site else "")
-            + f" · <https://www.notion.so/{str(r.get('_page_id','')).replace('-','')}|노션>"
-        )
-    text = "\n".join(lines)
+def send_text(text: str, *, dry_run: bool = False) -> bool:
+    """아무 텍스트나 보낸다. **서식은 스킬이 만든다** — 그건 도메인이다.
+
+    반환은 발송 성공 여부다. dry_run 은 화면에만 찍고 True.
+    """
     if dry_run:
         print(_indent(text))
         return True

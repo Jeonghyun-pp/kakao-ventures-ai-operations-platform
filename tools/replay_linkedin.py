@@ -107,13 +107,43 @@ def main() -> int:
     expect("currentPosition 이 놓치는 사람", 100 * miss / n, 33.9, 12.0)
     print(f"      → positions() 가 이걸 흡수한다. 안 하면 이 사람들의 '현재'를 못 본다")
 
-    # 6) 정규화가 실제로 접는가
+    # 6) 개월 계산 — 노션에 쌓인 기존 값과 분포를 대조한다
+    import statistics as stt
+    ten = [profile.tenure_months(i) for i in items]
+    fnd = [profile.founding_months(i) for i in items]
+    gap = [profile.gap_months(i) for i in items]
+    tv = [x for x in ten if x is not None]
+    fv = [x for x in fnd if x is not None]
+    gv = [x for x in gap if x is not None]
+    print(f"\n  · 재직 개월   산출 {len(tv)}/{n} ({100*len(tv)/n:.0f}%) · 중앙값 {stt.median(tv):.0f}")
+    print(f"  · 창업 개월   산출 {len(fv)}/{n} ({100*len(fv)/n:.0f}%) · 중앙값 {stt.median(fv):.0f}")
+    print(f"  · 공백 개월   산출 {len(gv)}/{n} ({100*len(gv)/n:.0f}%) · 0인 사람 {sum(1 for x in gv if x==0)}")
+    # 🔴 창업 직함 우선 min 이 실제로 작동하나 — 그냥 min 과 달라지는 사람 수
+    plain = []
+    for i in items:
+        ps = profile._raw_positions(i)
+        vs = [m for m in (profile._pos_months(x) for x in ps) if m is not None]
+        plain.append(min(vs) if vs else None)
+    any_diff = sum(1 for a, b in zip(ten, plain) if a is not None and b is not None and a != b)
+    # 🔴 옛 실측 7.7% 는 **좁은 정의**다 — "그냥 min 으로는 12개월 미만인데 창업 직함으로는
+    #    24개월 이상"인 사람. 값이 조금이라도 다른 사람을 세면 훨씬 커진다(그건 다른 지표다).
+    #    같은 것을 재야 대조가 성립한다.
+    rescued = sum(1 for pl, fd in zip(plain, fnd)
+                  if pl is not None and pl < 12 and fd is not None and fd >= 24)
+    print(f"  · 창업직함 우선 min 이 값을 바꾼 사람: {any_diff}명 ({100*any_diff/n:.1f}%)")
+    print(f"  · 그중 **12개월 미만 → 창업 24개월 이상** 으로 구제된 사람: {rescued}명 ({100*rescued/n:.1f}%)")
+    ok2 = 3.0 <= 100*rescued/n <= 15.0
+    print(f"  {'✅' if ok2 else '🔴'} 구제 비율이 실측(7.7%) 범위 안 (3~15%)")
+    print("      → 0 이면 Example Person F 보정이 작동 안 하는 것이다")
+    ok &= ok2
+
+    # 7) 정규화가 실제로 접는가
     raw_keys = {u for u in urns if u}
     folded = {profile.canonical_urn(u) or u for u in raw_keys}
     print(f"\n  · URN 정규화: 원본 키 {len(raw_keys)} → 접은 키 {len(folded)} "
           f"(같은 사람 {len(raw_keys) - len(folded)}쌍이 합쳐졌다)")
 
-    # 7) 지문 버전
+    # 8) 지문 버전
     fps = [profile.fingerprint(i) for i in items[:200]]
     versioned = all(f.startswith(profile.FP_VERSION + "|") for f in fps)
     print(f"  {'✅' if versioned else '🔴'} 지문에 버전 접두가 붙는다 ({profile.FP_VERSION})")
