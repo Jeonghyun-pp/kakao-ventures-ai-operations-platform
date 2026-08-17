@@ -23,7 +23,13 @@ from datetime import date, datetime, timedelta, timezone
 
 from kvlib import Fetched, constraints
 
-from . import claude, itunes, ledger, notion, slack
+from kvlib import ledger
+from kv_transport import itunes, notion, slack
+
+from . import judge
+
+# 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.** 통로는 명단을 안 들고 있다.
+notion.register_writable("ch_앱스토어", "00000000-0000-0000-0000-30deea8edcc5")
 
 TASK = "appstore"
 DB = "ch_앱스토어"
@@ -154,7 +160,7 @@ def _props(aid: str, v: dict, d: dict, run_id: str) -> dict:
         "Chart": chart_label,
         "Chart Rank": v.get("rank"),
         "Genre": [genre_name] if genre_name in notion.allowed_options(
-            notion.WRITABLE[DB], "Genre") else [],
+            notion.writable_id(DB), "Genre") else [],
         "Entry Type": entry,
         "Post URL": d.get("url") or f"https://apps.apple.com/kr/app/id{aid}",
         # 한국팀 판별을 정규식으로 하지 않는다 — 개발사 도메인을 그대로 보여주고 사람이 본다
@@ -179,7 +185,7 @@ def pick(*, n: int = 2, dry_run: bool = False) -> int:
         return 0
     print(f"▶ pick — 오늘 후보 {len(rows)}개 중 {n}개")
 
-    picked = claude.pick_apps(rows, n=n)
+    picked = judge.pick_apps(rows, n=n)
     if not picked.is_measured:
         print(f"🔴 선정 실패: {picked.reason}")
         return 1
@@ -212,7 +218,7 @@ def card(*, dry_run: bool = False) -> int:
     if not todays:
         print("· 오늘 착지분이 없다")
         return 0
-    f = notion.query(notion.WRITABLE[DB], ["App ID", "판정", "서비스명", "Developer", "One Liner", "Homepage"])
+    f = notion.query(notion.writable_id(DB), ["App ID", "판정", "서비스명", "Developer", "One Liner", "Homepage"])
     if not f.is_measured:
         print(f"🔴 노션을 못 읽었다: {f.reason}")
         return 1

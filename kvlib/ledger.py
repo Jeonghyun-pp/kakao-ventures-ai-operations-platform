@@ -35,7 +35,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from kvlib import paths
+from . import paths
 
 LANDED = "landed"
 PICKED = "picked"

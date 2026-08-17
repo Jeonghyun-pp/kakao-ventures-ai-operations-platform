@@ -26,11 +26,11 @@ ROOT = Path(__file__).resolve().parent
 
 # 외부에 닿아도 되는 파일 = 통로. 여기 밖에서 망을 부르면 A1 위반.
 TRANSPORTS = {
-    "skills/appstore/itunes.py",
-    "skills/appstore/notion.py",
-    "skills/appstore/slack.py",
-    "skills/appstore/claude.py",
-    "skills/linkedin/apify.py",
+    "kv_transport/itunes.py",
+    "kv_transport/notion.py",
+    "kv_transport/slack.py",
+    "kv_transport/claude.py",
+    "kv_transport/apify.py",
 }
 # 외부 접촉 모듈
 NET_MODULES = {"requests", "urllib", "urllib3", "http", "socket", "httpx", "aiohttp"}
@@ -47,7 +47,7 @@ FIXTURE_FILES = {
 }
 
 SPAWN_ALLOWED = {
-    "skills/appstore/claude.py": "claude -p 통로. 이게 claude 를 부르는 유일한 자리다",
+    "kv_transport/claude.py": "claude -p 통로. 이게 claude 를 부르는 유일한 자리다",
     "tools/mutation_test.py": "검사 러너. check_intent 를 자식 프로세스로 돌려야 한다",
     "schedule.py": "launchd 통로. launchctl 을 부르는 유일한 자리다",
 }
@@ -144,7 +144,7 @@ def a3_no_rc_success() -> None:
 # ---------------------------------------------------------------- A4
 def a4_readback() -> None:
     """노션 쓰기 뒤에 되읽기가 붙어 있나."""
-    src = (ROOT / "skills/appstore/notion.py").read_text(encoding="utf-8")
+    src = (ROOT / "kv_transport/notion.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     writers = {"create", "update"}
     missing = []
@@ -161,7 +161,7 @@ def a4_readback() -> None:
 # ---------------------------------------------------------------- A5
 def a5_option_source() -> None:
     """select 값을 코드 상수로 두지 않는다 — 정본은 라이브 스키마다."""
-    src = (ROOT / "skills/appstore/notion.py").read_text(encoding="utf-8")
+    src = (ROOT / "kv_transport/notion.py").read_text(encoding="utf-8")
     has_check = "_check_option" in src and "allowed_options" in src
     tree = ast.parse(src)
     called = False
@@ -227,7 +227,7 @@ def a9_schedule() -> None:
 
 def a7_paid_tag() -> None:
     """유료 호출은 skill 꼬리표 없이 불가능해야 한다."""
-    src = (ROOT / "skills/linkedin/apify.py").read_text(encoding="utf-8")
+    src = (ROOT / "kv_transport/apify.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     ok = False
     for fn in ast.walk(tree):

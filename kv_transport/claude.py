@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
 
 from kvlib import Fetched, constraints, paths
 
@@ -90,59 +89,12 @@ def run_session(prompt: str, *, system: str | None = None) -> str:
     return out
 
 
-# ---------------------------------------------------------------- 선정
-
-_SYSTEM = (
-    "너는 벤처캐피털 소싱 담당자를 돕는다. 주어진 앱 목록에서 사람이 직접 볼 값어치가 있는 것만 고른다. "
-    "설명이나 인사말을 쓰지 말고 요구된 형식만 출력한다."
-)
 
 
-def pick_apps(rows: list[dict], *, n: int = 2) -> Fetched:
-    """오늘 후보 중 n 개를 고른다. 반환 [{key, reason}].
-
-    출력을 **한 줄씩 되읽어 검증**한다. 어긋난 줄만 DLQ 로 가고 나머지는 산다.
-    """
-    criteria = (Path(__file__).parent / "criteria.md").read_text(encoding="utf-8")
-    lines = [f"{r['key']}\t{r.get('name', '')}\t{r.get('released', '')}" for r in rows]
-    prompt = (
-        f"{criteria}\n\n"
-        f"# 오늘 후보 {len(rows)}개 (app_id · 이름 · 출시일)\n"
-        + "\n".join(lines)
-        + f"\n\n# 출력 형식\n정확히 {n}줄. 각 줄은 `app_id<TAB>고른 이유(한 문장)`.\n"
-          "머리말·꼬리말·코드펜스 금지. 위 목록에 있는 app_id 만 쓴다.\n"
-    )
-    try:
-        raw = run_session(prompt, system=_SYSTEM)
-    except SessionError as e:
-        return Fetched.unknown(f"claude:{e}")
-
-    valid_keys = {r["key"] for r in rows}
-    good, bad = [], []
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or line.startswith("```"):
-            continue
-        parts = line.split("\t") if "\t" in line else line.split(None, 1)
-        if len(parts) < 2:
-            bad.append({"line": line, "why": "필드 부족"})
-            continue
-        key, reason = parts[0].strip(), parts[1].strip()
-        if key not in valid_keys:
-            bad.append({"line": line, "why": "목록에 없는 app_id"})
-            continue
-        good.append({"key": key, "reason": reason})
-
-    if bad:
-        _dlq(bad)
-        print(f"  ⚠️  검증 실패 {len(bad)}줄 → DLQ (나머지 {len(good)}줄은 살린다)")
-    if not good:
-        return Fetched.unknown(f"검증 통과 0줄 (원문 {len(raw)}자)")
-    return Fetched.measured(good[:n], requested=n, got=len(good), dlq=len(bad))
-
-
-def _dlq(rows: list[dict]) -> None:
-    p = paths.data("appstore", "dlq") / "pick_dlq.jsonl"
+def dlq(skill: str, name: str, rows: list[dict]) -> None:
+    """검증에 실패한 줄을 격리한다. **버리지 않는다 — 나중에 왜 깨졌는지 봐야 한다.**"""
+    p = paths.data(skill, "dlq") / f"{name}.jsonl"
     with p.open("a", encoding="utf-8") as f:
         for r in rows:
-            f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(), **r}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(), **r},
+                               ensure_ascii=False) + "\n")

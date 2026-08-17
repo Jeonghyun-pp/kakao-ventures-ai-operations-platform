@@ -19,7 +19,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from skills.appstore import ledger, notion  # noqa: E402
+from kvlib import ledger  # noqa: E402
+from kv_transport import notion  # noqa: E402
 
 TASK = "appstore"
 
@@ -28,7 +29,7 @@ def main(apply: bool) -> int:
     already = ledger.keys(TASK, ledger.LANDED)
     print(f"장부에 이미 있는 키: {len(already)}개")
 
-    f = notion.query(notion.WRITABLE["ch_앱스토어"], ["App ID"])
+    f = notion.query("00000000-0000-0000-0000-30deea8edcc5", ["App ID"])
     if not f.is_measured:
         print(f"🔴 노션을 못 읽었다: {f.reason}")
         return 1

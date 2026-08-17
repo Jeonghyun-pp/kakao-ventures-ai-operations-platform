@@ -33,18 +33,34 @@ from kvlib import Fetched, constraints, secrets
 _API = "https://api.notion.com/v1"
 _VERSION = "2022-06-28"
 
-# 🔴 쓰기 허용 DB 명단. 여기 없으면 쓰지 않는다.
+# 🔴 쓰기 허용 DB — **스킬이 등록한다.** 통로가 명단을 들고 있지 않다.
+#
+#    통로가 하드코딩하면 스킬이 늘 때마다 여기를 고쳐야 하고, 그게 두 진실원이 된다
+#    (스킬은 쓰는데 명단에 없거나, 명단엔 있는데 스킬이 없거나).
+#    통로가 지키는 건 하나다 — **등록 안 된 DB 에는 안 쓴다.**
+#
 #    옛 시스템은 매핑 없는 채널을 base DB 로 조용히 흘려보냈고, 그 DB엔 그 채널 칸이 없어
 #    값 대부분이 버려진 채 "오염된 대조원"이 됐다.
-WRITABLE = {
-    "ch_앱스토어": "00000000-0000-0000-0000-30deea8edcc5",
-}
-# 읽기 전용 — 대조·조회에만 쓴다
+_WRITABLE: dict[str, str] = {}
+
+# 읽기 전용 — 대조·조회 대상. 읽기는 아무 DB나 되므로 편의 목록일 뿐이다.
 READ_ONLY = {
     "base_주간소싱": "00000000-0000-0000-0000-d609b10d8459",
-    "ch_링크드인": "00000000-0000-0000-0000-8702f7cc7f34",
     "ch_스레드": "00000000-0000-0000-0000-a258370d87f8",
+    "dedup_극초기": "00000000-0000-0000-0000-72b2b8579963",
 }
+
+
+def register_writable(key: str, db_id: str) -> None:
+    """스킬이 자기 착지 DB 를 등록한다. 같은 키를 다른 id 로 덮으면 raise."""
+    prev = _WRITABLE.get(key)
+    if prev and prev != db_id:
+        raise NotionError(f"'{key}' 가 이미 {prev} 로 등록돼 있다 (새로: {db_id})")
+    _WRITABLE[key] = db_id
+
+
+def writable_id(key: str) -> str:
+    return _writable_id(key)
 
 _NET_ERRORS = (
     requests.exceptions.Timeout,
@@ -288,12 +304,12 @@ def update(page_id: str, db_key: str, props: dict) -> Fetched:
 
 
 def _writable_id(db_key: str) -> str:
-    if db_key not in WRITABLE:
+    if db_key not in _WRITABLE:
         raise NotWritable(
-            f"'{db_key}' 는 쓰기 허용 명단에 없다. 쓸 수 있는 것: {sorted(WRITABLE)}. "
-            f"읽기 전용: {sorted(READ_ONLY)}"
+            f"'{db_key}' 가 등록돼 있지 않다. 등록된 것: {sorted(_WRITABLE)}. "
+            f"스킬이 notion.register_writable('{db_key}', '<db_id>') 를 먼저 불러야 한다."
         )
-    return WRITABLE[db_key]
+    return _WRITABLE[db_key]
 
 
 def _build(db_id: str, props: dict) -> dict:
