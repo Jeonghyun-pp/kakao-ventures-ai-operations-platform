@@ -240,6 +240,36 @@ def a7_paid_tag() -> None:
           "run_actor 가 skill 을 키워드 필수로 받는다" if ok else "skill 이 필수가 아니다")
 
 
+def a13_portability() -> None:
+    """맥 전용 코드가 schedule.py 밖으로 새지 않았나.
+
+    다른 기계로 옮길 때 고칠 곳이 한 파일이어야 이식이 싸다.
+    지금 0건인 상태를 잠근다 — 새로 생기면 즉시 잡힌다.
+    """
+    marks = ("launchctl", "LaunchAgents", "/Users/", "Library/")
+    bad = []
+    for p in py_files():
+        r = rel(p)
+        if r in ("schedule.py",) or r.startswith("tools/"):
+            continue        # 일회성 도구는 그 기계에서만 쓴다
+        src = p.read_text(encoding="utf-8")
+        try:
+            in_string = set()
+            for node in ast.walk(ast.parse(src)):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    in_string.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+        except SyntaxError:
+            continue
+        for i, line in enumerate(src.splitlines(), 1):
+            if i in in_string:
+                continue
+            for m in marks:
+                if m in line.split("#")[0]:
+                    bad.append(f"{r}:{i} {m}")
+    check("A13", "맥 전용 코드가 schedule.py 밖에 없다", not bad,
+          f"{len(bad)}건: {bad[:4]}" if bad else "옮길 때 고칠 곳이 schedule.py 하나다")
+
+
 def not_yet() -> None:
 
 
@@ -259,6 +289,7 @@ def main() -> int:
     a8_no_send()
     a7_paid_tag()
     a9_schedule()
+    a13_portability()
     not_yet()
 
     print("=" * 68)

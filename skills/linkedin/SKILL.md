@@ -2,8 +2,8 @@
 name: linkedin
 description: 링크드인에서 극초기 창업자를 주 1회 수집해 Tier 를 판정하고, 매일 상위 5명씩 노션에 착지시킨다.
 schedule:
-  - { cmd: collect, when: "월 07:30", why: "이때만 돈이 나간다. 축별로 차례인 것만 돈다" }
-  - { cmd: card,    when: "매일 10:00", why: "정현님이 훑은 결과가 반영된 뒤에 나간다" }
+  - { cmd: collect, when: "월 09:10", why: "이때만 돈이 나간다. 축별로 차례인 것만 돈다" }
+  - { cmd: card,    when: "매일 11:00", why: "정현님이 훑은 결과가 반영된 뒤에 나간다" }
 ---
 
 # 링크드인 소싱
@@ -11,10 +11,10 @@ schedule:
 ## 하루
 
 ```
-월 07:30  collect   축별로 차례인 것만 → Apify → 원본 아카이브 → 장부로 중복 제거
+월 09:10  collect   축별로 차례인 것만 → Apify → 원본 아카이브 → 장부로 중복 제거
                     claude 배치 판정(Catch/Trend/Wait/Cut) → **전량** 노션 착지
 매일       (사람)     정현님이 노션에서 훑는다. 아니면 Tier 를 고친다
-매일 10:00 card      🔴 노션에서 Tier 를 **다시 읽어**, 아직 안 나간 사람 좋은 순 5명
+매일 11:00 card      🔴 노션에서 Tier 를 **다시 읽어**, 아직 안 나간 사람 좋은 순 5명
                     Catch 는 장부에 meeting_candidate 만 남긴다 — 메일은 별도 스킬 몫
 ```
 
