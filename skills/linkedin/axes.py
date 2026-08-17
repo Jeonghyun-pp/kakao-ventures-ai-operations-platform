@@ -16,7 +16,15 @@
 **구글코리아 사장까지 걸렸다.** 켜니 중앙값 6개월이 됐다.
 *같은 돈으로 사는 사람이 통째로 달라진다.*
 
-## 페이지 배분은 실측 성적으로 정했다
+## 🔴 이 채널의 목적은 "알려지기 전에 찾는 것"이다
+
+이미 트랙션이 있고 알려진 팀은 다른 경로로도 우리에게 온다. 그러니 배분을 **이른 쪽으로** 기울인다.
+
+다만 필터만 당기면 안 된다 — 실측으로 창업 0~3개월(1.34배)이 3~6개월(1.91배)보다 **낮다.**
+사람이 별로여서가 아니라 **보여줄 게 아직 없어서** 판정이 Wait/Cut 으로 몰리는 것이다.
+그래서 `criteria.md` 도 같이 바꿨다 — "정보가 없는 것은 감점이 아니다".
+
+## 페이지 배분은 실측 성적 + 위 목적으로 정했다
 
 노션 ch_링크드인 1,151행의 축별 Catch 비율(기저 17.9%):
 
@@ -58,7 +66,7 @@ AXES: dict[str, dict] = {
     },
     # 실측 29.6% — 이미 극초기인 사람 전체 (모수 1,348명)
     "early-kr": {
-        "every_days": 7, "pages": 4, "rewind": False,
+        "every_days": 7, "pages": 3, "rewind": False,   # 4→3 상대적으로 덜 이른 축
         "payload": {"currentJobTitles": _TITLES, "locations": ["South Korea"], **_EARLY},
     },
     # 실측 16.3% 지만 Cut 이 6%로 최저 — 정보가 없을 뿐이다.
@@ -66,7 +74,7 @@ AXES: dict[str, dict] = {
     #    재직기간으로 자르면 그 사람들이 사라진다.
     #    그리고 Stealth 는 직함이 아니라 **회사명**에 박힌다(실측: 직함 0명 / 회사명 2명).
     "stealth-kr": {
-        "every_days": 7, "pages": 6, "rewind": False,
+        "every_days": 7, "pages": 8, "rewind": False,   # 6→8 "안 알려진"의 가장 직접적 신호
         "payload": {"searchQuery": "Stealth Startup", "locations": ["South Korea"]},
     },
     # 신규 유입 감지기. rewind = 매번 전량(237명) 재구매 —
@@ -90,7 +98,7 @@ AXES: dict[str, dict] = {
     # 해외에 있는 한국 연고자. schools 서버 필터는 실제로 작동한다(25명 중 24명이 서·연·고·카·포).
     # 한국 거주 축에는 학교를 안 건다 — 효과가 1.27배로 약한데 모수만 크게 준다.
     "stealth-us-krschool": {
-        "every_days": 30, "pages": 6, "rewind": True,
+        "every_days": 14, "pages": 6, "rewind": True,   # 월1→격주
         "payload": {"searchQuery": "Stealth Startup", "locations": ["United States"],
                     "schools": ["Seoul National University", "KAIST", "POSTECH",
                                 "Yonsei University", "Korea University"]},

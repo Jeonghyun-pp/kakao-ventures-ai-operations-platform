@@ -7,7 +7,10 @@ from kvlib import Fetched
 from kv_transport import claude
 
 TIERS = ("Catch", "Trend", "Wait", "Cut")
-BATCH = 25          # claude 한 번에 넣는 인원. 넘으면 나눠 부른다
+# claude 한 번에 넣는 인원. 넘으면 나눠 부른다.
+# 🔴 작게 잡으면 호출 수가 늘어 쿼터 차단선(일 50회)에 닿는다 —
+#    700명이면 25명씩은 28회, 50명씩은 14회다. 한 줄이 400자 남짓이라 50명도 넉넉하다.
+BATCH = 50
 
 _SYSTEM = (
     "너는 벤처캐피털 소싱 담당자를 돕는다. 주어진 링크드인 프로필을 네 등급으로 나눈다. "

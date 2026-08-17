@@ -131,14 +131,20 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
         print(f"🔴 판정 실패: {verdicts.reason} — 산 사람은 아카이브에 있으니 다시 판정할 수 있다")
         return 1
     vmap = {v["key"]: v for v in verdicts.require()}
+    # 🔴 판정을 못 받은 사람을 **조용히 버리지 않는다.** 돈 주고 산 사람이다.
+    unjudged = [k for k in fresh if k not in vmap]
     print(f"· 판정 {len(vmap)}/{len(fresh)}")
+    if unjudged:
+        print(f"🔴 판정 못 받은 사람 {len(unjudged)}명 — 착지하지 않는다. "
+              f"원본은 아카이브에 있으니 다시 판정할 수 있다")
+        ledger.append(TASK, "-", "unjudged", n=len(unjudged), keys=unjudged[:50], run=run_id)
 
     # ---- 착지 → 장부
     landed = failed = 0
     for k, item in fresh.items():
         v = vmap.get(k)
         if not v:
-            continue
+            continue        # 위에서 시끄럽게 셌다
         res = notion.create(DB, _props(item, v, run_id))
         if not res.is_measured:
             failed += 1
@@ -153,8 +159,8 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
 
     print(f"· 착지 {landed} · 실패 {failed}")
     _report()
-    if unknowns or failed:
-        raise Degraded(f"미상 {len(unknowns)} · 착지실패 {failed}")
+    if unknowns or failed or unjudged:
+        raise Degraded(f"미상 {len(unknowns)} · 착지실패 {failed} · 판정누락 {len(unjudged)}")
     return 0
 
 
