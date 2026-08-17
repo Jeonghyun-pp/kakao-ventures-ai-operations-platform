@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from kvlib import Fetched, constraints
 
-from kvlib import ledger
+from kvlib import ledger, lock
 from kv_transport import itunes, notion, slack
 
 from . import card as card_fmt, judge
@@ -252,7 +252,8 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     try:
         if a.cmd == "collect":
-            return collect(dry_run=a.dry_run, limit_genres=a.genres, limit=a.limit)
+            with lock.hold("appstore-collect"):
+                return collect(dry_run=a.dry_run, limit_genres=a.genres, limit=a.limit)
         if a.cmd == "pick":
             return pick(n=a.n, dry_run=a.dry_run)
         if a.cmd == "card":
@@ -260,6 +261,9 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "status":
             print(ledger.summary(TASK))
             return 0
+    except lock.Busy as e:
+        print(f"🔴 {e}")
+        return 3
     except Degraded as e:
         print(f"🔴 온전하지 않다: {e}")
         return 2   # 크론이 종료코드만 본다 — "0건 성공"과 가른다

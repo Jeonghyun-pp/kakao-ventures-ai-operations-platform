@@ -20,7 +20,7 @@ import sys
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from kvlib import ledger
+from kvlib import ledger, lock
 from kv_transport import apify, notion, slack
 
 from . import axes, judge, profile
@@ -196,12 +196,16 @@ def _props(item: dict, v: dict, run_id: str) -> dict:
     s = _summary(item)
     iso = date.today().isocalendar()
     return {
-        "서비스명": s["company"] or s["name"] or s["key"],
+        # 🔴 제목은 **사람 이름**이다. 링크드인은 사람을 소싱하는 채널이고,
+        #    스텔스 축에서 오는 사람은 회사명이 "Stealth Mode Startup" 같은 것이라
+        #    제목으로 쓰면 목록에서 서로 구별이 안 된다.
+        #    회사는 One Liner 에 직함과 함께 싣는다.
+        "서비스명": s["name"] or s["key"],
         "LinkedIn URL": s["url"] or None,
         "Author Username": s["public_id"],
         "Author Display Name": s["name"],
         "Author Headline": s["headline"],
-        "One Liner": s["title"],
+        "One Liner": " · ".join(x for x in (s["company"], s["title"]) if x),
         "Raw Text": " · ".join(x for x in (s["headline"], s["company"], s["about"]) if x),
         "Tier": v["tier"],
         "AI Reason": v["reason"],
@@ -231,7 +235,7 @@ def card(*, n: int = 5, dry_run: bool = False) -> int:
         return 0
 
     f = notion.query(notion.writable_id(DB),
-                     ["LinkedIn URL", "Tier", "서비스명", "Author Headline", "Author Display Name"])
+                     ["LinkedIn URL", "Tier", "서비스명", "One Liner", "Author Headline"])
     if not f.is_measured:
         print(f"🔴 노션을 못 읽었다: {f.reason}")
         return 1
@@ -253,9 +257,10 @@ def card(*, n: int = 5, dry_run: bool = False) -> int:
 
     lines = [f"*오늘의 링크드인 {len(pick)}명*"]
     for _, k, live in pick:
+        # 제목이 사람 이름, One Liner 가 "회사 · 직함" 이다
         lines.append(
-            f"\n• *{live.get('Author Display Name') or live.get('서비스명')}* "
-            f"— {live.get('서비스명') or ''}  `{live.get('Tier')}`\n"
+            f"\n• *{live.get('서비스명')}*  `{live.get('Tier')}`\n"
+            f"  {(live.get('One Liner') or '')[:80]}\n"
             f"  {(live.get('Author Headline') or '')[:100]}\n"
             f"  <{live.get('LinkedIn URL')}|링크드인> · "
             f"<https://www.notion.so/{str(live['_page_id']).replace('-', '')}|노션>"
@@ -302,7 +307,8 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     try:
         if a.cmd == "collect":
-            return collect(only_axis=a.axis, pages=a.pages, dry_run=a.dry_run)
+            with lock.hold("linkedin-collect"):
+                return collect(only_axis=a.axis, pages=a.pages, dry_run=a.dry_run)
         if a.cmd == "card":
             return card(n=a.n, dry_run=a.dry_run)
         if a.cmd == "status":
@@ -312,6 +318,9 @@ def main(argv: list[str] | None = None) -> int:
                 st = _axis_state(ax)
                 print(f"  {ax:22} 마지막 {st.get('ran_on','-')} · 다음 p{_next_page(ax)}")
             return 0
+    except lock.Busy as e:
+        print(f"🔴 {e}")
+        return 3
     except Degraded as e:
         print(f"🔴 온전하지 않다: {e}")
         return 2

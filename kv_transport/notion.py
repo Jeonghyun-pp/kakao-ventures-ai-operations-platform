@@ -306,6 +306,29 @@ def update(page_id: str, db_key: str, props: dict) -> Fetched:
     return Fetched.measured(page_id)
 
 
+def archive(page_id: str) -> Fetched:
+    """행을 휴지통으로 보낸다. **지우는 게 아니라 아카이브**라 노션에서 되살릴 수 있다.
+
+    쓰기와 같은 규율을 지킨다 — 보내고 나서 **되읽어** 실제로 archived 인지 확인한다.
+    200 은 "요청을 받았다"이지 "반영됐다"가 아니다.
+    """
+    try:
+        _req("PATCH", f"/pages/{page_id}", json_body={"archived": True})
+    except NotionError as e:
+        # 🔴 이미 아카이브된 페이지에 PATCH 하면 400 이 난다. 그건 실패가 아니라
+        #    **이미 원하는 상태**다. 멱등이어야 재실행이 안전하다.
+        #    (실측 08-17: 같은 작업을 두 번 띄웠더니 193건이 "실패"로 잡혔는데 전부 이 경우였다)
+        if "archived" not in str(e):
+            return Fetched.unknown(f"archive:{e}")
+    try:
+        page = _req("GET", f"/pages/{page_id}")
+    except NotionError as e:
+        return Fetched.unknown(f"archive_readback:{e}")
+    if not page.get("archived") and not page.get("in_trash"):
+        return Fetched.unknown("archive_not_applied", page_id=page_id)
+    return Fetched.measured(page_id)
+
+
 def _writable_id(db_key: str) -> str:
     if db_key not in _WRITABLE:
         raise NotWritable(

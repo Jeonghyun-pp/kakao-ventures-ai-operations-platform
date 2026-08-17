@@ -3,7 +3,7 @@
 여기 있는 것은 **어느 스킬에서도 같은 것**뿐이다:
 
     fetched      통로의 반환 타입 (0 과 미상을 가른다)
-    ledger       장부 — 멱등·재개·보고가 전부 여기서 나온다
+    ledger       장부 — 멱등·재개·보고가 전부 여기서 나온다\n    lock         이중 실행 방지 (flock, unlink 금지)
     constraints  [0] 외부 제약의 기계 판본
     paths        데이터 루트 기준 경로
 
@@ -12,4 +12,4 @@
 미리 뺐으면 옛 시스템처럼 선을 감으로 긋게 되고, 그러면 두 겹이 된다.
 """
 from .fetched import Fetched, Unknown  # noqa: F401
-from . import constraints, ledger, paths  # noqa: F401
+from . import constraints, ledger, lock, paths  # noqa: F401
