@@ -186,6 +186,9 @@ def _summary(item: dict) -> dict:
         "tenure": profile.tenure_months(item),
         "founding": profile.founding_months(item),
         "gap": profile.gap_months(item),
+        "ft_gap": profile.fulltime_gap_months(item),
+        "kr": profile.korea_signals(item),
+        "company_url": profile.company_url(item),
         "company": " · ".join(dict.fromkeys(p["company"] for p in s["positions"] if p["company"])),
         "title": " · ".join(dict.fromkeys(p["title"] for p in s["positions"] if p["title"])),
     })
@@ -214,6 +217,13 @@ def _props(item: dict, v: dict, run_id: str) -> dict:
         "Tenure Months": s["tenure"],
         "창업 개월": s["founding"],
         "공백 개월": s["gap"],
+        # 🔴 본업 공백은 공백 개월과 **다른 값**이다. 파트타임 자문만 걸어둔 사람은
+        #    공백 0 인데 본업 공백 6 이 나온다 — EIR 처럼 창업 준비 중인 사람이 그 모양이다
+        "본업 공백": s["ft_gap"],
+        "Korea Signal": [x for x in s["kr"] if x in notion.allowed_options(
+            notion.writable_id(DB), "Korea Signal")],
+        "Homepage": s["company_url"] or None,      # 노션 `회사` formula 가 이걸 파싱한다
+        "Post URL": s["url"] or None,
         "Sourcing Method": "keyword_search",
         "Status": "New",
         "Match Reason": f"{s['axis']} · 재직 {s['tenure']}개월 · 창업 {s['founding']}개월",

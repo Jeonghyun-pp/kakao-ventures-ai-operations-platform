@@ -268,6 +268,14 @@ def _plain(v: dict):
         return (v.get("date") or {}).get("start")
     if t in ("created_time", "last_edited_time"):
         return v.get(t)
+    if t == "formula":
+        # 🔴 formula 는 값이 한 겹 더 싸여 있다. 안 풀면 **값이 있는데 None 으로 읽힌다**
+        #    (실측 08-17: `회사` 칸이 0% 로 보였는데 실제로는 차 있었다 — 파서가 못 읽은 것).
+        fx = v.get("formula") or {}
+        return fx.get(fx.get("type", ""))
+    if t == "rollup":
+        rl = v.get("rollup") or {}
+        return rl.get(rl.get("type", ""))
     return None
 
 

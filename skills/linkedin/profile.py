@@ -286,6 +286,76 @@ def gap_months(item: dict) -> int | None:
     return (_today_m() - max(ends)) if ends else None
 
 
+# 🔴 부업으로 보는 고용형태는 여기까지다. **넓히지 마라** —
+#    `Contract` 를 넣으면 `Deputy Site Manager(LNG) · Contract` 같은 명백한 본업을 무직으로 만든다.
+_SIDE_EMPLOYMENT = {"Part-time", "Internship", "Volunteer", "Seasonal"}
+
+# 한국 거주 판별용. 🔴 이걸로 "한국팀"을 판정하지 않는다 — 그건 정규식으로 못 맞힌다.
+#    거주지 문자열에 이게 있으면 KR-거주 신호를 다는 것뿐이다.
+KR_LOCATION_TERMS = (
+    "korea", "seoul", "한국", "서울", "대한민국",
+    "busan", "부산", "daejeon", "대전", "incheon", "인천", "daegu", "대구",
+    "gwangju", "광주", "ulsan", "울산", "sejong", "세종",
+    "gyeonggi", "경기", "pangyo", "판교", "seongnam", "성남", "gangnam", "강남",
+)
+KR_SCHOOLS = ("seoul national", "kaist", "korea advanced institute", "postech",
+              "yonsei", "korea university", "서울대", "카이스트", "포스텍", "연세", "고려대")
+
+
+def is_side_job(pos: dict) -> bool:
+    return str(pos.get("employmentType") or "") in _SIDE_EMPLOYMENT
+
+
+def fulltime_gap_months(item: dict) -> int | None:
+    """**본업**(부업 제외) 기준 공백 개월. `gap_months` 의 짝이다.
+
+    🔴 왜 따로 재나: `gap_months` 는 Present 가 **하나라도** 있으면 0 이다. 그런데 퇴사하고
+       자문·EIR 만 파트타임으로 걸어둔 사람이 있다 — 실질은 본업이 없는데 0 으로 찍힌다.
+       EIR(Entrepreneur in Residence)은 **말 그대로 창업 준비 중**이라, 이 채널에서
+       가장 놓치면 안 되는 인구다.
+
+    두 칸을 **같이** 봐야 뜻이 산다:
+        공백 0 / 본업공백 6  → 파트타임 하나 걸고 6개월째 본업 없음  ← 신호
+        공백 0 / 본업공백 0  → 정상 재직
+    """
+    exp = [e for e in (item.get("experience") or []) if isinstance(e, dict)]
+    if any(is_present(e) and not is_side_job(e) for e in exp):
+        return 0
+    ends = [int(e["endDate"]["year"]) * 12
+            + _MON.get(str(e["endDate"].get("month", "")).strip()[:3].lower(), 1)
+            for e in exp
+            if not is_present(e) and not is_side_job(e)
+            and isinstance(e.get("endDate"), dict) and e["endDate"].get("year")]
+    return (_today_m() - max(ends)) if ends else None
+
+
+def korea_signals(item: dict) -> list[str]:
+    """노션 `Korea Signal` multi_select 값. 거주·학교만 판별한다."""
+    out = []
+    loc = str(item.get("location") or item.get("locationName") or "").lower()
+    if any(t in loc for t in KR_LOCATION_TERMS):
+        out.append("KR-거주")
+    schools = " ".join(
+        str(e.get("schoolName") or e.get("school") or e.get("title") or "")
+        for e in (item.get("education") or []) if isinstance(e, dict)).lower()
+    if any(t in schools for t in KR_SCHOOLS):
+        out.append("KR-학교")
+    return out
+
+
+def company_url(item: dict) -> str:
+    """현재 회사의 링크드인 URL. 노션 `회사` formula 가 이걸 파싱한다.
+
+    판단할 때 **회사 자체를 조회할 유일한 열쇠**다 — payload 에 회사의 나이·투자단계가 없다.
+    창업 포지션을 우선한다.
+    """
+    for e in _raw_positions(item):
+        u = e.get("companyLinkedinUrl")
+        if u:
+            return str(u)
+    return ""
+
+
 def _raw_positions(item: dict) -> list[dict]:
     """개월 계산용 원본 포지션(dict 그대로). positions() 는 표시용으로 평평하게 만든다."""
     out = []
