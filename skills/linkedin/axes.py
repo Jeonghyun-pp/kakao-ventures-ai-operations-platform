@@ -24,6 +24,23 @@
 사람이 별로여서가 아니라 **보여줄 게 아직 없어서** 판정이 Wait/Cut 으로 몰리는 것이다.
 그래서 `criteria.md` 도 같이 바꿨다 — "정보가 없는 것은 감점이 아니다".
 
+## 🔴 [2026-08-17 실측] 페이지를 24 → 4.5 로 줄였다
+
+첫 전 축 실행에서 **650명을 사서 566명이 신규**였다. 이 페이스면 풀(gap 제외 약 2,700명)이
+**5주면 마른다.** 목표는 주 70~80명이었다.
+
+축마다 신규율이 완전히 다르다:
+
+    커서 축    다음 페이지를 산다     → 사는 족족 신규 (25명/페이지)
+    rewind 축  매번 같은 사람을 산다   → 신규는 "그 사이 새로 생긴 사람"뿐
+
+`flow-new-founder` 가 극단적이다. 모수 237명인데 첫 실행에 224명을 봤다. 다음엔
+$2.00 을 써도 신규는 10~20명이다 — 명당 $0.10~0.20 으로 커서 축($0.008)의 20배다.
+그래도 못 버리는 이유는 **빠름**이다. 이번 주 창업한 사람을 이번 주에 잡는 게 목적이니까.
+
+→ **커서 축은 페이지를 줄이고, rewind 축은 주기를 늘렸다**(전량이어야 "놓치는 게 0"이
+   성립하므로 페이지를 못 줄인다).
+
 ## 페이지 배분은 실측 성적 + 위 목적으로 정했다
 
 노션 ch_링크드인 1,151행의 축별 Catch 비율(기저 17.9%):
@@ -60,13 +77,13 @@ _EARLY = {"yearsAtCurrentCompanyIds": ["1"], "companyHeadcount": ["A", "B"]}
 AXES: dict[str, dict] = {
     # 실측 33.3% — 최고. "지금 움직이는 사람"
     "posted-early": {
-        "every_days": 7, "pages": 4, "rewind": False,
+        "every_days": 7, "pages": 1, "rewind": False,
         "payload": {"currentJobTitles": _TITLES, "locations": ["South Korea"],
                     "recentlyPostedOnLinkedIn": True, **_EARLY},
     },
     # 실측 29.6% — 이미 극초기인 사람 전체 (모수 1,348명)
     "early-kr": {
-        "every_days": 7, "pages": 3, "rewind": False,   # 4→3 상대적으로 덜 이른 축
+        "every_days": 7, "pages": 1, "rewind": False,
         "payload": {"currentJobTitles": _TITLES, "locations": ["South Korea"], **_EARLY},
     },
     # 실측 16.3% 지만 Cut 이 6%로 최저 — 정보가 없을 뿐이다.
@@ -74,13 +91,13 @@ AXES: dict[str, dict] = {
     #    재직기간으로 자르면 그 사람들이 사라진다.
     #    그리고 Stealth 는 직함이 아니라 **회사명**에 박힌다(실측: 직함 0명 / 회사명 2명).
     "stealth-kr": {
-        "every_days": 7, "pages": 8, "rewind": False,   # 6→8 "안 알려진"의 가장 직접적 신호
+        "every_days": 7, "pages": 1, "rewind": False,
         "payload": {"searchQuery": "Stealth Startup", "locations": ["South Korea"]},
     },
     # 신규 유입 감지기. rewind = 매번 전량(237명) 재구매 —
     # 액터에 "이미 산 사람 빼고" 하는 파라미터가 **없어서** 어쩔 수 없다. 사고 나서 장부로 거른다.
     "flow-new-founder": {
-        "every_days": 14, "pages": 10, "rewind": True,
+        "every_days": 30, "pages": 10, "rewind": True,
         "payload": {"currentJobTitles": _TITLES, "locations": ["South Korea"],
                     "recentlyChangedJobs": True, **_EARLY},
     },
@@ -90,7 +107,7 @@ AXES: dict[str, dict] = {
     #    과거 직함을 임원으로 걸면 공백자 4/25가 전원 휴지기 임원인데,
     #    실무 직함으로 걸면 10/25 이고 9/12가 실무자였다(유료 프로브 2회).
     "gap-practitioner": {
-        "every_days": 14, "pages": 2, "rewind": False,
+        "every_days": 14, "pages": 1, "rewind": False,
         "payload": {"pastJobTitles": ["Software Engineer", "Product Manager",
                                       "Data Scientist", "Designer"],
                     "locations": ["South Korea"]},
@@ -98,7 +115,7 @@ AXES: dict[str, dict] = {
     # 해외에 있는 한국 연고자. schools 서버 필터는 실제로 작동한다(25명 중 24명이 서·연·고·카·포).
     # 한국 거주 축에는 학교를 안 건다 — 효과가 1.27배로 약한데 모수만 크게 준다.
     "stealth-us-krschool": {
-        "every_days": 14, "pages": 6, "rewind": True,   # 월1→격주
+        "every_days": 30, "pages": 6, "rewind": True,
         "payload": {"searchQuery": "Stealth Startup", "locations": ["United States"],
                     "schools": ["Seoul National University", "KAIST", "POSTECH",
                                 "Yonsei University", "Korea University"]},

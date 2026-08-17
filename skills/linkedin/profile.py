@@ -72,6 +72,31 @@ def seen_key(item: dict) -> str:
     return canonical_urn(urn) or urn or normalize_url(str(item.get("linkedinUrl") or ""))
 
 
+def match_keys(item: dict) -> list[str]:
+    """이 사람을 가리키는 **모든** 키. 하나라도 겹치면 같은 사람이다.
+
+    🔴 키가 하나면 안 된다. 실측(2026-08-17): 우리가 수집한 사람은 URN 키
+    (`urn:ACxxxxxxxxx`)를 갖는데, 노션 옛 행에서 뽑을 수 있는 건 URL 키(`in/vanity`)뿐이다.
+    **두 키 공간이 절대 안 만난다** — URN 에서 vanity 를 유도할 방법이 없다.
+    그래서 595명을 넣었더니 509명(86%)이 이미 있던 사람이었다.
+
+    옛 코드가 이걸 알고 `match_keys` 로 여러 키를 달았는데 우리가 하나만 달았다.
+    사람마다 URN·URL 둘 다 달아두면 어느 쪽으로 와도 잡힌다.
+    """
+    out = []
+    urn = canonical_urn(str(item.get("id") or "")) or str(item.get("id") or "")
+    if urn:
+        out.append(urn)
+    for u in (item.get("linkedinUrl"), item.get("publicIdentifier")):
+        if not u:
+            continue
+        raw = str(u)
+        k = normalize_url(raw if "linkedin.com" in raw else f"linkedin.com/in/{raw}")
+        if k and k not in out:
+            out.append(k)
+    return out
+
+
 def is_present(exp: dict) -> bool:
     """진행 중인 경력인가.
 

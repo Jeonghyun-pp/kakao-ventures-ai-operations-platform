@@ -36,6 +36,12 @@ MEETING = "meeting_candidate"
 notion.register_writable(DB, "00000000-0000-0000-0000-8702f7cc7f34")
 
 TIERS = ("Catch", "Trend", "Wait", "Cut")
+
+# 🔴 재고 규칙 — 아직 슬랙에 안 나간 사람이 이만큼 남아 있으면 **더 사지 않는다.**
+#    고정 페이지로 정하면 재고가 쌓이는 걸 못 본다. 실제로 첫 실행에 590명을 넣어
+#    117일치가 쌓였고, 그 상태에서 또 사는 건 의미가 없었다.
+#    페이지 숫자를 감으로 정하는 대신 **재고가 스스로 조절하게** 한다.
+BACKLOG_CAP = 100
 _ORDER = {t: i for i, t in enumerate(TIERS)}      # 좋은 순
 
 
@@ -74,6 +80,12 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
     today = ledger.today()
     print(f"▶ collect run={run_id}")
 
+    backlog = _backlog()
+    if not only_axis and backlog >= BACKLOG_CAP:
+        print(f"· 아직 안 나간 사람이 {backlog}명 (임계 {BACKLOG_CAP}) — 더 사지 않는다")
+        print(f"  하루 5명이면 {backlog // 5}일치다. 재고가 줄면 그때 산다")
+        return 0
+
     targets = [only_axis] if only_axis else [a for a in axes.AXES if _due(a, today)]
     if not targets:
         print("· 이번 주 차례인 축이 없다")
@@ -91,8 +103,9 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
         print("  (dry-run — 돈을 쓰지 않았다)")
         return 0
 
-    seen = ledger.keys(TASK, ledger.LANDED)
-    print(f"· 장부에 이미 있는 사람 {len(seen)}명")
+    # 🔴 키 하나로 세면 안 된다 — URN 으로 온 사람과 URL 로 저장된 사람이 안 만난다
+    seen = ledger.all_keys(TASK, ledger.LANDED)
+    print(f"· 장부에 이미 있는 키 {len(seen)}개")
 
     fresh: dict[str, dict] = {}
     bought = 0
@@ -107,10 +120,11 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
             items = f.require()
             bought += len(items)
             for it in items:
-                k = profile.seen_key(it)
-                if not k or k in seen or k in fresh:
+                ks = profile.match_keys(it)
+                if not ks or any(x in seen for x in ks) or any(x in fresh for x in ks):
                     continue
-                fresh[k] = {**it, "_axis": a}
+                fresh[ks[0]] = {**it, "_axis": a, "_keys": ks}
+                seen.update(ks)          # 같은 실행 안에서도 두 번 안 잡히게
         # 커서 전진 — 착지 성공 여부와 무관하게 "여기까지 샀다"는 사실이다
         ledger.append(TASK, a, AXIS_EV, ran_on=today,
                       next_page=(1 if axes.AXES[a]["rewind"] else start + n), run=run_id)
@@ -152,6 +166,7 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
             continue
         page_id = res.require()
         ledger.append(TASK, k, ledger.LANDED, page_id=page_id, run=run_id,
+                      keys=item.get("_keys") or [k],      # 별칭 전부 — 다음에 어느 쪽으로 와도 잡힌다
                       axis=item["_axis"], tier=v["tier"], name=_summary(item)["name"])
         if v["tier"] == "Catch":
             ledger.append(TASK, k, MEETING, page_id=page_id, axis=item["_axis"])
@@ -252,6 +267,24 @@ def card(*, n: int = 5, dry_run: bool = False) -> int:
     return 0 if ok or dry_run else 1
 
 
+def _backlog() -> int:
+    """아직 슬랙에 안 나간 **사람** 수.
+
+    🔴 seed 로 넣은 옛 노션 행은 빼야 한다. 그건 과거 데이터지 나갈 후보가 아니다.
+       (실측: 안 빼면 1,819명으로 잡혀 "363일치"라는 헛소리가 나온다)
+    🔴 키가 아니라 사람을 센다 — 한 사람이 URN·URL 두 키를 갖는다.
+    """
+    carded = ledger.all_keys(TASK, CARDED)
+    n = 0
+    for r in ledger.rows(TASK, ev=ledger.LANDED):
+        if str(r.get("src", "")).startswith("seed"):
+            continue
+        ks = {str(r.get("key"))} | {str(k) for k in (r.get("keys") or [])}
+        if not (ks & carded):
+            n += 1
+    return n
+
+
 def _report() -> None:
     s = ledger.summary(TASK)
     print(f"· 장부: 오늘 {s['total_today']}줄 {s['counts']} · 총 {s['ledger_lines']}줄")
@@ -274,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
             return card(n=a.n, dry_run=a.dry_run)
         if a.cmd == "status":
             print(ledger.summary(TASK))
+            print(f"  재고(아직 안 나간 사람) {_backlog()}명 / 임계 {BACKLOG_CAP}")
             for ax in axes.AXES:
                 st = _axis_state(ax)
                 print(f"  {ax:22} 마지막 {st.get('ran_on','-')} · 다음 p{_next_page(ax)}")

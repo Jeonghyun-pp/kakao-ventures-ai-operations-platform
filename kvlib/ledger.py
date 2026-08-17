@@ -112,6 +112,21 @@ def keys(task: str, ev: str = LANDED) -> set[str]:
     return {r["key"] for r in rows(task, ev=ev) if "key" in r}
 
 
+def all_keys(task: str, ev: str = LANDED) -> set[str]:
+    """`key` 와 `keys`(별칭 목록)를 **합쳐** 돌려준다.
+
+    한 사람이 키를 여러 개 갖는 경우가 있다 — 예: 링크드인은 URN 과 URL 이 서로
+    유도되지 않아 둘 다 달아야 한다. 하나만 세면 다른 쪽으로 온 같은 사람을 놓친다.
+    """
+    out: set[str] = set()
+    for r in rows(task, ev=ev):
+        if r.get("key"):
+            out.add(str(r["key"]))
+        for k in (r.get("keys") or []):
+            out.add(str(k))
+    return out
+
+
 def has(task: str, key: str, ev: str = LANDED) -> bool:
     return str(key) in keys(task, ev)
 
