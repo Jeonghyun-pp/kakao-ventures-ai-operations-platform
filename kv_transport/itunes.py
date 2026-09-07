@@ -278,6 +278,7 @@ def lookup(app_ids: list[str]) -> Fetched:
                     "developer": it.get("artistName") or "",
                     "released_at": (it.get("releaseDate") or "")[:10],
                     "seller_url": it.get("sellerUrl") or "",
+                    "seller_name": it.get("sellerName") or "",
                     "description": it.get("description") or "",
                     "subtitle": it.get("subtitle") or "",
                     "artwork": it.get("artworkUrl512") or it.get("artworkUrl100") or "",

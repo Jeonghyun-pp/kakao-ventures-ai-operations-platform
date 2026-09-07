@@ -1,10 +1,8 @@
 ---
 name: appstore
-description: 앱스토어 25장르 × 4차트에서 6개월 이내 신규 앱을 모아 노션에 착지시키고, 그중 볼 값어치가 있는 2개를 골라 슬랙에 올린다.
+description: 앱스토어 25장르 × 4차트에서 6개월 이내 신규 한국 앱을 모아 노션에 착지시킨다.
 schedule:
   - { cmd: collect, when: "매일 09:10", why: "맥이 확실히 깨어 있는 시각. 자다 깨면 DNS 전에 발화한다" }
-  - { cmd: pick,    when: "매일 09:40", why: "수집이 끝난 뒤. 10~11시에 훑을 수 있게" }
-  - { cmd: card,    when: "매일 11:00", why: "훑은 결과가 반영된 뒤에 나간다" }
 ---
 
 # 앱스토어 소싱
@@ -12,26 +10,18 @@ schedule:
 ## 하루
 
 ```
-09:10  collect   25장르 × 4차트 → 처음 보는 앱 → 6개월 이내만 → 노션 전량 착지
-09:40  pick      claude 가 그중 2개를 골라 노션 `판정 = Pass`
-10~11  (사람)     정현님이 노션에서 훑는다. 아니다 싶으면 판정을 고친다
-11:00  card      🔴 노션에서 판정=Pass 를 **다시 읽어** 슬랙 카드
+09:10  collect   25장르 × 4차트 → 처음 보는 앱 → 6개월 이내 → 국적 필터 → 한국 앱만 노션 착지
 
 🔴 왜 9시 이후인가: 맥이 자다 깨면 launchd 가 밀린 작업을 **즉시** 발화하는데, 그때가
    DNS 가 아직 안 올라온 순간이다. 옛 시스템이 그걸로 76요청을 전멸시킨 적이 있다.
    이미 깨어 있는 시각에 돌리면 그 위험이 없다.
 ```
 
-**정현님 검토가 노션에서 일어난다.** 그래서 승인 화면을 따로 안 만든다 —
-노션이 이미 그 화면이고, `card` 가 노션을 다시 읽으니 수정이 그대로 반영된다.
-
 ## 명령
 
 ```bash
 cd ~/kv
 ./.venv/bin/python -m skills.appstore.run collect [--dry-run] [--limit N] [--genres N]
-./.venv/bin/python -m skills.appstore.run pick    [--dry-run] [-n 2]
-./.venv/bin/python -m skills.appstore.run card    [--dry-run]
 ./.venv/bin/python -m skills.appstore.run status
 ```
 

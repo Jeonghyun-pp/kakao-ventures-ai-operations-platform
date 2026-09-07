@@ -44,6 +44,12 @@ appstore:
   # 신규 판정 기준. 이보다 오래된 앱은 버린다.
   max_age_days: 180
 
+  # 국적 판정(kr_origin). 규칙을 고치면 반드시 eval 을 돌린다.
+  kr_origin:
+    hangul_foreign_max_ratio: 0.05   # L7: 한글 비율 이하면 foreign
+    min_description_length: 40        # L7: 이보다 짧으면 비율 판정 안 함
+    over_deletion_warn_ratio: 0.90    # HEALTH: 외국 비율 이 이상이면 경고
+
 http:
   # 망 계열만 재시도한다. 404·429·5xx 는 상대 서버의 답이지 망 문제가 아니다.
   # RequestException 을 통째로 잡으면 MissingSchema 같은 프로그래밍 오류까지 105초 기다렸다
@@ -90,7 +96,8 @@ claude:
   # 구독 세션에는 사용량 API 가 없다 → 호출 수를 프록시로 잰다.
   daily_calls_warn: 30
   daily_calls_block: 50
-  timeout_sec: 180             # 권한 프롬프트에 걸리면 무한정 멈춘다.
+  timeout_sec: 300             # 권한 프롬프트에 걸리면 무한정 멈춘다.
+                               # 180 은 배치 하나를 못 끝내는 일이 잦았다 (08-30·31).
   # rc 0 + 빈 출력 = 인증 만료. rc 로 성공을 판정하면 인증 만료가 ok:true 로 기록된다.
   success_is_output_not_rc: true
   # 출력은 soft 다. 스키마를 줘도 강제가 아니다 → 되읽어 검증한다.
@@ -106,5 +113,69 @@ apify:
 slack:
   # 명시 값만 억제로 인정한다. truthy 판정이면 KV_NO_SEND=0 도 "켜짐"이 된다.
   suppress_values: ["1", "true", "yes", "on"]
-  # webhook 은 ts 를 안 준다 → 반응 조회 불가. 승인은 bot 토큰 경로로.
+  # webhook 은 ts 를 안 준다 → 반응 조회 불가. 그래서 2026-08-18 에 bot API 로 옮겼다.
   webhook_returns_ts: false
+  # 🔴 실패해도 HTTP 200 을 준다. 본문의 ok 로 판정해야 한다.
+  failure_is_http_200: true
+  # 봇에 부여된 스코프(실측 08-18): incoming-webhook · groups:history · channels:history · chat:write
+  # reactions:read 가 없어 reactions.list 는 못 쓴다 → conversations.history 로 읽는다.
+  reactions_via_history: true
+  # 승인 어휘. 아무나 눌러도 인정한다 [사용자 결정 2026-08-18] —
+  # 정현님이 심사역 대신 누르는 경우가 있다.
+  reaction_no: [x, heavy_multiplication_x, negative_squared_cross_mark, no_entry_sign]
+  reaction_yes: [white_check_mark, o, heavy_check_mark, ok_hand, "+1"]
+  # 반응이 없을 때. 만기는 저장하지 않고 게시일(KST)에서 매번 센다.
+  followup_days: 7            # 무반응이면 거절 메일 초안 + 아카이브
+  followup_warn_days: 6       # 그 하루 전에 스레드로 예고한다
+  # 🔴 반응을 **못 읽는** 상태가 이만큼 이어지면 대기에서 뺀다. 미상은 "반응이 없다"가
+  #    아니라 "판단이 안 섰다"라 만기 시계가 안 간다 — 메시지가 지워지거나 채널이
+  #    어긋나면 그 대기가 영원해진다. 실측 2026-08-18: 두 건이 13일간 매 10분
+  #    종료코드 1 을 냈고, 그 사이 진짜 고장이 났어도 그 빨간불에 묻혔을 것이다.
+  followup_unreachable_days: 3
+
+gmail:
+  # [0] 실측 근거는 ~/kv-automation/skills/mail-harness — 아래 숫자는 전부 그쪽에서
+  # 사고를 겪고 정해진 값이다. 옛 시스템은 이 값들이 config.yaml·rules.py 상수·
+  # metrics.py 상수 셋에 흩어져 있었고, 그래서 문서와 코드가 어긋난 항목이 생겼다.
+  token_refresh_lead_sec: 60   # access_token 은 1시간. 만료 후 갱신은 401 한 번을 낭비한다.
+  scan:
+    lookback_days: 14
+    max_results: 100           # list 는 id 만 준다 → 건마다 get 이 한 번 더 붙는다 (N+1).
+  mass_blast_recipients: 20    # To+Cc+Bcc 합. 이 이상이면 대량 발송으로 본다.
+  korean_ratio_threshold: 0.15  # webflow 회신 언어 판별. ko/(ko+en) 글자 비율.
+  named_partner_body_chars: 1500  # 심사역 지명은 본문 앞부분에만 있다. 뒤는 인용문이다.
+  body_chars_for_judge: 2500   # claude 에 넘기는 본문 상한.
+  subject_chars_for_judge: 300
+  # 🔴 50 은 너무 컸다. 한 통이 제목 300 + 본문 2500 자라 배치가 140k 자에 달했고,
+  #    180초 안에 못 끝냈다 — 2026-08-30·31 plan 이 연속으로 claude:timeout 으로 죽었다.
+  #    게다가 배치가 하나뿐이면 그 하나가 죽을 때 **부분 결과조차 없다**
+  #    (judge.py: 첫 배치 실패면 통째로 미상). 쪼개면 앞 배치는 살아남는다.
+  # 계획이 이보다 오래되면 apply 가 Degraded 로 끝난다. 실행이 위험해서가 아니라
+  # (항목마다 다시 본다) **오늘 plan 이 안 돌았다**는 신호를 묻지 않기 위해서다.
+  plan_stale_hours: 12
+  judge_batch: 15
+  # 무수정 발송률 — 자동 발송 승격의 **유일한** 근거다.
+  promote:
+    rate: 0.95
+    window_days: 21
+    min_samples: 5             # 🔴 옛 시스템은 이 값이 문서에만 있고 코드에 없었다.
+                               #    표본 1건이 100% 면 승격을 통과해버린다.
+  unmodified_similarity: 0.98  # difflib ratio. 이 이상이면 사람이 안 고치고 보냈다고 본다.
+  watch_expire_days: 30        # 이 기간 안에 안 나가면 표본에서 뺀다 (안 보낸 것도 신호다).
+  unknown_alert_ratio: 0.30    # 한 실행의 UNKNOWN 비율이 이를 넘으면 분류기 이상이다.
+  # 분류와 무관하게 **영원히** 사람이 보낸다. 무수정률이 100% 여도 승격 대상이 아니다.
+  never_auto_send: [PARTNERSHIP_DECLINE, TRUSTED_REF, RECRUIT, IMPERSONATION]
+
+linkedin:
+  # 🔴 링크드인 연결 요청에 붙이는 메모의 글자 상한. 플랫폼이 정하고 우리가 못 넘긴다.
+  #    이미 연결된 사이면 일반 메시지라 상한이 사실상 없어, 두 벌을 다 만든다.
+  connect_note_chars: 300
+  outreach_batch: 10          # claude 한 번에 넣는 인원
+  # 🔴 ✅ 를 못 받은 사람의 만기. 없으면 대기줄이 영원히 자란다 —
+  #    실측 2026-08-31: 31명이 쌓여 followup 로그가 83KB 가 됐고, 매 10분
+  #    "✅ 없음 (대기 31명)" 만 찍었다. 반응 지연 실측(11명)은 중앙값 당일 ·
+  #    10명이 3일 안이라 7일이면 사실상 답이 나온 것이다. 메일과 같은 값으로 맞춘다.
+  followup_days: 7
+  # 🔴 남은 재고가 이 일수 이하면 미리 알린다. 로그는 "남으면 3일 더"라고 세고
+  #    있었는데 그 숫자가 사람에게 간 적이 없어, 0 이 된 걸 닷새 뒤에 알았다.
+  stock_warn_days: 3

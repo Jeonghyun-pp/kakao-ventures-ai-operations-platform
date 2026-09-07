@@ -1,11 +1,6 @@
-"""앱스토어 스킬 — 진입점 셋.
+"""앱스토어 스킬 — 수집 → 국적 필터 → 노션 착지.
 
-    collect   07:00  25장르 × 4차트 수집 → 후보 추출 → 노션 착지 → 장부 기록
-    pick      08:30  claude 가 후보 중 2개 선정 → 판정=Pass 표시
-    card      10:00  🔴 노션에서 판정=Pass 를 **다시 읽어** 슬랙 카드
-
-사람이 09~10시에 노션에서 판정을 고치면 card 가 그걸 반영한다.
-별도 승인 화면을 만들지 않는 이유가 이거다 — 노션이 이미 그 화면이다.
+    collect   09:10  25장르 × 4차트 수집 → 6개월 컷 → 국적 필터(규칙+LLM) → 한국 앱만 착지
 
 ## 지키는 규율
 
@@ -21,12 +16,11 @@ import sys
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from kvlib import Fetched, constraints
-
+from kvlib import constraints
 from kvlib import ledger, lock
-from kv_transport import itunes, notion, slack
+from kv_transport import itunes, notion
 
-from . import card as card_fmt, judge
+from . import kr_origin
 
 # 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.** 통로는 명단을 안 들고 있다.
 notion.register_writable("ch_앱스토어", "00000000-0000-0000-0000-30deea8edcc5")
@@ -52,7 +46,15 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
     print(f"▶ collect run={run_id}")
 
     seen_before = ledger.keys(TASK, ledger.LANDED)
-    print(f"· 장부에 이미 있는 앱 {len(seen_before)}개")
+    notion_existing = notion.query(notion.writable_id(DB), ["App ID"])
+    if notion_existing.is_measured:
+        notion_ids = {r["App ID"] for r in notion_existing.require() if r.get("App ID")}
+        gap = notion_ids - seen_before
+        seen_before |= notion_ids
+        print(f"· 기존 앱 {len(seen_before)}개 (장부 {len(seen_before) - len(gap)} + 노션에만 {len(gap)})")
+    else:
+        print(f"⚠️  노션 기존 앱 조회 실패: {notion_existing.reason} — 장부만으로 중복 판정")
+        print(f"· 장부에 이미 있는 앱 {len(seen_before)}개")
 
     genres = _GENRES[:limit_genres] if limit_genres else _GENRES
     targets = [(g, c) for g in genres for c in _CHARTS] + [(None, "new")]
@@ -111,10 +113,60 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
              if details[aid]["released_at"] and _d(details[aid]["released_at"]) >= cutoff}
     print(f"· 출시일 미상 {len(lost)} 제외 · 6개월 초과 {len(found) - len(fresh)} 제외 → 후보 {len(fresh)}개")
 
+    # ---- 국적 필터
+    origins: dict[str, tuple[str, str]] = {}
+    foreign_by_rule = []
+    unknowns_for_llm = []
+    for aid in list(fresh):
+        d = details[aid]
+        verdict, reason = kr_origin.classify(
+            d.get("seller_name", ""), d.get("seller_url", ""),
+            d.get("name", ""), d.get("description", ""))
+        origins[aid] = (verdict, reason)
+        if verdict == "foreign":
+            foreign_by_rule.append(aid)
+        elif verdict == "unknown":
+            unknowns_for_llm.append({
+                "app_id": aid,
+                "seller_name": d.get("seller_name", ""),
+                "app_name": d.get("name", ""),
+                "description": d.get("description", ""),
+            })
+
+    for aid in foreign_by_rule:
+        fresh.pop(aid, None)
+    print(f"· 국적 필터(규칙): foreign {len(foreign_by_rule)} 제거 · unknown {len(unknowns_for_llm)} → LLM")
+
+    if unknowns_for_llm:
+        llm_result = kr_origin.llm_judge_origin(unknowns_for_llm)
+        if llm_result.is_measured:
+            llm_foreign = 0
+            for item in llm_result.require():
+                origins[item["app_id"]] = (item["verdict"], item["reason"])
+                if item["verdict"] == "foreign":
+                    fresh.pop(item["app_id"], None)
+                    llm_foreign += 1
+            print(f"· 국적 필터(LLM): foreign {llm_foreign} 추가 제거")
+        else:
+            print(f"  ⚠️  국적 LLM 실패: {llm_result.reason} — unknown 은 그대로 착지")
+
+    health_results = [(v, r) for v, r in origins.values()]
+    for warn in kr_origin.check_health(health_results, len(origins)):
+        print(f"  ⚠️  {warn}")
+
+    print(f"· 국적 필터 후 후보 {len(fresh)}개")
+
     if dry_run:
         for aid, v in list(fresh.items())[:10]:
             d = details[aid]
-            print(f"    {d['released_at']}  {d['name'][:30]:30} · {d['developer'][:20]:20} · {d.get('seller_url','')[:40]}")
+            ov, oreason = origins.get(aid, ("?", ""))
+            print(f"    {d['released_at']}  {d['name'][:30]:30} · {ov:7} · {d.get('seller_url','')[:40]}")
+        if foreign_by_rule:
+            print(f"  제거된 외국 앱 (규칙, 앞 5개):")
+            for aid in foreign_by_rule[:5]:
+                d = details[aid]
+                _, oreason = origins.get(aid, ("", ""))
+                print(f"    ✗ {d['name'][:30]:30} · {oreason}")
         print(f"  (dry-run — 착지하지 않았다. 후보 {len(fresh)}개)")
         return 0
 
@@ -124,14 +176,16 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
         print(f"  (--limit {limit} — 앞의 {len(fresh)}개만 착지한다)")
     landed = failed = 0
     for aid, v in fresh.items():
-        props = _props(aid, v, details[aid], run_id)
+        origin = origins.get(aid, ("unknown", ""))
+        props = _props(aid, v, details[aid], run_id, origin=origin)
         res = notion.create(DB, props)
         if not res.is_measured:
             failed += 1
             print(f"  ✗ {aid} 착지 실패: {res.reason}")
             continue
         ledger.append(TASK, aid, ledger.LANDED, page_id=res.require(), run=run_id,
-                      name=details[aid]["name"], released=details[aid]["released_at"])
+                      name=details[aid]["name"], released=details[aid]["released_at"],
+                      origin=origin[0])
         landed += 1
 
     print(f"· 착지 {landed} · 실패 {failed}")
@@ -145,7 +199,8 @@ def _d(s: str) -> date:
     return datetime.strptime(s[:10], "%Y-%m-%d").date()
 
 
-def _props(aid: str, v: dict, d: dict, run_id: str) -> dict:
+def _props(aid: str, v: dict, d: dict, run_id: str,
+           origin: tuple[str, str] = ("unknown", "")) -> dict:
     genre_name = itunes.GENRE_NAMES.get(v.get("genre"), "전체")
     chart_label = itunes.CHART_LABEL.get(v["chart"], v["chart"])
     entry = "new_release" if v["chart"] == "new" else "chart_new"
@@ -168,67 +223,11 @@ def _props(aid: str, v: dict, d: dict, run_id: str) -> dict:
         "Artwork": d.get("artwork") or None,
         "Rating": d.get("rating"),
         "Review Count": d.get("review_count"),
-        "Match Reason": f"{genre_name} · {chart_label} {v.get('rank')}위",
+        "Match Reason": f"{genre_name} · {chart_label} {v.get('rank')}위 · 국적 {origin[0]}({origin[1][:40]})",
         "Captured At": ledger.today(),   # 로컬(KST) — 사람이 보는 날짜와 맞춘다
         "Run ID": run_id,
         "주차": f"{iso.year}-W{iso.week:02d}",
     }
-
-
-# ---------------------------------------------------------------- pick
-
-def pick(*, n: int = 2, dry_run: bool = False) -> int:
-    """오늘 착지분 중 claude 가 n 개를 고른다."""
-    rows = [r for r in ledger.rows(TASK, ev=ledger.LANDED, day=ledger.today()) if r.get("page_id")]
-    if not rows:
-        print("· 오늘 착지분이 없다 — 고를 것이 없다")
-        return 0
-    print(f"▶ pick — 오늘 후보 {len(rows)}개 중 {n}개")
-
-    picked = judge.pick_apps(rows, n=n)
-    if not picked.is_measured:
-        print(f"🔴 선정 실패: {picked.reason}")
-        return 1
-    chosen = picked.require()
-    if dry_run:
-        for c in chosen:
-            print(f"    {c['key']}  {c['reason'][:80]}")
-        return 0
-
-    for c in chosen:
-        row = next((r for r in rows if r["key"] == c["key"]), None)
-        if not row:
-            continue
-        res = notion.update(row["page_id"], DB, {"판정": "Pass"})
-        if not res.is_measured:
-            print(f"  ✗ {c['key']} 표시 실패: {res.reason}")
-            continue
-        ledger.append(TASK, c["key"], ledger.PICKED, page_id=row["page_id"], reason=c["reason"])
-        print(f"  ✓ {c['key']} · {c['reason'][:60]}")
-
-    slack.notify_owner(f"앱스토어 후보 {len(chosen)}개 골라뒀습니다 — 10시 전에 훑어주세요")
-    return 0
-
-
-# ---------------------------------------------------------------- card
-
-def card(*, dry_run: bool = False) -> int:
-    """🔴 노션에서 판정=Pass 를 다시 읽는다 — 사람이 고친 게 여기서 반영된다."""
-    todays = {r["key"]: r for r in ledger.rows(TASK, ev=ledger.LANDED, day=ledger.today())}
-    if not todays:
-        print("· 오늘 착지분이 없다")
-        return 0
-    f = notion.query(notion.writable_id(DB), ["App ID", "판정", "서비스명", "Developer", "One Liner", "Homepage"])
-    if not f.is_measured:
-        print(f"🔴 노션을 못 읽었다: {f.reason}")
-        return 1
-    passed = [r for r in f.require()
-              if r.get("판정") == "Pass" and str(r.get("App ID") or "") in todays]
-    print(f"▶ card — 오늘 착지 {len(todays)} 중 Pass {len(passed)}")
-    if not passed:
-        print("· Pass 가 없다 — 카드를 안 보낸다")
-        return 0
-    return 0 if card_fmt.send(passed, dry_run=dry_run) else 1
 
 
 # ---------------------------------------------------------------- 보고
@@ -246,18 +245,12 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("collect"); c.add_argument("--dry-run", action="store_true")
     c.add_argument("--genres", type=int); c.add_argument("--limit", type=int)
-    k = sub.add_parser("pick"); k.add_argument("--dry-run", action="store_true"); k.add_argument("-n", type=int, default=2)
-    d = sub.add_parser("card"); d.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
     a = p.parse_args(argv)
     try:
         if a.cmd == "collect":
             with lock.hold("appstore-collect"):
                 return collect(dry_run=a.dry_run, limit_genres=a.genres, limit=a.limit)
-        if a.cmd == "pick":
-            return pick(n=a.n, dry_run=a.dry_run)
-        if a.cmd == "card":
-            return card(dry_run=a.dry_run)
         if a.cmd == "status":
             print(ledger.summary(TASK))
             return 0
