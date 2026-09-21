@@ -262,6 +262,43 @@ def status(con) -> str:
             f" · 정답 {c('SELECT count(*) FROM judgments WHERE run=?', HUMAN)}")
 
 
+def _send_section(con, since: str) -> list[str]:
+    """자동 회신의 후보와 제외, 그리고 갈래를 **켜도 되는지**. 🔴 승격 원칙은 gmail.promote 그대로다 —
+    기간 안에 사람 정답이 붙은 표본이 min_samples 이상이고 분류 일치율이 rate 이상일 때만 "켜도 된다"고 말한다."""
+    try:
+        rows = con.execute("SELECT a.message_id, a.status, a.detail, a.created, m.subject FROM actions a"
+                           " JOIN messages m ON m.id=a.message_id WHERE a.kind='send' ORDER BY a.created DESC").fetchall()
+    except sqlite3.OperationalError:
+        return ["아직 없음"]
+    out, p = [], constraints.get("gmail.promote")
+    floor = (datetime.now(timezone.utc) - timedelta(days=p["window_days"])).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cats = sorted({json.loads(r["detail"]).get("category") for r in rows if r["status"] != "skipped"})
+    for cat in cats:
+        ids = [r["message_id"] for r in rows if r["status"] != "skipped" and r["created"] >= floor
+               and json.loads(r["detail"]).get("category") == cat]
+        marks = con.execute(f"SELECT category FROM judgments WHERE run=? AND message_id IN ({','.join('?' * len(ids))})",
+                            (HUMAN, *ids)).fetchall() if ids else []
+        hit = sum(1 for (c,) in marks if c == cat)
+        rate = hit / len(marks) if marks else 0
+        ok = len(marks) >= p["min_samples"] and rate >= p["rate"]
+        on = cat in constraints.get("mail_observe.send_branches")
+        out.append(f"- `{cat}` 후보 {len(ids)}통 · 사람 정답 {len(marks)}/{p['min_samples']} · 일치 {rate:.0%} (기준 {p['rate']:.0%})"
+                   f" → **{'켜져 있다' if on else '켜도 된다' if ok else '아직'}**")
+    recent = [r for r in rows if r["created"] >= since]
+    why = {}
+    for r in recent:
+        d = json.loads(r["detail"])
+        if r["status"] == "skipped":
+            why[d.get("why", "")] = why.get(d.get("why", ""), 0) + 1
+    out += ["", f"이번 보고 기간: 발송 {sum(r['status'] == 'done' for r in recent)} · 보냈을 것 {sum(r['status'] == 'dry' for r in recent)}"
+                f" · 제외 {sum(r['status'] == 'skipped' for r in recent)}"
+                + (" (" + " · ".join(f"{k} {v}" for k, v in why.items()) + ")" if why else ""), ""]
+    out += [f"- {'✅ 발송' if r['status'] == 'done' else '보냈을 것'} → {json.loads(r['detail']).get('to')} · {str(r['subject'])[:60]}"
+            f" · `{r['message_id']}`" + (f"  ⛔ {json.loads(r['detail'])['blocked']}" if json.loads(r['detail']).get('blocked') else "")
+            for r in recent if r["status"] in ("done", "dry", "failed", "sending")] or ["없음"]
+    return out
+
+
 def report(con, since: str) -> tuple[str, str]:
     """`since`(UTC ISO) 뒤에 판정된 메일. (파일에 쓸 전체 보고서, 슬랙에 올릴 짧은 요약).
 
@@ -302,6 +339,7 @@ def report(con, since: str) -> tuple[str, str]:
     md = [f"# 메일 관찰 보고 — {since} 이후", "", head, "", f"{status(con)}", "", "## 🚩 먼저 볼 것", ""]
     md += [f"- **{why}** · `{r['c']}` · {cell(r['subject'])[:70]}  \n  {cell(r['reason'])}  \n  `{r['id']}` · {r['sender']}"
            for r, why in flagged] or ["없음"]
+    md += ["", "## 📤 보냈을 메일 (폼 안내)", ""] + _send_section(con, since)
     md += ["", "## 전체", "", "| 날짜 | 분류 | 후속 | 규칙 | 현행 | 제목 | 발신 | 이유 | id |", "|---|---|---|---|---|---|---|---|---|"]
     md += [f"| {when(r['internal_ms'])} | `{r['c']}` | {r['f'] or ''} | {r['rc'] or ''} | {legacy.get(r['id'], '')} "
            f"| {cell(r['subject'])[:60]} | {r['sender']} | {cell(r['reason'])[:160]} | `{r['id']}` |" for r in rows]
@@ -448,7 +486,8 @@ def main(a) -> int:
         r = f.advance()
         f.close()
         if any(r.values()):
-            print(f"  · 판단 흐름: 새로 물음 {r['asked']} · 결정 {r['decided']} · 인수 {r['acked']} · 리마인드 {r['reminded']}"
+            print(f"  · 회신: 발송 {r['sent']} · 보냈을 것 {r['would_send']} · 제외 {r['skipped']}"
+                  f" | 판단 흐름: 새로 물음 {r['asked']} · 결정 {r['decided']} · 인수 {r['acked']} · 리마인드 {r['reminded']}"
                   f" · 결정 대기 {r['waiting']} · 맡을 사람 대기 {r['unclaimed']}"
                   f" | 밖으로 나가는 문 {constraints.get('mail_observe.outbound')}")
         out = paths.data("mail", "reports") / f"{ledger.today()}.md"

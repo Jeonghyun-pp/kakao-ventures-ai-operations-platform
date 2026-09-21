@@ -180,6 +180,42 @@ class Report(unittest.TestCase):
         self.assertIn("| `k` |", md)                                       # 전체 표에 id 가 있어야 label 을 칠 수 있다
 
 
+class Promotion(unittest.TestCase):
+    """🔴 갈래를 "켜도 된다"고 말하는 기준은 gmail.promote 그대로다 — 표본 하한 없이 100% 가 통과하던 옛 사고를 되풀이하지 않는다."""
+
+    def setUp(self):
+        self.con = observe.connect(":memory:")
+        self.addCleanup(self.con.close)
+        self.con.executescript("CREATE TABLE actions(message_id TEXT, kind TEXT, status TEXT, detail TEXT, created TEXT,"
+                               " PRIMARY KEY(message_id, kind));")
+        for i in range(6):
+            self.con.execute("INSERT INTO messages(id, subject) VALUES(?, ?)", (f"m{i}", "투자 문의"))
+            self.con.execute("INSERT INTO actions VALUES(?, 'send', 'dry', ?, ?)",
+                             (f"m{i}", '{"to": "f@example.com", "category": "INBOUND_KO"}', observe._now()))
+
+    def line(self):
+        return next(x for x in observe._send_section(self.con, "2000-01-01T00:00:00Z") if x.startswith("- `INBOUND_KO`"))
+
+    def label(self, i, cat):
+        observe._save(self.con, f"m{i}", observe.HUMAN, "", "", "", {"ok": 1, "category": cat})
+
+    def test_one_perfect_sample_is_not_enough(self):
+        self.label(0, "INBOUND_KO")
+        self.assertIn("사람 정답 1/5", self.line())
+        self.assertIn("**아직**", self.line())
+
+    def test_enough_matching_samples(self):
+        for i in range(5):
+            self.label(i, "INBOUND_KO")
+        self.assertIn("**켜도 된다**", self.line())
+
+    def test_one_wrong_in_six_is_below_the_rate(self):
+        for i in range(5):
+            self.label(i, "INBOUND_KO")
+        self.label(5, "VENDOR_PITCH")                                       # 6건 중 5건 = 83% < 95%
+        self.assertIn("**아직**", self.line())
+
+
 class Backup(unittest.TestCase):
     def test_backup_of_open_db_restores(self):
         with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):

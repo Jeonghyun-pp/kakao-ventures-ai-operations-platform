@@ -96,6 +96,26 @@ sqlite3 ~/kv-data/mail/db/mail.sqlite "SELECT message_id, kind, status FROM acti
 ./.venv/bin/python -m skills.mail.run observe --op decide --id <메일id> --decision yes|no     # 슬랙 없이 결정을 넣어 본다
 ```
 
+### 폼 안내 자동 회신 (flow.reply_all) — 🔴 세 겹으로 닫혀 있다
+
+콜드 투자 문의(`INBOUND_KO`·`INBOUND_EN`)에 승인된 템플릿(`inbound_form_ko/en`)을 보낸다. 정책은 현행 `route.decide()` 그대로다.
+신뢰 경로·제휴 거절·채용·사칭은 `gmail.never_auto_send` 라 여기 오지 않는다.
+
+```
+실제로 나가려면 셋이 다 열려야 한다                                     지금
+  mail_observe.outbound: "on"                                        "off"
+  mail_observe.send_branches 에 그 카테고리                            []
+  check_intent A8 — 발송 코드는 kv_transport/gmail_send.py 한 줄,        통과
+                    그 모듈을 import 하는 곳은 flow.py 뿐
+```
+제외되는 것(다시 안 본다): 후속·재문의 · 보낼 수 없는 수신자 · 같은 수신자에게 이미 · 대화가 이미 진행.
+문이 열려도 막히는 것(다음 실행에 다시 본다): 현행 장부에 그 메일이 있다 · **지금 실제** 스레드가 움직였다 · 하루 상한(`send_per_day`).
+초안을 만들고 **그 초안을** 보낸다 — 보낸 초안은 사라지므로 같은 메일이 두 번 못 나가고, 실패하면 초안이 남아 사람이 보낼 수 있다.
+
+🔴 **켜기 전에**: 현행 plan/apply 가 같은 메일에 매일 09:30 폼 안내 **초안**을 만든다. 새 흐름이 발송까지 하면 사람이 그 초안도 눌러
+같은 안내가 두 번 갈 수 있다 → 갈래를 켜는 날 현행의 그 갈래를 끈다. 매일 보고의 "보냈을 메일" 절에 갈래별로
+"사람 정답 n/5 · 일치 m% → 아직/켜도 된다"가 나온다 — `gmail.promote` 의 기준 그대로다. 정답은 `--op label` 로 단다.
+
 replay 는 기준 파일의 해시로 run 이름(`r-<sha>`)을 만든다. 같은 기준으로 다시 부르면 이어서 하고,
 기준을 고치면 새 run 이 된다. 운영 판정(`live`)은 어떤 경우에도 안 바뀐다.
 
