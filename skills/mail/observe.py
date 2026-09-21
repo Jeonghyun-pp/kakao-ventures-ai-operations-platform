@@ -321,8 +321,7 @@ def run_once(con, reader, llm, *, days: int, max_judge: int | None, no_judge: bo
         if c["failed"] or c["partial"]:
             rc = 2
     if not no_judge:
-        room = constraints.get("mail_observe.judge_per_day") - llm_calls_today(con)
-        cap = min(max_judge if max_judge is not None else constraints.get("mail_observe.judge_per_run"), max(room, 0))
+        cap = max_judge if max_judge is not None else constraints.get("mail_observe.judge_per_run")
         j = judge(con, llm, run=LIVE, criteria=CRITERIA.read_text(encoding="utf-8"), limit=cap)
         if j["judged"] or j["invalid"] or j["stopped"]:
             print(f"  · 판정 {j['judged']}통 · 형식 실패 {j['invalid']}"

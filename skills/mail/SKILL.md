@@ -55,7 +55,7 @@ A8 은 `/send` 를 잡되 `/drafts` 는 통과시킨다.
 
 ```bash
 ./.venv/bin/python -m skills.mail.run observe                      # 새 메일 수집 → 분류 → 하루 한 번 백업
-./.venv/bin/python -m skills.mail.run observe --days 14            # 밀린 날을 거슬러 수집 (분류는 하루 상한만큼씩)
+./.venv/bin/python -m skills.mail.run observe --days 14            # 밀린 날을 거슬러 수집
 ./.venv/bin/python -m skills.mail.run observe --op status
 ./.venv/bin/python -m skills.mail.run observe --op diff                       # live ↔ 현행 plan 의 카테고리
 ./.venv/bin/python -m skills.mail.run observe --op replay --limit 30          # 고친 기준을 저장된 메일에 다시 적용
