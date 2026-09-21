@@ -152,10 +152,6 @@ class Webflow(unittest.TestCase):
     def test_as_message_none_when_no_address(self):
         self.assertIsNone(rules.webflow_as_message(msg(body="문의 유형 : 기타 문의\n주소 없음\n")))
 
-    def test_korean_ratio(self):
-        self.assertEqual(rules.korean_ratio(""), 0.0)
-        self.assertEqual(rules.korean_ratio("가나다abc"), 0.5)
-
 
 if __name__ == "__main__":
     unittest.main()

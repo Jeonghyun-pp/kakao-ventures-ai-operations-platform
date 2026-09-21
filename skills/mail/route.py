@@ -169,43 +169,14 @@ def _fwd(note: str) -> str:
 
 
 def _webflow(msg: dict) -> dict:
-    """웹플로우 갈래. **전부 forward.**"""
-    form = rules.parse_webflow(msg.get("body") or "")
-    kind = form["kind"]
-    to = form["reply_to"]
-    blob = f"{form['title']} {form['content']}"
+    """웹플로우 폼인데 **문의자 주소를 본문에서 못 찾은** 경우. 여기 오는 건 그것뿐이다.
 
-    if not to:
-        return {"action": "escalate",
-                "note": "웹플로우 문의자 주소를 본문에서 못 찾았다 — 주소를 추측하면 반송된다"}
-
-    ko = rules.korean_ratio(blob) >= constraints.get("gmail.korean_ratio_threshold")
-
-    if "투자" in kind:
-        return {"action": "forward", "to": to,
-                "body": tpl("webflow_invest_ko" if ko else "webflow_invest_en", google_form=GOOGLE_FORM),
-                "note": f"웹플로우 투자 문의 → 문의자({to})"}
-    if "멘토링" in kind:
-        # 🔴 [사용자 결정 2026-08-18] 회신하지 않고 아카이빙한다.
-        #    오피스아워가 '22년 하반기부터 중단된 상태라 안내할 내용이 없다.
-        #    대가: 멘토링을 물어본 사람은 아무 답도 못 받는다. 재개되면 되살릴 자리다.
-        return {"action": "archive", "note": f"웹플로우 멘토링 문의 — 회신 없이 아카이빙 ({to})"}
-    if "TIPS" in kind.upper() or "팁스" in kind:
-        return {"action": "forward", "to": to, "body": tpl("webflow_tips", google_form=GOOGLE_FORM),
-                "note": f"웹플로우 TIPS 문의 → 문의자({to})"}
-    if "섭외" in kind:
-        return {"action": "forward", "to": SLACK_BPLAN,
-                "body": _fwd(f"웹플로우 섭외 문의입니다 (문의자 {to})"),
-                "note": "웹플로우 섭외 → #Squad-비플랜"}
-
-    # 🔴 유형이 우리 갈래 밖이어도(예: '기타 문의') 내용은 대개 분명하다 —
-    #    실측: '기타 문의'로 온 Times Higher Education 강연 초청.
-    #    사람에게 보내되 **절대 sender 에게 답장하지 않는다**(no-reply 라 반송된다).
-    #    그래서 claude 에게 넘기지 않고 여기서 슬랙으로 보낸다 — 어떤 분류가 나오든
-    #    문의자에게 답장이 가는 경로를 만들지 않기 위해서다.
-    return {"action": "forward", "to": SLACK_BPLAN,
-            "body": _fwd(f"홈페이지 문의가 왔는데 유형이 '{kind}' 입니다 (문의자 {to})"),
-            "note": f"웹플로우 '{kind}' → #Squad-비플랜"}
+    주소를 찾은 폼은 `run.plan()` 이 문의자가 보낸 메일로 바꿔 claude 에게 넘긴다(2026-09-02) — 유형별 분기는
+    그날부터 도달하지 않아 걷어냈다(2026-09-21). 그 분기들에 있던 결정은 SKILL.md '웹플로우 문의 유형별 결정'에 옮겼다.
+    🔴 no-reply 주소로는 **절대 답장하지 않는다**(550 반송). 주소를 추측하지도 않는다 — 사람에게 올린다.
+    """
+    return {"action": "escalate",
+            "note": "웹플로우 문의자 주소를 본문에서 못 찾았다 — 주소를 추측하면 반송된다"}
 
 
 def decide(msg: dict, hit: dict) -> dict:

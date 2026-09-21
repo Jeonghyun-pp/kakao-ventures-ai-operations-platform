@@ -133,13 +133,6 @@ _NAME_MARKER = r"(?:님|씨|께|\s*심사역|\s*파트너|\s*대표|\s*앞)"
 
 # ---------------------------------------------------------------- 보조
 
-def korean_ratio(text: str) -> float:
-    """한글/(한글+영문) 글자 비율. webflow 회신 언어를 고르는 데 쓴다."""
-    ko = len(re.findall(r"[가-힣]", text or ""))
-    en = len(re.findall(r"[A-Za-z]", text or ""))
-    return ko / (ko + en) if (ko + en) else 0.0
-
-
 def parse_webflow(body: str) -> dict:
     """웹플로우 폼 본문에서 문의 유형·문의자 주소·제목·내용을 뽑는다.
 
