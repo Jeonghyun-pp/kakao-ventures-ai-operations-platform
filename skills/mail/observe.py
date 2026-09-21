@@ -99,7 +99,7 @@ def collect(con, reader, *, days: int) -> dict:
     new = [i for i in ids.require() if i not in known]
     own = {a.lower() for a in constraints.get("mail_observe.own_addresses")}
     got = failed = 0
-    for mid in new[:constraints.get("mail_observe.fetch_per_run")]:
+    for mid in new:
         f = reader.message(mid)
         if not f.is_measured:
             failed += 1
@@ -123,8 +123,7 @@ def collect(con, reader, *, days: int) -> dict:
                     (m["id"], m["thread_id"], m["internal_date"], direction, sender, subject,
                      cat, hit.get("why"), kind, json.dumps(m, ensure_ascii=False), _now()))
         got += 1
-    return {"listed": len(ids.require()), "new": len(new), "stored": got, "failed": failed,
-            "partial": ids.partial, "left": max(0, len(new) - got - failed)}
+    return {"listed": len(ids.require()), "stored": got, "failed": failed, "partial": ids.partial}
 
 
 # ---------------------------------------------------------------- 분류
@@ -189,7 +188,7 @@ def _save(con, mid, run, sha, text, raw, p) -> None:
         (mid, run, sha, text, raw, p.get("category"), p.get("reason"), p.get("followup"), p["ok"], p.get("error"), _now()))
 
 
-def judge(con, llm, *, run: str, criteria: str, limit: int, since_ms: int = 0) -> dict:
+def judge(con, llm, *, run: str, criteria: str, limit: int = -1) -> dict:
     """아직 그 run 의 판정이 없는 받은 메일을 최신 순으로. 한 통에 한 번 부른다.
 
     `llm(prompt, system) -> str`. 호출 자체가 실패하면(인증 만료·차단선·타임아웃) **그 실행은 멈춘다** —
@@ -204,10 +203,10 @@ def judge(con, llm, *, run: str, criteria: str, limit: int, since_ms: int = 0) -
                                                   "reason": f"규칙: {r['rule_why']}", "followup": "no"})
     rows = con.execute(
         "SELECT m.* FROM messages m LEFT JOIN judgments j ON j.message_id=m.id AND j.run=?"
-        " WHERE m.direction='in' AND m.internal_ms>=? AND (j.message_id IS NULL OR (j.ok=0 AND j.attempts<?))"
+        " WHERE m.direction='in' AND (j.message_id IS NULL OR (j.ok=0 AND j.attempts<?))"
         f" AND NOT coalesce({_IS_STRUCTURAL}, 0)"                                # 구조 규칙 몫은 replay 에서도 모델에 안 보낸다
         " ORDER BY m.internal_ms DESC LIMIT ?",
-        (run, since_ms, constraints.get("mail_observe.judge_attempts_max"), *STRUCTURAL, limit)).fetchall()
+        (run, constraints.get("mail_observe.judge_attempts_max"), *STRUCTURAL, limit)).fetchall()
     done = bad = 0
     for r in rows:
         text = build_input(con, r, criteria)
@@ -219,12 +218,6 @@ def judge(con, llm, *, run: str, criteria: str, limit: int, since_ms: int = 0) -
         _save(con, r["id"], run, sha, text, raw, p)
         done, bad = done + p["ok"], bad + (1 - p["ok"])
     return {"judged": done, "invalid": bad, "stopped": None}
-
-
-def llm_calls_today(con) -> int:
-    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")        # claude 통로의 하루도 UTC 다
-    return con.execute("SELECT coalesce(sum(attempts),0) FROM judgments WHERE input_text!='' AND created>=?",
-                       (day,)).fetchone()[0]
 
 
 # ---------------------------------------------------------------- 보기
@@ -266,8 +259,7 @@ def status(con) -> str:
             f" | 판정 {c('SELECT count(*) FROM judgments WHERE run=? AND ok=1', LIVE)}"
             f" · 형식 실패 {c('SELECT count(*) FROM judgments WHERE run=? AND ok=0', LIVE)}"
             f" · 대기 {c('SELECT count(*) FROM messages m WHERE direction=? AND NOT EXISTS(SELECT 1 FROM judgments j WHERE j.message_id=m.id AND j.run=?)', 'in', LIVE)}"
-            f" · 정답 {c('SELECT count(*) FROM judgments WHERE run=?', HUMAN)}"
-            f" | 오늘 claude {llm_calls_today(con)}회")
+            f" · 정답 {c('SELECT count(*) FROM judgments WHERE run=?', HUMAN)}")
 
 
 def report(con, since: str) -> tuple[str, str]:
@@ -301,7 +293,7 @@ def report(con, since: str) -> tuple[str, str]:
 
     cell = lambda x: str(x or "").replace("|", "/").replace("\n", " ")            # noqa: E731
     when = lambda ms: datetime.fromtimestamp((ms or 0) / 1000, timezone.utc).strftime("%m-%d")   # noqa: E731
-    flagged = [(r, flag(r)) for r in rows if flag(r)]
+    flagged = [(r, w) for r in rows if (w := flag(r))]
     dist = {}
     for r in rows:
         dist[r["c"] or "실패"] = dist.get(r["c"] or "실패", 0) + 1
@@ -371,12 +363,12 @@ def run_once(con, reader, llm, *, days: int, max_judge: int | None, no_judge: bo
         rc = 2
     else:
         if c["stored"] or c["failed"] or c["partial"]:
-            print(f"  · 수집 {c['stored']}통 (목록 {c['listed']} · 남음 {c['left']} · 실패 {c['failed']})"
+            print(f"  · 수집 {c['stored']}통 (목록 {c['listed']} · 실패 {c['failed']})"
                   + ("  🔴 목록이 상한에서 잘렸다" if c["partial"] else ""))
         if c["failed"] or c["partial"]:
             rc = 2
     if not no_judge:
-        cap = max_judge if max_judge is not None else constraints.get("mail_observe.judge_per_run")
+        cap = -1 if max_judge is None else max_judge          # 상한 없음 [사용자 결정 2026-09-21]. SQLite 의 LIMIT -1 = 전부
         j = judge(con, llm, run=LIVE, criteria=CRITERIA.read_text(encoding="utf-8"), limit=cap)
         if j["judged"] or j["invalid"] or j["stopped"]:
             print(f"  · 판정 {j['judged']}통 · 형식 실패 {j['invalid']}"
@@ -441,7 +433,7 @@ def main(a) -> int:
         if a.op == "replay":
             crit = Path(a.criteria).read_text(encoding="utf-8") if a.criteria else CRITERIA.read_text(encoding="utf-8")
             run = f"r-{criteria_sha(crit)}"
-            j = judge(con, llm, run=run, criteria=crit, limit=a.limit or constraints.get("mail_observe.judge_per_run"))
+            j = judge(con, llm, run=run, criteria=crit, limit=a.limit or -1)
             print(f"replay {run}: 판정 {j['judged']} · 형식 실패 {j['invalid']}"
                   + (f" · 🔴 멈춤: {j['stopped']}" if j["stopped"] else "") + f"\n  다음: observe --op diff --a live --b {run}")
             return 2 if j["stopped"] else 0

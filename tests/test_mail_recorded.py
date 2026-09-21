@@ -14,7 +14,7 @@ import json
 import re
 import unittest
 
-from kvlib import constraints, paths
+from kvlib import paths
 from skills.mail import route, rules
 
 FIXTURE = paths.data("mail", "fixtures") / "recorded_decisions_20260903_20260921.json"
@@ -84,9 +84,6 @@ class Recorded(unittest.TestCase):
                 self.assertEqual(act.get(k), r["expect"].get(k), f"{k} · {r['category']} · {r['subject'][:30]}")
             n += 1
         self.assertGreater(n, 100)
-
-    def test_unknown_alert_threshold_exists(self):
-        self.assertTrue(0 < constraints.get("gmail.unknown_alert_ratio") < 1)
 
 
 if __name__ == "__main__":

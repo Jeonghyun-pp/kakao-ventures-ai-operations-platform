@@ -45,7 +45,9 @@ from . import clean, route, rules                               # noqa: E402
 
 ASK = (rules.EVENT_SPEAKER, rules.TRUSTED_REF)                  # route.decide 가 'slack' 으로 보내는 갈래
 YES_DRAFT = {"trusted_ref": "trusted_direct_ko"}                # ⭕ 에 나가는 초안. event 의 ⭕ 는 사람이 잇는다(일정 조율은 범위 밖)
-MAIL_KINDS = ("draft", "archive")                               # 메일함에 쓰는 종류 — 문이 'on' 일 때만
+# 🔴 'slack' 단계에서 실제로 하는 종류 — **허용 목록**이다. 여기 없는 종류(초안·아카이브, 그리고 앞으로 생길 무엇이든)는
+#    'on' 이 아니면 기록만 한다. 금지 목록으로 두면 새 종류를 만들며 깜빡했을 때 그게 그대로 나간다.
+SLACK_KINDS = ("post", "handoff", "clarify", "ack")            # + remind1..N
 ACK = ("raising_hand", "man-raising-hand", "woman-raising-hand", "person_raising_hand", "hand")
 PEOPLE = Path(__file__).parent / "people.yaml"
 
@@ -115,7 +117,7 @@ class Flow:
             return "done"                                                # 이미 했다
         gate = constraints.get("mail_observe.outbound")
         status, extra = "dry", {}
-        if gate == "on" or (gate == "slack" and kind not in MAIL_KINDS):
+        if gate == "on" or (gate == "slack" and (kind in SLACK_KINDS or kind.startswith("remind"))):
             try:
                 extra, status = {"result": do()}, "done"
             except Exception as e:                                       # 실패는 적고 넘어간다 — 다음 실행이 다시 시도한다

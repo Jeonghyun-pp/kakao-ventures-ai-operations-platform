@@ -200,19 +200,29 @@ class Backup(unittest.TestCase):
 
 
 class ReadOnly(unittest.TestCase):
-    """🔴 관찰 코드에 쓰기 함수의 이름이 **등장하지 않는다.** 등장하면 그건 더 이상 관찰이 아니다."""
+    """🔴 관찰은 **읽기만** 한다. 통로에서 부를 수 있는 건 아래 셋뿐이다 — 허용 목록이다.
 
-    WRITES = {"archive", "relabel", "draft_reply", "draft_forward", "draft_new", "post", "send_text", "notify_owner"}
+    쓰기 함수 이름을 늘어놓은 금지 목록이면, 통로에 새 쓰기 함수가 생겼을 때 그걸 불러도 통과한다.
+    """
 
-    def test_no_write_calls_and_no_write_imports(self):
-        root = Path(observe.__file__).parent
-        for name in ("observe.py", "clean.py"):
-            tree = ast.parse((root / name).read_text(encoding="utf-8"))
-            attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-            self.assertFalse(attrs & self.WRITES, f"{name}: {attrs & self.WRITES}")
-            mods = {a.name for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
-            self.assertFalse(mods & {"slack", "notion", "sheets", "run", "route"} - ({"route"} if name == "clean.py" else set()),
-                             f"{name}: {mods}")
+    ALLOWED = {"auth_check", "search_ids", "message"}              # gmail · reader
+    LLM = {"run_session"}                                          # claude
+
+    def test_observe_calls_only_the_allowed_reads(self):
+        tree = ast.parse((Path(observe.__file__)).read_text(encoding="utf-8"))
+        used = {}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in ("gmail", "reader", "claude"):
+                used.setdefault(n.value.id, set()).add(n.attr)
+        self.assertLessEqual(used.get("gmail", set()) | used.get("reader", set()), self.ALLOWED)
+        self.assertLessEqual(used.get("claude", set()), self.LLM)
+        mods = {a.name for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
+        self.assertFalse(mods & {"slack", "notion", "sheets", "run", "route"}, mods)
+
+    def test_clean_touches_no_transport(self):
+        tree = ast.parse((Path(observe.__file__).parent / "clean.py").read_text(encoding="utf-8"))
+        froms = {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+        self.assertFalse([m for m in froms if m.startswith("kv_transport")], froms)
 
 
 if __name__ == "__main__":

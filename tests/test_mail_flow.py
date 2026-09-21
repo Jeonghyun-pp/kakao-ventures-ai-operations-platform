@@ -159,6 +159,15 @@ class FlowCase(unittest.TestCase):
         self.assertEqual(len(heads), 2)                                              # 두 통, 각각 한 번씩만
         self.assertEqual(set(v for (m, k), v in self.acts().items() if k == "post"), {"done"})
 
+    def test_unknown_kind_is_dry_unless_the_gate_is_fully_open(self):
+        """🔴 문은 허용 목록이다. 앞으로 생길 종류(예: label)를 깜빡해도 'slack' 단계에서는 안 나간다."""
+        f, did = self.flow(Hands()), []
+        with gate("slack"):
+            self.assertEqual(f._out("ev", "label", {}, lambda: did.append(1)), "dry")
+        with gate("on"):
+            self.assertEqual(f._out("ev", "label", {}, lambda: did.append(1)), "done")
+        self.assertEqual(did, [1])
+
     def test_handoff_stays_open_until_someone_claims_it(self):
         h = Hands()
         with gate("slack"):
