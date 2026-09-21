@@ -68,10 +68,14 @@ def _record(ok: bool, err: str = "") -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def run_session(prompt: str, *, system: str | None = None) -> str:
+def run_session(prompt: str, *, system: str | None = None, tools: str | None = None) -> str:
     """claude -p 한 번. stdout 원문을 **파싱하지 않고** 그대로 돌려준다.
 
     검증은 호출부 몫이다 — 관심사를 섞으면 파싱 실패가 호출 실패로 오인된다.
+
+    `tools` 를 주면 `--tools` 로 넘긴다. `""` 는 **내장 도구 전부 끔**이다 — 바깥 사람이 쓴 글(메일 본문)을
+    읽히는 호출은 이걸 쓴다. 금지 목록은 CLI 에 새 도구가 생기면 뚫리지만 빈 허용 목록은 안 뚫린다.
+    안 주면(None) 명령줄이 전과 **한 글자도 다르지 않다** — 다른 스킬은 영향이 없다.
     """
     n = _calls_today()
     if n >= constraints.get("claude.daily_calls_block"):
@@ -86,6 +90,8 @@ def run_session(prompt: str, *, system: str | None = None) -> str:
     ]
     if system:
         cmd += ["--append-system-prompt", system]
+    if tools is not None:
+        cmd += ["--tools", tools]
 
     try:
         # prompt 는 argv 가 아니라 stdin — 데이터가 "-" 로 시작해도 플래그로 안 읽힌다
