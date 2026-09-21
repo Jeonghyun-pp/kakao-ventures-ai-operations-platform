@@ -47,6 +47,32 @@ A8 은 `/send` 를 잡되 `/drafts` 는 통과시킨다.
 🔴 그 전에는 `followup` 도 실질적으로 놀고 있다 — 올린 게 없으면 걷을 반응도 없다.
 비플랜방에 사람이 직접 지시해 올린 건(BIXPO 2026)만 추적한다.
 
+## 관찰 (observe) — 새 흐름. 지금은 **읽고 기록만** 한다
+
+현행 plan/apply 옆에서 돈다. 메일함에도 슬랙에도 쓰지 않는다(테스트가 쓰기 함수 이름의 부재를 확인한다).
+한 통은 **한 번만** 판정하고, 모델이 본 글을 그대로 저장한다 — 그래서 기준을 고치고 다시 재 볼 수 있다.
+
+```bash
+./.venv/bin/python -m skills.mail.run observe                      # 새 메일 수집 → 분류 → 하루 한 번 백업
+./.venv/bin/python -m skills.mail.run observe --days 14            # 밀린 날을 거슬러 수집 (분류는 하루 상한만큼씩)
+./.venv/bin/python -m skills.mail.run observe --op status
+./.venv/bin/python -m skills.mail.run observe --op diff                       # live ↔ 현행 plan 의 카테고리
+./.venv/bin/python -m skills.mail.run observe --op replay --limit 30          # 고친 기준을 저장된 메일에 다시 적용
+./.venv/bin/python -m skills.mail.run observe --op diff --a live --b r-<sha>  # 무엇이 달라졌나
+./.venv/bin/python -m skills.mail.run observe --op label --id <메일id> --category INBOUND_KO --why "…"
+./.venv/bin/python -m skills.mail.run observe --op restore-test
+```
+
+```
+기준을 깎는 자리   skills/mail/classify_criteria.md   ← 이것만 고친다
+🔴 고치면 안 되는 것  skills/mail/criteria.md            ← 현행 plan 이 매일 읽는다. 고치면 내일 아침 아카이브·초안이 바뀐다
+DB               ~/kv-data/mail/db/mail.sqlite (권한 600 · 메일 본문이 들어 있다)
+백업             ~/kv-data/mail/db/backup/mail-<날짜>.sqlite (SQLite 온라인 백업 · 7세대)
+```
+
+replay 는 기준 파일의 해시로 run 이름(`r-<sha>`)을 만든다. 같은 기준으로 다시 부르면 이어서 하고,
+기준을 고치면 새 run 이 된다. 운영 판정(`live`)은 어떤 경우에도 안 바뀐다.
+
 ## 계획이 오래되면 크게 말한다
 
 `apply` 는 계획이 12시간(`gmail.plan_stale_hours`)보다 오래됐으면 **종료코드 2**로 끝난다.

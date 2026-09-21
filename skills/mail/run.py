@@ -722,6 +722,19 @@ def main(argv: list[str] | None = None) -> int:
     fu = sub.add_parser("followup", help="슬랙 반응 수거 · 만기 처리")
     fu.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
+    ob = sub.add_parser("observe", help="관찰 — 모으고 분류하고 기록만 한다 (메일함·슬랙에 안 쓴다)")
+    ob.add_argument("--op", default="run",
+                    choices=["run", "status", "replay", "diff", "label", "backup", "restore-test"])
+    ob.add_argument("--days", type=int, default=None, help="이만큼 거슬러 수집 (첫 실행·밀린 날)")
+    ob.add_argument("--max-judge", type=int, default=None)
+    ob.add_argument("--no-judge", action="store_true")
+    ob.add_argument("--criteria", default=None, help="replay 에 쓸 기준 파일 (기본: classify_criteria.md)")
+    ob.add_argument("--limit", type=int, default=None)
+    ob.add_argument("--a", default="live")
+    ob.add_argument("--b", default="legacy")
+    ob.add_argument("--id", default=None)
+    ob.add_argument("--category", default=None)
+    ob.add_argument("--why", default=None)
     a = p.parse_args(argv)
 
     try:
@@ -737,6 +750,10 @@ def main(argv: list[str] | None = None) -> int:
                 return followup(dry_run=a.dry_run)
         if a.cmd == "status":
             return status()
+        if a.cmd == "observe":
+            # 🔴 여기서 import 한다. 새 코드가 import 단계에서 죽어도 09:10 plan 은 산다.
+            from . import observe
+            return observe.main(a)
     except lock.Busy as e:
         print(f"🔴 {e}")
         return 3
