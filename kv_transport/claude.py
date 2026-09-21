@@ -18,14 +18,34 @@ claude 가 `reason` 에 이스케이프 없는 `"` 를 넣어 **JSON 배열이 �
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 
 from kvlib import Fetched, constraints, paths
 
 
 class SessionError(RuntimeError):
     pass
+
+
+def _bin() -> str:
+    """claude 실행 파일의 **절대경로**.
+
+    🔴 맨이름 `"claude"` 로 부르면 launchd 에서 못 찾는다 — launchd 의 기본 PATH 는
+       로그인 셸의 PATH 가 아니다. 2026-08-19 08:10 에 자동 업데이트가 실행 파일을
+       `~/.local/bin` 으로 옮기자 그날 11:00 링크드인 카드와 메일 plan 이 **동시에** 죽었다.
+       그때 나온 말이 "claude CLI 가 없다" 였다 — **환경 문제인데 인증 문제처럼 읽힌다.**
+       그래서 부를 때마다 절대경로로 해석한다(업데이트로 경로가 또 바뀌어도 따라간다).
+    """
+    found = shutil.which("claude")
+    if not found:
+        cand = Path.home() / ".local" / "bin" / "claude"
+        found = str(cand) if cand.exists() else ""
+    if not found:
+        raise SessionError("claude CLI 를 못 찾았다 (PATH 와 ~/.local/bin 둘 다 없음)")
+    return found
 
 
 def _usage_path() -> Path:
@@ -60,7 +80,7 @@ def run_session(prompt: str, *, system: str | None = None) -> str:
         print(f"  ⚠️  오늘 claude 호출 {n}회 (경고선 {constraints.get('claude.daily_calls_warn')})")
 
     cmd = [
-        "claude", "-p",
+        _bin(), "-p",
         "--strict-mcp-config",                      # 전역 ~/.claude 의 MCP 상속 차단
         "--disallowedTools", ",".join(constraints.get("claude.forbidden_tools")),
     ]

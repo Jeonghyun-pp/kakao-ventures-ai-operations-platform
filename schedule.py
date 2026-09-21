@@ -49,6 +49,11 @@ LABEL = "com.kv.{skill}.{cmd}"
 AGENTS = Path.home() / "Library/LaunchAgents"
 
 _WHEN = re.compile(r"(매일|월|화|수|목|금|토|일)\s+(\d{1,2}):(\d{2})")
+# 🔴 주기 실행. "때가 되면"이 아니라 "N분마다"가 필요한 일이 있다 —
+#    사람이 슬랙에 이모지를 누르는 시점을 우리가 못 정하기 때문이다.
+#    맥이 자는 동안은 안 돈다. 깨어나면 launchd 가 **한 번만** 몰아서 발화한다
+#    (밀린 횟수만큼 반복하지 않는다).
+_EVERY = re.compile(r"(\d+)\s*분마다")
 _WEEKDAY = {"월": 1, "화": 2, "수": 3, "목": 4, "금": 5, "토": 6, "일": 0}
 
 
@@ -62,24 +67,43 @@ def declared() -> list[dict]:
         fm = yaml.safe_load(text.split("---", 2)[1])
         skill = fm.get("name") or md.parent.name
         for row in fm.get("schedule") or []:
-            m = _WHEN.match(str(row.get("when", "")))
-            if not m:
-                raise ValueError(f"{md}: when 을 못 읽었다: {row.get('when')!r} (예: '매일 07:00')")
-            day, hh, mm = m.group(1), int(m.group(2)), int(m.group(3))
-            out.append({
-                "skill": skill, "cmd": row["cmd"], "when": row["when"],
-                "why": row.get("why", ""), "weekday": None if day == "매일" else _WEEKDAY[day],
-                "hour": hh, "minute": mm,
-                "label": LABEL.format(skill=skill, cmd=row["cmd"]),
-            })
+            raw = str(row.get("when", ""))
+            # 🔴 `cmd` 에 플래그가 붙을 수 있다 ("apply --no-slack").
+            #    ① 라벨은 **첫 낱말만** 쓴다. 안 그러면 플리스트 파일명에 공백과
+            #       대시가 들어가고, 플래그를 바꾸는 순간 launchd 는 다른 잡으로 본다
+            #       (옛 잡이 남아 둘이 같이 돈다).
+            #    ② argv 는 **낱말마다 하나씩** 넘긴다. 통째로 넘기면 argparse 가
+            #       "apply --no-slack" 이라는 이름의 하위명령을 찾다가 죽는다.
+            argv = str(row["cmd"]).split()
+            job = {"skill": skill, "cmd": row["cmd"], "argv": argv, "when": raw,
+                   "why": row.get("why", ""),
+                   "label": LABEL.format(skill=skill, cmd=argv[0])}
+            e = _EVERY.match(raw)
+            m = _WHEN.match(raw)
+            if e:
+                job.update(interval=int(e.group(1)) * 60, weekday=None, hour=None, minute=None)
+            elif m:
+                day, hh, mm = m.group(1), int(m.group(2)), int(m.group(3))
+                job.update(interval=None, weekday=None if day == "매일" else _WEEKDAY[day],
+                           hour=hh, minute=mm)
+            else:
+                raise ValueError(
+                    f"{md}: when 을 못 읽었다: {raw!r} (예: '매일 07:00' 또는 '10분마다')")
+            out.append(job)
     return out
 
 
 def plist(job: dict) -> str:
-    cal = f"<key>Hour</key><integer>{job['hour']}</integer>\n    <key>Minute</key><integer>{job['minute']}</integer>"
-    if job["weekday"] is not None:
-        cal += f"\n    <key>Weekday</key><integer>{job['weekday']}</integer>"
+    if job.get("interval"):
+        when = f"  <key>StartInterval</key><integer>{job['interval']}</integer>"
+    else:
+        cal = (f"<key>Hour</key><integer>{job['hour']}</integer>\n"
+               f"    <key>Minute</key><integer>{job['minute']}</integer>")
+        if job["weekday"] is not None:
+            cal += f"\n    <key>Weekday</key><integer>{job['weekday']}</integer>"
+        when = f"  <key>StartCalendarInterval</key><dict>\n    {cal}\n  </dict>"
     log = Path.home() / "kv-data" / "_logs" / f"{job['label']}.log"
+    argv = "".join(f"<string>{a}</string>" for a in job["argv"])
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- 생성물이다. 손으로 고치지 마라 — 정본은 skills/{job['skill']}/SKILL.md 의 schedule 선언이다.
@@ -90,12 +114,10 @@ def plist(job: dict) -> str:
   <array>
     <string>{ROOT}/.venv/bin/python</string>
     <string>-m</string><string>skills.{job['skill']}.run</string>
-    <string>{job['cmd']}</string>
+    {argv}
   </array>
   <key>WorkingDirectory</key><string>{ROOT}</string>
-  <key>StartCalendarInterval</key><dict>
-    {cal}
-  </dict>
+{when}
   <key>RunAtLoad</key><false/>
   <key>StandardOutPath</key><string>{log}</string>
   <key>StandardErrorPath</key><string>{log}</string>

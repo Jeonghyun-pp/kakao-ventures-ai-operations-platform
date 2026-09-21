@@ -43,8 +43,26 @@ MUTATIONS = [
      "    limit = limit or 2000  # 변이: 숫자를 코드에 박는다"),
     ("A0", "검사기가 파싱 오류에 죽지 않는다",
      "kv_transport/slack.py",
-     "def _post(text: str) -> bool:",
-     "def _post(text: str) -> bool  # 변이: 문법 오류\ndef _post(text: str) -> bool:"),
+     "def _indent(s: str) -> str:",
+     "def _indent(s: str) -> str  # 변이: 문법 오류\ndef _indent(s: str) -> str:"),
+    # 🔴 지메일 쓰기 경로. 옛 검사는 googleapiclient 전용이라, requests 로 짠 통로에
+    #    아카이브 함수를 붙여도 아무것도 못 잡았다. 두 형태를 다 물어야 한다.
+    ("A8", "발송 — 초안 발송 엔드포인트",
+     "kv_transport/gmail.py",
+     "def labels() -> Fetched:",
+     "def send_draft(draft_id: str):   # 변이: 초안을 발송한다\n"
+     "    return _req(\"POST\", f\"/drafts/{draft_id}/send\")\n\n\n"
+     "def labels() -> Fetched:"),
+    ("A8", "발송 — 옛 SDK 패턴 drafts().send",
+     "kv_transport/gmail.py",
+     "def inbox_count() -> Fetched:",
+     "def send_sdk(svc, draft_id: str):   # 변이: SDK 로 발송한다\n"
+     "    return svc.users().drafts().send(userId=\"me\", body={\"id\": draft_id})\n\n\n"
+     "def inbox_count() -> Fetched:"),
+    ("A8", "발송 — smtplib 우회",
+     "skills/mail/judge.py",
+     "from pathlib import Path",
+     "import smtplib  # 변이: 지메일 API 를 통째로 우회한다\nfrom pathlib import Path"),
 ]
 
 

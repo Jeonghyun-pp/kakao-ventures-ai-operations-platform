@@ -43,12 +43,15 @@ _VERSION = "2022-06-28"
 #    값 대부분이 버려진 채 "오염된 대조원"이 됐다.
 _WRITABLE: dict[str, str] = {}
 
-# 읽기 전용 — 대조·조회 대상. 읽기는 아무 DB나 되므로 편의 목록일 뿐이다.
-READ_ONLY = {
-    "base_주간소싱": "00000000-0000-0000-0000-d609b10d8459",
-    "ch_스레드": "00000000-0000-0000-0000-a258370d87f8",
-    "dedup_극초기": "00000000-0000-0000-0000-72b2b8579963",
-}
+# 🔴 READ_ONLY 를 지웠다 (2026-08-18).
+#
+#    세 개를 선언해두고 **참조가 0건**이었다. 그 자체로 "선언은 있는데 발동 안 하는" 상태고,
+#    더 나쁜 건 `dedup_극초기` 라는 이름이 **극초기 DB 를 중복 대조원으로 쓴다고 말하는데
+#    실제로는 아무도 안 읽었다**는 점이다. 그래서 08-18 조사에서 "극초기가 오염되면
+#    중복 판정이 어긋난다"는 잘못된 걱정이 나왔다 — 어긋날 코드가 없었다.
+#
+#    읽기는 아무 DB 나 되므로 명단이 필요 없다. 읽는 곳이 id 를 직접 들고 있으면 된다.
+#    (쓰기만 등록제다 — 그건 "등록 안 된 DB 에 안 쓴다"를 강제하기 위해서다.)
 
 
 def register_writable(key: str, db_id: str) -> None:
@@ -185,6 +188,9 @@ def sanitize(text: str) -> str:
     """
     for ch in constraints.get("notion.strips_chars"):
         text = text.replace(ch, "\n")
+    # 제로폭(U+200B 등)은 개행이 아니라 제거다 — 폭이 0이라 사람 눈엔 원래 없던 글자다 (09-16 실측)
+    for ch in constraints.get("notion.strips_zero_width"):
+        text = text.replace(ch, "")
     if constraints.get("notion.strips_control_chars"):
         # C0 제어문자 제거 (\n·\t 는 남긴다). 하나씩 잡으면 계속 나온다 — 부류로 막는다.
         text = "".join(c for c in text if c >= " " or c in "\n\t")

@@ -83,6 +83,9 @@ notion:
   #    노션이 정확히 무엇을 지우는지는 문서에 없다. 되읽기가 새 문자를 만나면 또 잡을 것이고,
   #    그때마다 부류를 넓힌다.
   strips_control_chars: true
+  # 🔴 [2026-09-16 실측 · 비플랜 첫 sync] 제로폭 문자도 지운다 — U+200B 하나 때문에 Example Company E 행이
+  #    되읽기 불일치(610 vs 608)로 실패했다. 이건 개행이 아니라 **없애는** 게 맞다(폭이 0이다).
+  strips_zero_width: ["\u200b", "\u200c", "\u200d", "\ufeff"]
   rate_limit_rps: 3            # 공식 한도. 성공해도 잔다.
   # 200 은 저장을 뜻하지 않는다 — 모르는 select 옵션을 조용히 버리면서 200 을 준다.
   write_verify: read_back
@@ -165,6 +168,17 @@ gmail:
   unknown_alert_ratio: 0.30    # 한 실행의 UNKNOWN 비율이 이를 넘으면 분류기 이상이다.
   # 분류와 무관하게 **영원히** 사람이 보낸다. 무수정률이 100% 여도 승격 대상이 아니다.
   never_auto_send: [PARTNERSHIP_DECLINE, TRUSTED_REF, RECRUIT, IMPERSONATION]
+
+sheets:
+  # 서비스계정 JWT 는 구글이 **최대 1시간**만 받는다. 더 길게 주면 invalid_grant.
+  jwt_lifetime_sec: 3600
+  token_refresh_lead_sec: 60   # access_token 도 1시간. 만료 후 갱신은 401 한 번을 낭비한다
+  # 값은 **표시 문자열**로 받는다. 옛 시스템(gspread get_all_values)이 그렇게 받았고,
+  # 노션 `접수키` 가 그 문자열(한국어 로케일 타임스탬프)에서 만들어졌다.
+  # UNFORMATTED 로 바꾸면 일련번호(float)가 와서 기존 키와 어긋난다 — 같은 접수가 두 번 들어간다.
+  value_render: FORMATTED_VALUE
+  # values.get 은 뒤쪽 빈 칸을 **생략한 채** 준다 → 행 길이가 제각각이다. 인덱스로 읽으면 IndexError.
+  ragged_rows: true
 
 linkedin:
   # 🔴 링크드인 연결 요청에 붙이는 메모의 글자 상한. 플랫폼이 정하고 우리가 못 넘긴다.

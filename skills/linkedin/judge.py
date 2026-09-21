@@ -25,6 +25,7 @@ def _line(p: dict) -> str:
         f"재직{p['tenure']}" if p["tenure"] is not None else "재직?",
         f"창업{p['founding']}" if p["founding"] is not None else "창업?",
         f"공백{p['gap']}" if p["gap"] is not None else "공백?",
+        f"학부{p['undergrad']}" if p.get("undergrad") else "학부미상",
         (p["headline"] or "")[:120], (p["about"] or "")[:200],
     ))
 
@@ -40,7 +41,7 @@ def judge_people(people: list[dict]) -> Fetched:
         prompt = (
             f"{criteria}\n\n"
             f"# 판정 대상 {len(chunk)}명\n"
-            "형식: key⇥축⇥이름⇥회사⇥직함⇥재직개월⇥창업개월⇥공백개월⇥헤드라인⇥소개\n"
+            "형식: key⇥축⇥이름⇥회사⇥직함⇥재직개월⇥창업개월⇥공백개월⇥학부시작연도⇥헤드라인⇥소개\n"
             + "\n".join(_line(p) for p in chunk)
             + f"\n\n# 출력\n정확히 {len(chunk)}줄. `key<TAB>Tier<TAB>이유 한 문장`.\n"
         )

@@ -24,9 +24,11 @@ from . import kr_origin
 
 # 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.** 통로는 명단을 안 들고 있다.
 notion.register_writable("ch_앱스토어", "00000000-0000-0000-0000-30deea8edcc5")
+notion.register_writable("ch_극초기", "00000000-0000-0000-0000-72b2b8579963")
 
 TASK = "appstore"
 DB = "ch_앱스토어"
+DB_극초기 = "ch_극초기"
 
 # 25장르 × 무료·유료·매출 + 최신출시 1회(genre 무시)
 _GENRES = list(itunes.GENRE_NAMES)
@@ -190,6 +192,13 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
 
     print(f"· 착지 {landed} · 실패 {failed}")
     _report(run_id, landed=landed, unknowns=len(unknowns), attempts=attempts, failed=failed)
+
+    # 착지 후 포팅 (DB로 업데이트 체크된 앱 → 극초기 DB)
+    try:
+        port()
+    except Exception as e:
+        print(f"  ⚠️  포팅 중 오류 (수집은 정상): {e}")
+
     if unknowns or failed:
         raise Degraded(f"미상 {len(unknowns)} · 착지실패 {failed}")
     return 0
@@ -230,6 +239,97 @@ def _props(aid: str, v: dict, d: dict, run_id: str,
     }
 
 
+# ---------------------------------------------------------------- 포팅
+
+_GENRE_MAP = {
+    "교육": "교육", "금융": "금융", "식음료": "식음료",
+    "비즈니스": "비즈니스", "엔터테인먼트": "엔터테인먼트",
+    "지식정보": "지식정보",
+}
+
+
+def port() -> int:
+    """앱스토어 DB에서 'DB로 업데이트' 체크된 앱을 극초기 DB로 포팅한다."""
+    print("▶ port: 앱스토어 → 극초기 DB")
+
+    checked = notion.query(
+        notion.writable_id(DB),
+        ["서비스명", "App ID", "One Liner", "Post URL", "Rating", "Genre"],
+    )
+    if not checked.is_measured:
+        print(f"  ⚠️  앱스토어 DB 조회 실패: {checked.reason}")
+        return 0
+
+    targets = []
+    for row in checked.require():
+        targets.append(row)
+
+    if not targets:
+        print("· 체크된 앱 0개 — 포팅할 것 없음")
+        return 0
+
+    # DB로 업데이트 = true 인 행만 필터 (query 는 전체를 가져오므로)
+    # → Notion API query 에 filter 를 써야 하지만, 현재 통로에 filter 지원이 없다.
+    #   대신 앱스토어 DB 를 전부 읽은 뒤 SQL 로 필터하는 대신,
+    #   MCP 로 이미 확인한 체크 앱 목록을 기준으로 한다.
+    #   실제로는 query 결과에서 checkbox 를 읽을 수 없으므로,
+    #   별도로 체크 여부를 조회한다.
+    checked_with_flag = notion.query(
+        notion.writable_id(DB),
+        ["서비스명", "App ID", "One Liner", "Post URL", "Rating", "Genre", "DB로 업데이트"],
+    )
+    if not checked_with_flag.is_measured:
+        print(f"  ⚠️  앱스토어 DB 조회 실패: {checked_with_flag.reason}")
+        return 0
+
+    targets = [r for r in checked_with_flag.require() if r.get("DB로 업데이트")]
+
+    if not targets:
+        print("· DB로 업데이트 체크된 앱 0개 — 포팅할 것 없음")
+        return 0
+    print(f"· DB로 업데이트 체크 {len(targets)}개")
+
+    existing = notion.query(notion.writable_id(DB_극초기), ["법인(서비스)"])
+    if existing.is_measured:
+        existing_names = {r["법인(서비스)"] for r in existing.require() if r.get("법인(서비스)")}
+    else:
+        print(f"  ⚠️  극초기 DB 조회 실패: {existing.reason} — 중복 체크 없이 진행")
+        existing_names = set()
+
+    new = [t for t in targets if t.get("서비스명") not in existing_names]
+    if not new:
+        print(f"· 전부 이미 극초기 DB에 존재 — 포팅할 것 없음")
+        return 0
+    print(f"· 신규 {len(new)}개 (기존 {len(targets) - len(new)}개 스킵)")
+
+    극초기_allowed_genres = notion.allowed_options(notion.writable_id(DB_극초기), "영역")
+    ported = failed = 0
+    for row in new:
+        genre_list = row.get("Genre") or []
+        mapped = [_GENRE_MAP[g] for g in genre_list if g in _GENRE_MAP]
+        mapped = [g for g in mapped if g in 극초기_allowed_genres]
+
+        props = {
+            "법인(서비스)": row.get("서비스명") or "",
+            "한 줄 설명": row.get("One Liner") or "",
+            "링크": row.get("Post URL") or "",
+            "평점": row.get("Rating"),
+            "발굴": "앱스토어",
+        }
+        if mapped:
+            props["영역"] = mapped
+
+        res = notion.create(DB_극초기, props)
+        if not res.is_measured:
+            failed += 1
+            print(f"  ✗ {row.get('서비스명')} 포팅 실패: {res.reason}")
+            continue
+        ported += 1
+
+    print(f"· 극초기 DB 포팅 완료: {ported}건 성공 · {failed}건 실패")
+    return ported
+
+
 # ---------------------------------------------------------------- 보고
 
 def _report(run_id: str, **counts) -> None:
@@ -245,12 +345,16 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("collect"); c.add_argument("--dry-run", action="store_true")
     c.add_argument("--genres", type=int); c.add_argument("--limit", type=int)
+    sub.add_parser("port")
     sub.add_parser("status")
     a = p.parse_args(argv)
     try:
         if a.cmd == "collect":
             with lock.hold("appstore-collect"):
                 return collect(dry_run=a.dry_run, limit_genres=a.genres, limit=a.limit)
+        if a.cmd == "port":
+            port()
+            return 0
         if a.cmd == "status":
             print(ledger.summary(TASK))
             return 0

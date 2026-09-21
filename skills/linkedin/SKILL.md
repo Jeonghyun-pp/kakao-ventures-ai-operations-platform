@@ -4,6 +4,7 @@ description: 링크드인에서 극초기 창업자를 주 1회 수집해 Tier �
 schedule:
   - { cmd: collect, when: "월 09:10", why: "이때만 돈이 나간다. 축별로 차례인 것만 돈다" }
   - { cmd: card,    when: "매일 11:00", why: "정현님이 훑은 결과가 반영된 뒤에 나간다" }
+  - { cmd: followup, when: "10분마다", why: "심사역이 언제 누를지 우리가 못 정한다. 누르고 10분 안에 초안이 뜬다" }
 ---
 
 # 링크드인 소싱
@@ -33,12 +34,35 @@ posted-early 1페이지 · $0.20 · 25명
 
 카드는 `review-test` 채널로 나간다. 판정 기준이 아직 초안이라 심사역 채널엔 안 보낸다.
 
+## ✅ 를 누르면 콜드 메시지 초안이 나온다
+
+```
+매일 11:00  card       헤더 1개 + 사람별 스레드 답글
+(심사역)                각자에게 ✅ — 반응이 사람과 이어지려면 스레드여야 한다
+사람이 직접  followup   ✅ 를 걷어 콜드 메시지 초안(짧게·길게)을 그 스레드에 올린다
+(심사역)                복사해서 본인 링크드인으로 보낸다
+```
+
+🔴 **`followup` 은 10분마다 돈다** — 시각을 정하는 게 아니라 **계속 지켜본다.**
+심사역이 언제 누를지 우리가 정할 수 없어서, "몇 시에 걷을까"를 추측하는 대신 자주 물어본다.
+반응이 없으면 슬랙 호출 한 번으로 끝나고 claude 는 안 부른다 — ✅ 가 있을 때만 부른다.
+
+    맥이 자면 안 돈다. 깨어나면 launchd 가 한 번만 몰아서 발화한다(밀린 횟수만큼 반복 안 함).
+
+🔴 **우리가 보내지 않는다.** 심사역 개인 계정으로 나가는 메시지라 그 계정에 못 들어간다.
+메일 트리아지가 `hello@` 초안을 만들 수 있는 것과 다르다. 글만 써서 올린다.
+
+🔴 **발신자는 ✅ 를 누른 분이다.** 명단(Reviewer A·박도윤·Reviewer B·이서준) 밖이 누르면
+이름 칸을 비우고 `발신자 이름을 채워주세요` 를 붙인다 — 개인 이름으로 나가는 글을
+우리가 임의로 정하지 않는다.
+
 ## 명령
 
 ```bash
 cd ~/kv
 ./.venv/bin/python -m skills.linkedin.run collect [--axis <축>] [--pages N] [--dry-run]
 ./.venv/bin/python -m skills.linkedin.run card [-n 5] [--dry-run]
+./.venv/bin/python -m skills.linkedin.run followup [--dry-run]   # ✅ 걷어 초안 작성
 ./.venv/bin/python -m skills.linkedin.run status      # 축별 마지막 실행일·다음 페이지
 ./.venv/bin/python tools/replay_linkedin.py           # 원본 1,865행으로 파서 검증 (돈 0·망 0)
 ```

@@ -363,3 +363,173 @@ def _raw_positions(item: dict) -> list[dict]:
         out += [p for p in (item.get(key) or []) if isinstance(p, dict)]
     out += [e for e in (item.get("experience") or []) if isinstance(e, dict) and is_present(e)]
     return out
+
+
+# ================================================================ 임시 소싱 조건 (2026-08-19)
+#
+# 🔴 아래 셋은 **서버에서 못 거는 조건**이다. 액터 입력 파라미터 41개를 전수 조회했는데
+#    (`GET /v2/acts/harvestapi~linkedin-profile-search/builds/default`, 무과금)
+#    **학력 연도 필터도, "현 직장 없음" 필터도 없다.**
+#    → 사고 나서 거른다 = **걸러진 사람 값도 이미 나간 돈이다.**
+#      그래서 거른 수를 반드시 세서 남긴다(조용한 삭제 없음). `axes.reject` 가 그 자리다.
+
+# 학위 문자열에서 학부를 가려낸다. **제외를 먼저 본다** — "Master of Business Administration - MBA"
+# 처럼 학사 약어(`BA`)를 품은 상위 학위가 있어서, 포함부터 보면 석사가 학부로 샌다.
+_NOT_UNDERGRAD = re.compile(
+    r"(master|mba|m\.?s\.?c?\b|m\.?a\.?\b|ph\.?d|doctor|석사|박사|"
+    r"high school|고등학교|associate|전문학사)", re.I)
+_UNDERGRAD = re.compile(
+    r"(bachelor|학사|학부|\bb\.?s\.?c?\b|\bb\.?a\.?\b|\bb\.?e\.?\b|\bb\.?tech\b|\bbba\b)", re.I)
+
+
+def undergrad_start_year(item: dict) -> int | None:
+    """학부 시작연도. **학위가 학부라고 적혀 있고 시작연도가 있는 것만** 센다.
+
+    🔴 `None` 은 "학부가 없다"가 아니라 **판정 불가**다. 실측(아카이브 675명):
+       교육 레코드 1,541개 중 `startDate` 가 null 인 것이 28.1% · 학위를 아예 안 적은 것이 138개.
+       버릴지 남길지는 **부르는 쪽이** 정한다 — 여기서 0 이나 9999 로 뭉개지 않는다.
+    """
+    years = []
+    for e in item.get("education") or []:
+        if not isinstance(e, dict):
+            continue
+        deg = str(e.get("degree") or "")
+        if not deg or _NOT_UNDERGRAD.search(deg) or not _UNDERGRAD.search(deg):
+            continue
+        sd = e.get("startDate")
+        y = sd.get("year") if isinstance(sd, dict) else None
+        if y:
+            years.append(int(y))
+    return min(years) if years else None
+
+
+STEALTH_TERMS = ("stealth", "newco", "스텔스")
+
+
+def stealth_signal(item: dict) -> bool:
+    """스텔스 표시가 붙어 있나. 🔴 **직함이 아니라 회사명**에 박힌다(실측: 직함 0명 / 회사명 2명)."""
+    txt = " ".join([str(item.get("headline") or "")]
+                   + [p["company"] for p in positions(item)]).lower()
+    return any(t in txt for t in STEALTH_TERMS)
+
+
+def gap_within(item: dict, months: int) -> bool:
+    """공백 개월 **또는** 본업 공백 개월 중 하나라도 [1, months] 안인가.
+
+    🔴 둘을 OR 로 본다(사용자 결정 2026-08-19). 퇴사하고 자문·EIR 만 파트타임으로 걸어둔
+       사람은 `공백 0 / 본업공백 6` 으로 나온다 — 그 사람이 이 조건의 표적이다.
+    0 은 재직 중이라 제외하고, None 은 판정 불가라 제외한다(= 통과시키지 않는다).
+    """
+    vals = [v for v in (gap_months(item), fulltime_gap_months(item)) if v is not None]
+    return any(0 < v <= months for v in vals)
+
+
+# 🔴 **학교는 학부 줄에서만 인정한다** (2026-08-19 사고).
+#    액터의 `schools` 필터는 학력 **아무 줄**에나 그 학교가 있으면 맞힌다. 그래서
+#    학부 GWU · 석사 Northeastern · 고려대 한 줄(2023) 인 미국인이 "설카포연고 출신"으로
+#    들어왔다(Anthony Yalong · San Jose 거주 · Stealth Startup 의 **직원**).
+#    우리는 학부 '연도'만 따로 재고 **학교와 학부를 묶지 않고 있었다.**
+#
+# 🔴 부분문자열로 맞히지 마라 — 실측 48종 안에 함정이 이만큼 있다:
+#    `Seoul National University of Science and Technology`(서울과기대) ≠ 서울대
+#    `Korea National Open University`(방송통신대) · `The Catholic University of Korea`
+#    `Korean Minjok Leadership Academy`(민사고) · `Korea Science Academy`(과학영재학교)
+#    `The University of British Columbia` ⊃ "columbia" · `Columbia College Chicago`
+#    `Stanford Continuing Studies` · `UC Berkeley Extension`(평생교육)
+#    → **정규화한 이름의 정확 일치**만 인정하고, 별칭은 손으로 적는다.
+_ELITE_UNDERGRAD = {
+    "kr": {"seoul national university", "yonsei university", "korea university",
+           "korea advanced institute of science and technology", "kaist",
+           "pohang university of science and technology", "postech"},
+    "us": {"harvard university", "yale university", "princeton university",
+           "columbia university", "university of pennsylvania", "brown university",
+           "dartmouth college", "cornell university",
+           "cornell peter and stephanie nolan school of hotel administration",
+           "massachusetts institute of technology", "stanford university",
+           "california institute of technology", "carnegie mellon university",
+           "university of california, berkeley", "uc berkeley college of engineering",
+           "university of california, berkeley, haas school of business",
+           "university of chicago", "northwestern university", "duke university"},
+}
+
+
+def _norm_school(name: str) -> str:
+    """`Korea University / 고려대학교` 처럼 병기된 이름은 앞부분만 본다."""
+    n = str(name or "").split("/")[0].strip().lower()
+    return re.sub(r"\s+", " ", n)
+
+
+def undergrad_schools(item: dict) -> list[str]:
+    """**학부 학위 줄에 적힌** 학교 이름들. 대학원·고등학교 줄은 안 센다."""
+    out = []
+    for e in item.get("education") or []:
+        if not isinstance(e, dict):
+            continue
+        deg = str(e.get("degree") or "")
+        if not deg or _NOT_UNDERGRAD.search(deg) or not _UNDERGRAD.search(deg):
+            continue
+        nm = _norm_school(e.get("schoolName") or "")
+        if nm:
+            out.append(nm)
+    return out
+
+
+def elite_undergrad(item: dict) -> str:
+    """학부가 지정 학교면 그 그룹('kr'/'us'), 아니면 빈 문자열.
+
+    🔴 학부 학위 줄이 아예 없으면 빈 문자열이다 — "아니다"가 아니라 **판정 불가**다.
+       `undergrad_start_year` 와 같은 성질이라, 버릴지 남길지는 부르는 쪽이 정한다.
+    """
+    got = set(undergrad_schools(item))
+    for grp, names in _ELITE_UNDERGRAD.items():
+        if got & names:
+            return grp
+    return ""
+
+
+# ================================================================ KAIST 재학 판별 (2026-09-15, Reviewer C 요청)
+#
+# 🔴 education의 endDate에 "Present"는 **0건**이다 (아카이브 2,923건 실측).
+#    experience에서는 흔하지만 education에서는 안 쓰인다.
+#    재학 판별은 endDate.year >= 현재연도 **만** 쓴다.
+
+_KAIST_NAMES = {"kaist", "korea advanced institute of science and technology"}
+_PHD_RE = re.compile(r"(ph\.?d|doctor|박사)", re.I)
+
+
+def kaist_currently_enrolled(item: dict) -> str:
+    """KAIST 학석사 재학 여부. 통과하면 빈 문자열, 아니면 이유."""
+    from datetime import date
+    current_year = date.today().year
+
+    found_kaist = False
+    all_phd = True
+    has_graduated = False
+
+    for e in item.get("education") or []:
+        if not isinstance(e, dict):
+            continue
+        if _norm_school(e.get("schoolName") or "") not in _KAIST_NAMES:
+            continue
+        found_kaist = True
+        if _PHD_RE.search(str(e.get("degree") or "")):
+            continue
+        all_phd = False
+        end = e.get("endDate")
+        if isinstance(end, dict) and end.get("year"):
+            if int(end["year"]) >= current_year:
+                return ""
+            has_graduated = True
+            continue
+        # endDate 빈 dict / None → startDate 로 추정
+        sd = e.get("startDate")
+        if isinstance(sd, dict) and sd.get("year") and int(sd["year"]) >= current_year - 6:
+            return ""  # 6년 이내 입학 → 재학 추정
+
+    if not found_kaist:
+        return "KAIST-아님"
+    if all_phd:
+        return "KAIST-박사"
+    if has_graduated:
+        return "KAIST-졸업"
+    return "KAIST-재학미확인"

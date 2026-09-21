@@ -4,7 +4,7 @@ from __future__ import annotations
 from kv_transport import slack
 
 
-def send(rows: list[dict], *, dry_run: bool = False) -> bool:
+def send(rows: list[dict], *, ch: str, dry_run: bool = False) -> bool:
     """오늘의 앱 카드. 뭘 하는 앱인지 한 줄 + 링크."""
     lines = [f"*오늘의 앱스토어 {len(rows)}개*"]
     for r in rows:
@@ -20,4 +20,4 @@ def send(rows: list[dict], *, dry_run: bool = False) -> bool:
             + f" · <https://www.notion.so/{str(r.get('_page_id','')).replace('-','')}|노션>"
         )
     text = "\n".join(lines)
-    return slack.send_text(text, dry_run=dry_run)
+    return slack.send_text(ch, text, dry_run=dry_run)

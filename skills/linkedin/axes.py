@@ -56,6 +56,8 @@ Catch 가 낮은 게 당연하고, Trend 가 49%다. 3~6개월 뒤 창업했는�
 """
 from __future__ import annotations
 
+from . import profile
+
 SLUG = "harvestapi~linkedin-profile-search"
 
 # 페이지당 $0.10(런당 고정) + 25명 × $0.004 = $0.20
@@ -73,6 +75,21 @@ COMMON = {
 
 _TITLES = ["Founder", "Co-Founder", "Cofounder", "CEO", "CTO", "대표", "창업자", "공동창업자"]
 _EARLY = {"yearsAtCurrentCompanyIds": ["1"], "companyHeadcount": ["A", "B"]}
+
+# 🔴 [사용자 결정 2026-09-01 · 시니어(Reviewer B) 기준] 사후에 텍스트로 거르던 컷을
+#    **서버로 옮긴다.** 사고 나서 버리면 그 값은 이미 나간 돈이다.
+#    실측으로 ✅ 손해가 0인 것만 옮겼다 — 리크루팅·컨설팅은 ✅ 11명 중 0명을 자른다.
+#    ⚠️ 분류는 링크드인이 정한다. 창업자가 Consulting 으로 잡히면 **사기도 전에 사라진다** —
+#       사후 컷은 되살릴 수 있지만 서버 컷은 데이터에 안 남는다. 프로브로 확인할 것.
+# 🔴 **문자열이다.** 스키마상 items.type = "string" 인데 enum 값이 숫자처럼 생겼다.
+#    정수로 보내면 액터가 http400 invalid-input 을 준다 (2026-09-01 실측, $0.20 날림).
+_EXCL_FN = ["6", "12", "25"]        # Consulting · Human Resources · Sales
+_EXCL_SENIOR = ["220", "300"]       # Director · Vice President
+_EXCL = {"excludeFunctionIds": _EXCL_FN, "excludeSeniorityLevelIds": _EXCL_SENIOR}
+
+# 창업자를 분류로 잡는다. 직함 문자열이 놓치는 사람 —
+# "Building something new" 처럼 쓴 사람 — 을 여기서 줍는다.
+_FOUNDER_CLASS = {"seniorityLevelIds": ["320", "310"]}   # Owner/Partner · CXO
 
 AXES: dict[str, dict] = {
     # 실측 33.3% — 최고. "지금 움직이는 사람"
@@ -122,7 +139,290 @@ AXES: dict[str, dict] = {
     },
 }
 
+# ================================================ 2026-09-01 · 시니어(Reviewer B) 기준
+#
+#     스텔스  OR  최근 6개월 내 경력단절  OR  현 직장 재직 6개월 이내
+#     그리고 창업자는 **직함과 분류 둘 다로** 잡는다.
+#
+# 🔴 **OR 은 서버가 못 건다.** 액터는 조건을 AND 로만 묶는다(스키마 41개 실조회).
+#    그래서 갈래마다 축을 따로 두고 사서 합친다 — 축을 나누는 것이 곧 OR 이다.
+#
+# 🔴 **"6개월 이내"도 서버에 없다.** yearsAtCurrentCompanyIds 의 최소 단위가
+#    `1 = 1년 미만`이다. 1년치를 사서 사후에 절반을 버린다 — 돈은 1년치가 나간다.
+#
+# 🔴 **학력은 안 건다**(사용자 결정 2026-09-01). elite-kr·elite-us-kr 은 은퇴한다.
+#    학력이 좋은 신호라는 근거를 끝내 못 찾았다 — 1티어 35명의 Catch 34% 가
+#    학교 덕인지 스텔스 조건 덕인지 갈리지 않았고, 갈릴 만큼의 표본도 없었다.
+_AXES_2026_09 = {
+    # 축 A — 스텔스. 🔴 재직·규모를 일부러 안 건다(스텔스 2년차도 팔로업 대상).
+    "s-stealth": {
+        "every_days": 7, "pages": 1, "rewind": False,
+        "payload": {"searchQuery": "Stealth Startup", "locations": ["South Korea"],
+                    **_EXCL},
+    },
+    # 축 B — 경력단절.
+    # 🔴 여기엔 **아무 현직 조건도 안 건다.** 직군·직급·리크루터 제외까지 뺐다 —
+    #    전부 현 직장 기준이라 걸면 공백자가 통째로 사라진다(실측: 271명 중 0명).
+    #    대신 사고 나서 claude 가 거른다.
+    "s-gap": {
+        "every_days": 14, "pages": 1, "rewind": False,
+        "keep_exclude_titles": False,
+        "payload": {"pastJobTitles": ["Software Engineer", "Product Manager",
+                                      "Data Scientist", "Designer"],
+                    "locations": ["South Korea"]},
+    },
+    # 축 C1 — 최근 입사 · 직함으로.
+    "s-recent-title": {
+        "every_days": 7, "pages": 1, "rewind": False,
+        "payload": {"currentJobTitles": _TITLES, "locations": ["South Korea"],
+                    **_EARLY, **_EXCL},
+    },
+    # 축 C2 — 최근 입사 · 분류로.
+    # 🔴 C1 과 한 축에 못 합친다. 직함과 분류를 한 쿼리에 넣으면 AND 라 **더 좁아진다.**
+    #    OR 로 만들려면 따로 사서 합쳐야 한다.
+    "s-recent-class": {
+        "every_days": 7, "pages": 1, "rewind": False,
+        "payload": {"locations": ["South Korea"],
+                    **_EARLY, **_FOUNDER_CLASS, **_EXCL},
+    },
+}
+AXES.update(_AXES_2026_09)
+
+
+# ================================================================ 임시 축 (2026-08-19, 사용자 지시)
+#
+#     (설카포연고 OR 미국 상위대) AND 학부 시작 ≥ 2010 AND (스텔스 OR 6개월 내 경력단절)
+#
+# 🔴 **셋 중 학교만 서버에서 걸린다.** 액터 파라미터 41개에 학력 연도 필터도,
+#    "현 직장 없음" 필터도 없다(2026-08-19 스키마 실조회). 나머지 둘은 사고 나서 거른다 —
+#    거른 사람 값도 이미 나간 돈이다. 그래서 `reject()` 가 이유별로 세고, run 이 장부에 남긴다.
+#
+# 🔴 `manual: True` — **정기 collect 가 이 축을 안 집는다.** 임시 조건이라 사람이
+#    `--axis` 로 부를 때만 돈다. 안 그러면 임시 실험이 주간 리듬에 조용히 눌러앉는다.
+#
+# 스텔스와 경력단절은 **한 쿼리에 OR 로 못 넣는다** — searchQuery(회사명 검색)와
+# "현 직함 없음"은 검색 모양이 반대다. 그래서 축을 둘로 가르고, 사후 조건은 둘 다 같은 것을 쓴다.
+
+# 🔴 LinkedIn 학교 필터는 **학교 이름으로 엔티티를 맞힌다.** 표기가 어긋나면 그 학교만
+#    조용히 0명이 된다 — 그래서 KAIST·POSTECH 은 약칭과 정식명을 둘 다 넣는다(옛 설정이 그랬다).
+KR_ELITE = ["Seoul National University", "KAIST",
+            "Korea Advanced Institute of Science and Technology",
+            "POSTECH", "Pohang University of Science and Technology",
+            "Yonsei University", "Korea University"]
+
+# 아이비 8 + 미국 상위대 8. **이 목록이 "미국 상위대"의 정의다** — 바꾸려면 여기 한 줄이다.
+US_ELITE = ["Harvard University", "Yale University", "Princeton University",
+            "Columbia University", "University of Pennsylvania", "Brown University",
+            "Dartmouth College", "Cornell University",
+            "Massachusetts Institute of Technology", "Stanford University",
+            "California Institute of Technology", "Carnegie Mellon University",
+            "University of California, Berkeley", "University of Chicago",
+            "Northwestern University", "Duke University"]
+
+ELITE_SCHOOLS = KR_ELITE + US_ELITE
+ELITE_LOCATIONS = ["South Korea", "United States"]
+UNDERGRAD_SINCE = 2010      # 학부 시작연도 하한 (≈ 만 34세 이하)
+GAP_MAX_MONTHS = 6          # 공백 또는 본업공백이 이 안이면 통과
+
+# 경력단절 축이 쓰는 과거 직함. 🔴 임원 직함으로 걸면 "이미 CEO 를 해본 사람"만 나온다
+#    (유료 프로브 실측: 임원 4/25 전원 휴지기 임원 · 실무 10/25 중 9/12 가 실무자).
+_PRACTITIONER = ["Software Engineer", "Product Manager", "Data Scientist", "Designer"]
+
+AXES.update({
+    # 🔴 [2026-08-19 실측으로 갈아엎음] 처음엔 학교 23곳을 한 축에 넣고 locations 를
+    #    [한국, 미국]으로 뒀다. **한국 연고가 통째로 빠졌다** — schools 도 locations 도 OR 라
+    #    실제로 걸린 조합이 "미국 학교 + 미국 거주"였고, 그게 제일 큰 인구라 앞을 다 차지했다.
+    #    산 50명 중 **한국 학교 1명 · 한국 거주 0명** · 모수 10,038(= 미국 스텔스 창업자 전체).
+    #    → 축을 갈라 **각 쿼리가 한국 연고를 강제**하게 한다. 한 축에 합치지 마라.
+    "elite-kr": {
+        "every_days": 7, "pages": 1, "rewind": False, "manual": True, "post": "elite",
+        "parked": "학력은 안 건다 [사용자 결정 2026-09-01]. 1티어 35명 Catch 34% 가 "
+                  "학교 덕인지 스텔스 조건 덕인지 끝내 안 갈렸다 — s-* 축이 대신한다",
+        "payload": {"searchQuery": "Stealth Startup",
+                    "locations": ELITE_LOCATIONS,      # 해외 한국인을 잡으려면 미국을 남긴다
+                    "schools": KR_ELITE},
+    },
+    "elite-us-kr": {
+        "every_days": 7, "pages": 1, "rewind": False, "manual": True, "post": "elite",
+        "parked": "학력은 안 건다 [사용자 결정 2026-09-01] — elite-kr 과 같은 이유",
+        # 🔴 거주지를 **한국으로만** 좁힌다. 안 좁히면 위와 같은 사고가 그대로 재현된다
+        #    (미국 학교 + 미국 거주 = 우리가 볼 수 없는 딜).
+        "payload": {"searchQuery": "Stealth Startup",
+                    "locations": ["South Korea"], "schools": US_ELITE},
+    },
+    # 🔴 **주차했다. 되살리기 전에 이 숫자를 먼저 반박하라** (2026-08-19 유료 실측 $0.20):
+    #      모수 297,197 · 천장 2,500 = **0.8% 밖에 못 본다**
+    #      1페이지 25명 중 6개월내 공백 **0명** (공백이 있기라도 한 사람 2명)
+    #    액터에 "현 직장 없음" 필터가 없어서 발굴로는 바늘 찾기다.
+    #    경력단절은 **발굴이 아니라 리텐션 신호**다 — 이미 아는 사람을 다시 보다가
+    #    '재직 → 공백'으로 바뀌는 순간을 잡아야 잡힌다.
+    "elite-gap": {
+        "every_days": 14, "pages": 1, "rewind": False, "manual": True, "post": "elite",
+        "parked": "모수 297k·천장 0.8%·1페이지 통과 0명 (2026-08-19 실측)",
+        "keep_exclude_titles": False,
+        "payload": {"pastJobTitles": _PRACTITIONER,
+                    "locations": ELITE_LOCATIONS, "schools": ELITE_SCHOOLS},
+    },
+})
+
+
+# ================================================================ KAIST 재학 창업자 (2026-09-15, Reviewer C 요청)
+#
+# 🔴 서버에 "재학중" 필터가 없다. schools 로 KAIST 전원을 사서
+#    education.endDate.year >= 현재연도 인 사람만 남긴다.
+#    졸업생 값도 이미 나간 돈이다 — reject 가 이유별로 세서 남긴다.
+#
+# 🔴 education 의 endDate 에 "Present" 는 **0건**이다(아카이브 2,923건 실측).
+#    experience 의 is_present() 를 그대로 쓰면 재학생 0명이 나온다.
+
+AXES["kaist-founder"] = {
+    "every_days": 7, "pages": 10, "rewind": True, "manual": True,
+    "post": "kaist-current",
+    "payload": {
+        "currentJobTitles": _TITLES,
+        "schools": ["KAIST", "Korea Advanced Institute of Science and Technology"],
+        **_EARLY,       # 재직 1년 미만 + 10인 이하 → 모수를 줄인다
+    },
+}
+
+# 직함이 아니라 분류(Owner/CXO)로 잡는 축. "Building something new" 처럼
+# Founder 를 안 쓴 사람을 여기서 줍는다.
+AXES["kaist-founder-class"] = {
+    "every_days": 7, "pages": 10, "rewind": True, "manual": True,
+    "post": "kaist-current",
+    "payload": {
+        "schools": ["KAIST", "Korea Advanced Institute of Science and Technology"],
+        **_EARLY, **_FOUNDER_CLASS,
+    },
+}
+
+# 스텔스 + KAIST. _EARLY 를 안 건다 — 스텔스 2년차도 대상이다(stealth-kr 과 동일 논리).
+AXES["kaist-stealth"] = {
+    "every_days": 7, "pages": 10, "rewind": True, "manual": True,
+    "post": "kaist-current",
+    "payload": {
+        "searchQuery": "Stealth Startup",
+        "schools": ["KAIST", "Korea Advanced Institute of Science and Technology"],
+    },
+}
+
+
+def reject(axis: str, item: dict) -> str:
+    """사후 조건에 걸리면 **이유**를, 통과하면 빈 문자열을 준다.
+
+    🔴 이유를 돌려주는 이유: 거른 사람을 세서 남기기 위해서다. bool 로 만들면
+       "몇 명이 왜 빠졌는지"가 사라지고, 그건 조용한 삭제다.
+    """
+    # 🔴 kaist-current 는 외국인 필터를 안 건다 — KAIST 유학생도 대상이다.
+    if AXES.get(axis, {}).get("post") == "kaist-current":
+        return profile.kaist_currently_enrolled(item)
+    loc = str(item.get("location") or item.get("locationName") or "").lower()
+    if loc and not profile.korea_signals(item):
+        return f"외국인({loc})"
+    if AXES.get(axis, {}).get("post") != "elite":
+        return ""
+    # 🔴 연도를 **모르면 뺀다**(사용자 결정 2026-08-19 최종). 결정이 두 번 뒤집혔으니
+    #    이력을 남긴다 — ①"학부 써있는 사람만"(컷) → ②완전탐색으로 바뀌며 "넘겨"(통과)
+    #    → ③학교를 학부 줄로 조이고 나니 **학교는 엄격·연도는 관대**한 비대칭이 드러나
+    #    다시 컷. 지금 1티어는 "조건이 전원 참"인 집합이다.
+    #    ⚠️ 대가: KAIST 학사인 게 확실한데 재학 기간만 안 적은 사람이 같이 빠진다(19명).
+    #       되돌리려면 이 두 줄을 `if y is not None and y < UNDERGRAD_SINCE` 로 합치면 된다.
+    y = profile.undergrad_start_year(item)
+    if y is None:
+        return "학부-연도미상"
+    if y < UNDERGRAD_SINCE:
+        return "학부-이전"
+    # 🔴 학교는 **학부 줄에서만** 인정한다(사용자 결정 2026-08-19 · 엄격).
+    #    액터의 schools 필터는 학력 아무 줄에나 걸리므로, 대학원·교환으로 지정 학교가
+    #    한 줄 있는 사람이 통과했다(실측: 115명 중 31명 = 27%).
+    #    학위 표기가 아예 없어 학부를 못 가리는 사람(25명)도 여기서 뺀다 — 엄격 기준이다.
+    if not profile.elite_undergrad(item):
+        return "학부-학교아님" if profile.undergrad_schools(item) else "학부-학교미상"
+    if not (profile.stealth_signal(item) or profile.gap_within(item, GAP_MAX_MONTHS)):
+        return "스텔스도-공백도-아님"
+    return ""
+
+
 
 def payload(axis: str, start_page: int) -> dict:
     a = AXES[axis]
-    return {**COMMON, **a["payload"], "startPage": start_page}
+    common = dict(COMMON)
+    # 🔴 과거직함 축은 리크루터 제외를 뺀다 — 현 직함 기준 필터라 공백자를 통째로 뺄 수 있고,
+    #    그러면 "공백형 0명"이 나와 **축이 고장난 것으로 오진**한다.
+    if not a.get("keep_exclude_titles", True):
+        common.pop("excludeCurrentJobTitles", None)
+    return {**common, **a["payload"], "startPage": start_page}
+
+
+# ================================================ 카드 필터 (노션 행에 대고 판정)
+#
+# 🔴 위 수집 축과 **같은 기준을 노션 행에 대본 것**이다. 완전히 같을 수는 없다 —
+#    노션에 없는 칸이 셋 있다:
+#      직군(function) · 직급(seniority) · 회사 규모
+#    그래서 축 C2(분류로 창업자 잡기)는 **여기서 적용 불가**하고, 직군·직급 제외는
+#    텍스트로 근사한다. 새 축으로 사온 사람부터는 이 격차가 줄어든다.
+#
+# 🔴 실측(2026-09-01, 아직 안 나간 1,190명):
+#      축 A 141 · 축 B 55 · 축 C1 168 → 합집합 347명 (69일치)
+#      나갔던 42명 중 30명 통과 · 그중 ✅ 7명 = 23%
+#    ⚠️ 적중률이 기저(26%)보다 낮다. 다만 이 필터의 실질인 직군·직급을 텍스트로만
+#       근사했고 C2 는 통째로 빠져 있어, **지금 데이터로는 제대로 평가되지 않는다.**
+
+_CARD_FOUNDER = ("founder", "co-founder", "cofounder", "ceo", "cto",
+                 "대표", "창업자", "공동창업자")
+_CARD_RECRUIT = ("recruit", "헤드헌", "talent acquisition", "sourcer", "hr manager")
+_CARD_EXCL_FN = ("consult", "컨설팅", "자문", "freelance", "프리랜서", "에이전시",
+                 "agency", "인사담당", "채용대행", "sales rep", "영업대행")
+_CARD_EXCL_SENIOR = ("director", "vice president", "전무", "상무", "본부장")
+# 🔴 [사용자 결정 2026-09-21] 값을 조였다. 실측(재고 1,177명 기준, 329명에서 시작):
+#      MAX_TENURE 60→36: -7 · STEALTH_MAX_MONTHS 신설(12): -38
+#      GAP_MONTHS 6→3 + `본업 공백` 체크에도 같은 상한: -37
+#      RECENT_MONTHS 6→3: -35 (Catch 8명 포함)
+#    → 200명대 초반. `본업 공백` 체크가 개월 수와 무관하게 통과시키던 우회를 막았다 —
+#      체크는 있는데 `공백 개월` 이 비어 있으면 여전히 통과한다(모르는 건 감점이 아니다).
+RECENT_MONTHS = 3        # 창업자 직함 + 현 직장 재직 3개월 이내 (서버는 1년 미만까지만 걸린다)
+GAP_MONTHS = 3           # 최근 3개월 내 경력단절 — 체크박스에도 같은 상한
+MAX_TENURE = 36          # 현 직장 재직 3년 초과 제외 (60 이었을 때 실측 Catch 0/105)
+STEALTH_MAX_MONTHS = 12  # 스텔스라도 재직 1년 초과면 제외 (2년차 스텔스는 극초기가 아니다)
+
+
+def _f(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def card_reject(live: dict) -> str:
+    """카드로 올릴 수 없으면 **이유**를, 올릴 수 있으면 빈 문자열을 준다.
+
+    🔴 bool 이 아니라 이유를 준다 — 몇 명이 왜 빠졌는지가 화면에 남아야 한다.
+       조용히 빠지면 재고가 왜 줄었는지 나중에 못 밝힌다.
+    """
+    head = str(live.get("Author Headline") or "").lower()
+    blob = " ".join(str(live.get(k) or "") for k in
+                    ("Author Headline", "Raw Text", "회사", "서비스명", "One Liner")).lower()
+    tenure = _f(live.get("Tenure Months"))
+
+    if tenure is not None and tenure > MAX_TENURE:
+        return f"재직 {MAX_TENURE}개월 초과"
+    if any(w in blob for w in _CARD_RECRUIT):
+        return "리크루팅"
+    if any(w in blob for w in _CARD_EXCL_FN):
+        return "컨설팅·인사·영업"
+    if any(w in head for w in _CARD_EXCL_SENIOR):
+        return "Director·VP"
+
+    company = str(live.get("회사") or "").lower()
+    if any(w in company for w in ("stealth", "steath")):
+        if tenure is not None and tenure > STEALTH_MAX_MONTHS:
+            return f"스텔스 재직 {STEALTH_MAX_MONTHS}개월 초과"
+        return ""                                    # 축 A
+    gap = _f(live.get("공백 개월"))
+    if gap is not None and 0 < gap <= GAP_MONTHS:
+        return ""                                    # 축 B
+    if live.get("본업 공백") and (gap is None or gap <= GAP_MONTHS):
+        return ""                                    # 축 B — 체크만 있고 개월이 빈 경우
+    if any(w in head for w in _CARD_FOUNDER) and tenure is not None and tenure <= RECENT_MONTHS:
+        return ""                                    # 축 C1
+    return "세 갈래 어디에도 안 걸림"

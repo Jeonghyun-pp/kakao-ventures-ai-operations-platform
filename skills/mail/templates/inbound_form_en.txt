@@ -1,0 +1,10 @@
+Hi, this is Kakao Ventures.
+
+Thank you for reaching out to Kakao Ventures.
+
+If you would like us to review an investment opportunity, please submit your business plan through the Google form below. Please note that a review may take between one and four weeks.
+
+Google form: {google_form}
+
+Best regards,
+Kakao Ventures

@@ -31,6 +31,8 @@ TRANSPORTS = {
     "kv_transport/slack.py",
     "kv_transport/claude.py",
     "kv_transport/apify.py",
+    "kv_transport/gmail.py",
+    "kv_transport/sheets.py",
 }
 # 외부 접촉 모듈
 NET_MODULES = {"requests", "urllib", "urllib3", "http", "socket", "httpx", "aiohttp"}
@@ -203,15 +205,80 @@ def a6_no_magic_constraints() -> None:
 
 
 # ---------------------------------------------------------------- A8
+# 🔴 **바깥으로 나가거나 되돌릴 수 없는** 지메일 엔드포인트. 하나라도 있으면 위반이다.
+#
+#    경계를 여기 그은 이유:
+#        아카이브(`/modify`)  인박스 라벨만 뗀다. 되돌릴 수 있다        → 허용
+#        초안(`POST /drafts`) 만들 뿐 나가지 않는다                  → 허용
+#        발송(`/send`)        회사 이름으로 바깥에 나간다             → 🔴 금지
+#        영구삭제(`/trash` 등) 되돌리기 어렵다. 쓸 일이 없다            → 🔴 금지
+#
+#    `POST /drafts` 와 `POST /drafts/{id}/send` 는 접미사 하나 차이다.
+#    그래서 `/send` 를 잡되 `/drafts` 는 통과시킨다.
+#
+#    옛 검사는 `.send(` 와 `messages()` 가 같은 줄에 있는지만 봤다. 그건 googleapiclient
+#    전용이고, requests 로 짜면 **아무것도 못 잡는다** — 통로가 생기는 순간 무력해지는
+#    검사였다. 게다가 `drafts().send(id)` 로도 메일이 나가는데 그것도 못 잡았다.
+#    (옛 리포에 `drafts().send` 는 0건이었지만, 막아서가 아니라 우연히 없었다.)
+GMAIL_FORBIDDEN_ENDPOINTS = ("/send", "/trash", "/batchDelete", "/import", "/insert")
+SMTP_MODULES = {"smtplib", "aiosmtplib"}
+
+
+def _docstring_lines(tree: ast.AST) -> set[int]:
+    """독스트링이 차지하는 줄 번호.
+
+    🔴 문자열 **전부**를 빼면 안 된다. A8 이 잡으려는 위반이 바로 문자열(URL)이기 때문이다.
+       독스트링만 뺀다 — 규칙을 설명하는 글이 그 규칙을 위반한 것으로 세지 않기 위해서다.
+       (08-17 실측: gmail 통로의 '왜 SDK 를 안 쓰나' 설명이 A8 에 걸렸다.)
+    """
+    out: set[int] = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if not isinstance(body, list) or not body:
+            continue
+        first = body[0]
+        if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)):
+            out.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
+    return out
+
+
 def a8_no_send() -> None:
-    """Gmail 발송 호출 0건. 지금은 Gmail 통로 자체가 없다."""
+    """메일이 바깥으로 나가는 경로가 코드에 없나.
+
+    스코프로는 못 막는다 — 토큰이 가진 gmail.modify 에 send 가 포함된다. 막는 자리는 여기뿐이다.
+    """
     bad = []
     for p in py_files():
+        r = rel(p)
+        if r in FIXTURE_FILES:
+            continue
         src = p.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue                      # A0 가 이미 셌다
+        # smtplib 는 지메일 API 를 통째로 우회하는 발송 경로다
+        for node in ast.walk(tree):
+            mods = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                    else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            if any(str(m).split(".")[0] in SMTP_MODULES for m in mods):
+                bad.append(f"{r}:{node.lineno} smtp")
+        skip_lines = _docstring_lines(tree)
         for i, line in enumerate(src.splitlines(), 1):
-            if re.search(r"\.send\s*\(", line.split("#")[0]) and "messages()" in line:
-                bad.append(f"{rel(p)}:{i}")
-    check("A8", "Gmail 발송 호출 0건", not bad, "Gmail 통로가 아직 없다 — 구조적으로 0")
+            if i in skip_lines:
+                continue
+            code = line.split("#")[0]
+            for ep in GMAIL_FORBIDDEN_ENDPOINTS:
+                if ep in code:
+                    bad.append(f"{r}:{i} {ep}")
+            # 옛 SDK 패턴도 계속 본다 — 누가 googleapiclient 를 다시 들여올 수 있다
+            if re.search(r"\.send\s*\(", code) and ("messages()" in code or "drafts()" in code):
+                bad.append(f"{r}:{i} sdk-send")
+    check("A8", "메일 발송 경로 0건", not bad,
+          f"{len(bad)}건: {bad[:4]}" if bad
+          else f"금지 엔드포인트 {len(GMAIL_FORBIDDEN_ENDPOINTS)}종 · SDK send · smtplib — 전부 0 "
+               f"(아카이브·초안은 허용)")
 
 
 # ---------------------------------------------------------------- 아직 못 세는 것
