@@ -28,6 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from kvlib import constraints
+from kv_transport import slack
 
 from . import rules
 
@@ -39,6 +40,8 @@ SLACK_BPLAN = "person-43d35afbd5dc@example.com"   # #Squad-비플랜 (메일 포
 
 # 🔴 슬랙 게시 대상 채널 키. 지금은 test(review-test) 고, 실채널은 사람이 지시할 때만.
 POST_CH = "test"
+slack.register("test",  "C000E8E4F75")     # review_test
+slack.register("bplan", "C0000AEB349")     # #Squad-비플랜 — 봇 초대 필요
 
 # 🔴 분류가 무엇이든, 무수정률이 얼마든 **영원히** 사람이 보낸다.
 NEVER_AUTO_SEND = tuple(constraints.get("gmail.never_auto_send"))

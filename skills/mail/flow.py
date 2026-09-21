@@ -291,8 +291,7 @@ class RealIO:
     """진짜 통로. `_out` 이 문을 열었을 때만 쓴다(반응·답글 읽기는 예외 — 읽기다)."""
 
     def __init__(self):
-        from kv_transport import gmail, slack
-        from . import run                                        # noqa: F401  채널 등록이 거기 있다
+        from kv_transport import gmail, slack                    # 채널 등록은 route 가 import 될 때 끝났다
         self.gmail, self.slack = gmail, slack
 
     def slack_post(self, ch: str, text: str, thread_ts: str | None = None) -> str:

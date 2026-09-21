@@ -52,9 +52,7 @@ _ICON = {"protect": "🔒", "archive": "📥", "reply": "✉️", "forward": "�
 # 🔴 슬랙 채널. **등록과 사용은 별개다** — 실채널을 등록해두되 지금은 test 로만 보낸다
 #    [사용자 결정 2026-08-18] 자동으로 도는 건 전부 review-test.
 #    실채널 게시는 사람이 그때그때 지시한다. 켤 때는 CH 한 줄만 바꾼다.
-slack.register("test",  "C000E8E4F75")     # review_test
-slack.register("bplan", "C0000AEB349")     # #Squad-비플랜 — 봇 초대 필요
-# 어느 채널로 보낼지는 route.POST_CH 하나가 정한다 (여기 또 두면 두 진실원이 된다)
+# 채널 등록은 route.py 에 있다 — 어느 채널로 보낼지 정하는 POST_CH 바로 옆이다.
 
 
 class Degraded(RuntimeError):
@@ -319,8 +317,9 @@ def _report(rows: list[dict], stamp: str, total: int, unjudged: list[dict]) -> s
            f"| 📤 forward | {c.get('forward', 0)} | 포워드 **초안**. 발송은 사람이 |",
            f"| 🚩 escalate | {c.get('escalate', 0)} | 인박스에 두고 사람이 본다. 초안 없음 |", ""]
 
-    if unknown_ratio > 0.30:
-        out += [f"> 🔴 **UNKNOWN 비율 {unknown_ratio:.0%}** — 기준(30%)을 넘었다. 분류기가 이상하다는 신호다.", ""]
+    alert = constraints.get("gmail.unknown_alert_ratio")
+    if unknown_ratio > alert:
+        out += [f"> 🔴 **UNKNOWN 비율 {unknown_ratio:.0%}** — 기준({alert:.0%})을 넘었다. 분류기가 이상하다는 신호다.", ""]
     if unjudged:
         out += [f"> 🔴 **claude 판정을 못 받은 메일 {len(unjudged)}통** — UNKNOWN 으로 뒀다. 조용히 버리지 않았다.", ""]
 
