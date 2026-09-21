@@ -88,7 +88,8 @@ class Flow:
     """`io` 는 밖에 닿는 손이다. 테스트는 가짜를 넣는다.
 
     slack_post(ch, text, thread_ts=None)->ts · slack_reactions(ch, ts)->[이름] · slack_replies(ch, ts)->[{ts,user,text}]
-    draft_reply(mid, to, body)->id · archive(mid)
+    draft_reply(mid, to, body, subject=None)->id · archive(mid)
+    send_draft(id)->보낸 메시지 id · draft_exists(id)->bool · thread_after(tid, mid)->int · legacy_acted(mid)->bool
     `llm(prompt, system)->str` 은 자유 답글을 읽을 때만 쓴다.
     """
 
@@ -196,6 +197,82 @@ class Flow:
         ids = [r[0] for r in self.con.execute("SELECT message_id FROM actions WHERE kind='post'")]
         return [i for i in ids if self.app.get_state(self._cfg(i)).next == (node,)]
 
+    # ---- 기다릴 게 없는 회신 (폼 안내) --------------------------------------------
+    def reply_all(self) -> dict:
+        """`route.decide()` 가 **회신**이라고 한 메일에 승인된 템플릿을 보낸다. 대기가 없어 그래프를 안 탄다.
+
+        ① 자격은 DB 만 보고 가른다 — 탈락은 `skipped` 로 남고 다시 안 본다.
+        ② 발송 시점의 문은 **문이 on 일 때만** 본다 — 막히면 `dry` 로 남아 다음 실행에 다시 본다.
+        ③ 실행은 `_out` 을 지난다. `send` 는 SLACK_KINDS 밖이라 문이 on 이 아니면 저절로 dry 다.
+        """
+        own = {a.lower() for a in constraints.get("mail_observe.own_addresses")}
+        gate_on = constraints.get("mail_observe.outbound") == "on"
+        n = {"sent": 0, "would_send": 0, "skipped": 0}
+        for mid, cat, follow in self.con.execute(
+                "SELECT j.message_id, j.category, j.followup FROM judgments j JOIN messages m ON m.id=j.message_id"
+                " WHERE j.run='live' AND j.ok=1 AND m.direction='in' AND NOT EXISTS(SELECT 1 FROM actions a"
+                " WHERE a.message_id=j.message_id AND a.kind='send' AND a.status IN ('done','skipped'))"
+                " ORDER BY m.internal_ms").fetchall():                       # 오래된 것부터 — 같은 사람의 첫 메일이 회신을 받는다
+            m, row = self._msg(mid)
+            act = route.decide(m, {"category": cat, "why": row["reason"]})
+            if act["action"] != "reply":
+                continue
+            to = (act.get("to") or "").lower()
+            webflow = row["webflow_kind"] is not None
+            why = (
+                "후속·재문의 — 폼 안내를 또 보내지 않는다" if follow == "yes" else
+                "영원히 수동인 갈래" if cat in constraints.get("gmail.never_auto_send") else
+                # ponytail: no-reply 류는 나열이다(열린 집합). 놓쳐도 반송될 뿐이고, 주 방어는 "수신자 = DB 에 기록된 발신자"다
+                "보낼 수 없는 수신자" if not to or to in own or re.search(r"no-?reply|donotreply|mailer-daemon", to) else
+                "같은 수신자에게 이미 보냈거나 보낼 것이다" if self.con.execute(
+                    "SELECT 1 FROM actions WHERE kind='send' AND status!='skipped' AND message_id!=?"   # 🔴 실패·진행 중도 '잡힌 것'이다 (모르는 상태는 막는 쪽)
+                    " AND json_extract(detail,'$.to')=?", (mid, to)).fetchone() else
+                # 🔴 웹플로우 알림은 서로 다른 문의자가 한 대화에 묶인다 — 대화 진행으로 판단하면 안 된다
+                "대화가 이미 진행됐다" if not webflow and self.con.execute(
+                    "SELECT 1 FROM messages WHERE thread_id=? AND internal_ms>?", (row["thread_id"], row["internal_ms"])).fetchone()
+                else "")
+            detail = {"to": to, "category": cat}
+            if why:
+                self.con.execute("INSERT OR REPLACE INTO actions VALUES(?,?,?,?,?)",
+                                 (mid, "send", "skipped", json.dumps({**detail, "why": why}, ensure_ascii=False), self.now()))
+                n["skipped"] += 1
+                continue
+            blocked = self._blocked(mid, cat, row["thread_id"]) if gate_on else ""
+            if blocked:                                                      # 문은 열렸지만 이 메일은 아직 — 다음 실행에 다시 본다
+                self.con.execute("INSERT OR REPLACE INTO actions VALUES(?,?,?,?,?)",
+                                 (mid, "send", "dry", json.dumps({**detail, "blocked": blocked}, ensure_ascii=False), self.now()))
+                n["would_send"] += 1
+                continue
+            prev = (self._act_row(mid, "send") or {}).get("draft_id")
+            if prev:
+                detail["draft_id"] = prev
+            status = self._out(mid, "send", detail, lambda: self._send(mid, to, act["body"], row["subject"] if webflow else None, detail))
+            n["sent" if status == "done" else "would_send"] += 1
+        return n
+
+    def _blocked(self, mid: str, cat: str, thread_id: str) -> str:
+        """발송 직전의 문. 🔴 돌이킬 수 없는 행동 앞에서는 DB 가 아니라 **지금의 현실**을 본다."""
+        if cat not in constraints.get("mail_observe.send_branches"):        # 허용 목록 — 기본은 빈 목록이다
+            return "이 갈래는 자동 발송이 안 켜져 있다"
+        if self.io.legacy_acted(mid):
+            return "현행 시스템이 이미 이 메일에 초안을 만들었거나 아카이브했다"
+        if self.io.thread_after(thread_id, mid) > 0:
+            return "그사이 대화가 진행됐다"
+        day = self.now()[:10]
+        sent = self.con.execute("SELECT count(*) FROM actions WHERE kind='send' AND status='done' AND created>=?", (day,)).fetchone()[0]
+        return "오늘 발송 상한에 닿았다" if sent >= constraints.get("mail_observe.send_per_day") else ""
+
+    def _send(self, mid: str, to: str, body: str, subject: str | None, detail: dict) -> str:
+        """초안을 만들고 **그 초안을** 보낸다. 🔴 두 번째 초안을 만들지 않는다 — 이전 시도의 초안이 있으면 그것부터 본다."""
+        did = detail.get("draft_id")
+        if did and not self.io.draft_exists(did):
+            return "이전 시도에서 이미 나갔다"                                 # 초안이 사라졌다 = 발송됐다
+        if not did:
+            did = detail["draft_id"] = self.io.draft_reply(mid, to, body, subject)
+            self.con.execute("INSERT OR REPLACE INTO actions VALUES(?,?,?,?,?)",   # 보내기 **전에** 적는다 — 여기서 죽어도 다음 실행이 이 초안을 잇는다
+                             (mid, "send", "sending", json.dumps(detail, ensure_ascii=False), self.now()))
+        return self.io.send_draft(did)
+
     def advance(self) -> dict:
         """새로 물을 메일을 시작하고, 올라간 글의 반응·답글을 읽어 잇고, 조용하면 리마인드한다."""
         new = [r[0] for r in self.con.execute(
@@ -203,7 +280,7 @@ class Flow:
             " AND NOT EXISTS(SELECT 1 FROM actions a WHERE a.message_id=j.message_id AND a.kind='post')", ASK)]
         for mid in new:
             self.app.invoke({"mid": mid}, self._cfg(mid))
-        n = {"asked": len(new), "decided": 0, "acked": 0, "reminded": 0}
+        n = {**self.reply_all(), "asked": len(new), "decided": 0, "acked": 0, "reminded": 0}
         for mid in self._at("wait"):
             self._post({"mid": mid})                                     # 문이 닫혀 dry 였던 질문은 문이 열리면 그때 올린다
             d = self._read_decision(mid)
@@ -291,8 +368,10 @@ class RealIO:
     """진짜 통로. `_out` 이 문을 열었을 때만 쓴다(반응·답글 읽기는 예외 — 읽기다)."""
 
     def __init__(self):
-        from kv_transport import gmail, slack                    # 채널 등록은 route 가 import 될 때 끝났다
-        self.gmail, self.slack = gmail, slack
+        from kv_transport import gmail, gmail_send, slack        # 채널 등록은 route 가 import 될 때 끝났다
+        from kvlib import ledger
+        self.gmail, self.slack, self.sender = gmail, slack, gmail_send
+        self._legacy = ledger.keys("mail", "archived") | ledger.keys("mail", "drafted")    # 현행 장부 — 읽기만
 
     def slack_post(self, ch: str, text: str, thread_ts: str | None = None) -> str:
         return self.slack.post(ch, text, thread_ts=thread_ts).require()
@@ -304,8 +383,20 @@ class RealIO:
         return [{"ts": r.get("ts", ""), "text": r.get("text", ""), "user": None if r.get("bot_id") else r.get("user")}
                 for r in self.slack.replies(ch, ts).require()]
 
-    def draft_reply(self, mid: str, to: str, body: str) -> str:
-        return self.gmail.draft_reply(self.gmail.message(mid).require(), body, to).require()
+    def draft_reply(self, mid: str, to: str, body: str, subject: str | None = None) -> str:
+        return self.gmail.draft_reply(self.gmail.message(mid).require(), body, to, subject=subject).require()
+
+    def send_draft(self, draft_id: str) -> str:
+        return self.sender.send_draft(draft_id).require()
+
+    def draft_exists(self, draft_id: str) -> bool:
+        return self.sender.draft_exists(draft_id).require()
+
+    def thread_after(self, thread_id: str, mid: str) -> int:
+        return self.gmail.thread_after(thread_id, mid).require()
+
+    def legacy_acted(self, mid: str) -> bool:
+        return mid in self._legacy
 
     def archive(self, mid: str) -> bool:
         return self.gmail.archive(mid).require()

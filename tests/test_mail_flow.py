@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ from tests.test_mail_observe import LLM, Reader, mail
 class Hands:
     def __init__(self, reactions=()):
         self.calls, self.reactions, self.replies = [], list(reactions), []
+        self.send_fails, self.drafts_exist, self.after, self.legacy = False, True, 0, set()
 
     def slack_post(self, ch, text, thread_ts=None):
         self.calls.append(("thread" if thread_ts else "post", ch, text)); return "ts-1"
@@ -25,17 +27,33 @@ class Hands:
     def slack_replies(self, ch, ts):
         return self.replies
 
-    def draft_reply(self, mid, to, body):
-        self.calls.append(("draft", mid, to, body[:12])); return "draft-1"
+    def draft_reply(self, mid, to, body, subject=None):
+        self.calls.append(("draft", mid, to, body[:12])); return f"draft-{mid}"
+
+    def send_draft(self, did):
+        self.calls.append(("send", did))
+        if self.send_fails:
+            raise RuntimeError("timeout")
+        return "sent-1"
+
+    def draft_exists(self, did):
+        return self.drafts_exist
+
+    def thread_after(self, tid, mid):
+        return self.after
+
+    def legacy_acted(self, mid):
+        return mid in self.legacy
 
     def archive(self, mid):
         self.calls.append(("archive", mid)); return True
 
 
-def gate(value):
+def gate(value, **over):
+    """문과, 필요하면 다른 설정값도 바꿔 끼운다: gate("on", send_branches=["INBOUND_KO"])."""
     real = flow.constraints.get
-    return mock.patch.object(flow.constraints, "get",
-                             lambda k: value if k == "mail_observe.outbound" else real(k))
+    table = {"mail_observe.outbound": value, **{f"mail_observe.{k}": v for k, v in over.items()}}
+    return mock.patch.object(flow.constraints, "get", lambda k: table[k] if k in table else real(k))
 
 
 class FlowCase(unittest.TestCase):
@@ -71,7 +89,8 @@ class FlowCase(unittest.TestCase):
         f.decide("tr", "yes", by="manual")
         f.decide("ev", "no", by="manual")
         self.assertEqual(h.calls, [])
-        self.assertEqual(self.acts(), {("ev", "post"): "dry", ("tr", "post"): "dry", ("tr", "draft"): "dry", ("ev", "archive"): "dry"})
+        self.assertEqual(self.acts(), {("ev", "post"): "dry", ("tr", "post"): "dry", ("tr", "draft"): "dry", ("ev", "archive"): "dry",
+                                       ("ko", "send"): "dry"})                       # 인바운드는 묻지 않고 폼 안내를 '보냈을 것'
 
     def test_slack_level_posts_but_never_touches_the_mailbox(self):
         """🔴 시험용 단계. 슬랙 글은 실제로 올라가고, ❌·⭕ 가 와도 아카이브·초안은 기록만 한다."""
@@ -225,6 +244,115 @@ class FlowCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SendCase(unittest.TestCase):
+    """폼 안내 자동 회신. 검사마다 하나씩."""
+
+    ON = dict(send_branches=["INBOUND_KO", "INBOUND_EN"])
+
+    def setUp(self):
+        d = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.path = str(Path(d) / "mail.sqlite")
+        self.con = observe.connect(self.path)
+        self.addCleanup(self.con.close)
+        msgs = [mail("a", sender="f@example.com", subject="투자 문의", ms=10),
+                mail("a2", sender="f@example.com", subject="투자 문의 (자료 추가)", ms=20),         # 같은 사람이 대화를 나눠 또 보냄
+                mail("fu", sender="g@example.com", subject="재문의 FOLLOW", ms=30),
+                mail("t1", sender="h@example.com", subject="투자 문의 H", ms=40),
+                mail("t2", t="t1", sender="deals@example.vc", subject="Re: 투자 문의 H", ms=50),   # 우리가 이미 답했다
+                mail("nr", sender="no-reply@example.com", subject="투자 문의 NR", ms=60)]
+        llm = lambda p, s: "CATEGORY: INBOUND_KO\nREASON: r\nFOLLOWUP: %s" % ("yes" if "FOLLOW" in p.split("제목:")[1][:40] else "no")
+        observe.run_once(self.con, Reader(msgs), llm, days=2, max_judge=50, no_judge=False)
+
+    def flow(self, hands):
+        f = flow.Flow(self.con, self.path, hands, now=lambda: "2026-09-21T01:00:00Z")
+        self.addCleanup(f.close)
+        return f
+
+    def sends(self):
+        return {r[0]: (r[1], json.loads(r[2])) for r in self.con.execute("SELECT message_id, status, detail FROM actions WHERE kind='send'")}
+
+    def test_eligibility_is_decided_from_the_db(self):
+        h = Hands()
+        r = self.flow(h).reply_all()                                                 # 문은 닫혀 있다(리포 기본값)
+        s = self.sends()
+        self.assertEqual(h.calls, [])                                                # 🔴 아무 손도 안 불렀다
+        self.assertEqual(s["a"][0], "dry")                                           # 보냈을 것
+        self.assertIn("같은 수신자", s["a2"][1]["why"])
+        self.assertIn("후속", s["fu"][1]["why"])
+        self.assertIn("대화가 이미 진행", s["t1"][1]["why"])
+        self.assertIn("수신자", s["nr"][1]["why"])
+        self.assertEqual((r["would_send"], r["skipped"], r["sent"]), (1, 4, 0))
+
+    def test_open_gate_but_empty_branch_list_sends_nothing(self):
+        """🔴 허용 목록의 기본은 빈 목록이다. 문만 열어서는 안 나간다."""
+        h = Hands()
+        with gate("on"):
+            self.flow(h).reply_all()
+        self.assertEqual(h.calls, [])
+        self.assertIn("안 켜져", self.sends()["a"][1]["blocked"])
+
+    def test_slack_level_never_sends(self):
+        h = Hands()
+        with gate("slack", **self.ON):
+            self.flow(h).reply_all()
+        self.assertEqual([c for c in h.calls if c[0] in ("draft", "send")], [])
+
+    def test_open_gate_and_allowed_branch_sends_once(self):
+        h = Hands()
+        with gate("on", **self.ON):
+            f = self.flow(h)
+            self.assertEqual(f.reply_all()["sent"], 1)
+            f.reply_all()
+        self.assertEqual([c[:2] for c in h.calls], [("draft", "a"), ("send", "draft-a")])   # 초안 하나, 발송 하나. 두 번째 실행은 아무것도 안 한다
+        self.assertEqual(self.sends()["a"][0], "done")
+
+    def test_never_auto_send_branch_is_skipped(self):
+        real = flow.constraints.get
+        with mock.patch.object(flow.constraints, "get", lambda k: ["INBOUND_KO"] if k == "gmail.never_auto_send" else real(k)):
+            self.flow(Hands()).reply_all()
+        self.assertIn("영원히 수동", self.sends()["a"][1]["why"])
+
+    def test_send_time_gates_block_without_sending(self):
+        for setup, word in ((lambda h: h.legacy.add("a"), "현행 시스템"), (lambda h: setattr(h, "after", 1), "대화가 진행")):
+            h = Hands()
+            setup(h)
+            f = self.flow(h)
+            self.con.execute("DELETE FROM actions")
+            with gate("on", **self.ON):
+                f.reply_all()
+            self.assertEqual(h.calls, [], word)
+            self.assertIn(word, self.sends()["a"][1]["blocked"])                     # dry 로 남아 다음 실행에 다시 본다
+
+    def test_daily_cap(self):
+        h = Hands()
+        with gate("on", send_per_day=0, **self.ON):
+            self.flow(h).reply_all()
+        self.assertEqual(h.calls, [])
+        self.assertIn("상한", self.sends()["a"][1]["blocked"])
+
+    def test_failed_send_keeps_the_draft_and_never_makes_a_second_one(self):
+        h = Hands()
+        h.send_fails = True
+        with gate("on", **self.ON):
+            self.flow(h).reply_all()
+            self.assertEqual(self.sends()["a"][0], "failed")
+            h.send_fails = False
+            self.flow(h).reply_all()
+        self.assertEqual([c[0] for c in h.calls], ["draft", "send", "send"])         # 🔴 초안은 한 번만 만들었다
+        self.assertEqual(self.sends()["a"][0], "done")
+
+    def test_vanished_draft_means_it_already_went_out(self):
+        h = Hands()
+        h.send_fails = True
+        with gate("on", **self.ON):
+            self.flow(h).reply_all()
+            h.drafts_exist = False                                                   # 응답은 못 받았지만 실제로는 나갔다
+            self.flow(h).reply_all()
+        self.assertEqual([c[0] for c in h.calls], ["draft", "send"])                 # 다시 보내지 않았다
+        self.assertEqual(self.sends()["a"][0], "done")
 
 
 class Mention(unittest.TestCase):

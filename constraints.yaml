@@ -160,6 +160,9 @@ gmail:
   plan_stale_hours: 12
   judge_batch: 15
   # 무수정 발송률 — 자동 발송 승격의 **유일한** 근거다.
+  # [2026-09-21] 재는 대상이 바뀌었다 — 새 흐름에는 사람이 초안을 누르는 단계가 없다. 그래서 "사람이 안 고치고 보낸 비율" 대신
+  #   "사람이 단 정답(observe --op label)과 분류가 일치한 비율"을 잰다(observe.report 의 승격 줄). **원칙은 같다**:
+  #   기간(window_days) 안의 표본이 min_samples 이상이고 비율이 rate 이상일 때만 그 갈래를 켜도 된다고 말한다.
   promote:
     rate: 0.95
     window_days: 21
@@ -211,6 +214,11 @@ mail_observe:
   #    slack  슬랙 글만 올린다(질문·리마인드·인계). 초안·아카이브는 계속 기록만 — 시험은 여기서 한다
   #    on     메일함에도 쓴다(초안·아카이브). 게시 채널은 route.POST_CH(test), 메일은 초안까지다
   outbound: "off"
+  # 자동 발송(flow.reply_all). 🔴 **허용 목록**이다 — 여기 적힌 카테고리만, 그것도 outbound 가 on 일 때만 나간다. 기본은 아무것도 없다.
+  #    후보는 route.decide() 가 'reply' 를 돌려주는 갈래(지금 INBOUND_KO · INBOUND_EN)다. 켜기 전에 현행 plan/apply 의 그 갈래를 끈다 —
+  #    안 그러면 현행이 같은 메일에 초안을 또 만들고, 사람이 그걸 누르면 같은 안내가 두 번 간다.
+  send_branches: []
+  send_per_day: 20             # 하루 발송 상한. 폭주 방지다 — 평소 콜드 문의는 하루 서너 통
   remind_days: 2               # 질문·인계 글에 이만큼 반응이 없으면 스레드에 한 줄. 무응답을 거절로 바꾸지 않는다
   remind_max: 3
   # 하루 보고 요약을 슬랙에 올린다 [사용자 결정 2026-09-21]. 위의 outbound 와 별개다 — 보고서만 먼저 열었다.
