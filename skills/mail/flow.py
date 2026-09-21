@@ -375,7 +375,8 @@ class RealIO:
         return self.slack.post(ch, text, thread_ts=thread_ts).require()
 
     def slack_reactions(self, ch: str, ts: str) -> list[str]:
-        return [x.get("name") for x in self.slack.reactions(ch, ts).require()]
+        # 피부색 변형은 "raising_hand::skin-tone-3" 으로 온다 — 같은 이모지다
+        return [(x.get("name") or "").split("::")[0] for x in self.slack.reactions(ch, ts).require()]
 
     def slack_replies(self, ch: str, ts: str) -> list[dict]:
         return [{"ts": r.get("ts", ""), "text": r.get("text", ""), "user": None if r.get("bot_id") else r.get("user")}
