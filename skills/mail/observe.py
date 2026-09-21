@@ -27,10 +27,10 @@ import json
 import re
 import secrets as _rand
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from kvlib import constraints, lock, paths
+from kvlib import constraints, ledger, lock, paths
 
 from . import clean, rules
 
@@ -270,6 +270,61 @@ def status(con) -> str:
             f" | 오늘 claude {llm_calls_today(con)}회")
 
 
+def report(con, since: str) -> tuple[str, str]:
+    """`since`(UTC ISO) 뒤에 판정된 메일. (파일에 쓸 전체 보고서, 슬랙에 올릴 짧은 요약).
+
+    먼저 볼 것 = 사람이 봐야 기준이 나아지는 것: UNKNOWN · 현행과 갈린 것 · 형식 실패 · 슬랙에 물었을 것.
+    """
+    rows = con.execute(
+        "SELECT m.id, m.subject, m.sender, m.internal_ms, m.rule_category rc, j.category c, j.reason, j.followup f,"
+        " j.ok, j.error FROM judgments j JOIN messages m ON m.id=j.message_id"
+        " WHERE j.run=? AND j.created>=? ORDER BY m.internal_ms DESC", (LIVE, since)).fetchall()
+    legacy = _legacy()
+    try:
+        acts = {}
+        for mid, kind, st in con.execute("SELECT message_id, kind, status FROM actions"):
+            acts.setdefault(mid, []).append(f"{kind}:{st}")
+    except sqlite3.OperationalError:                             # 판단 흐름이 아직 한 번도 안 돌았다
+        acts = {}
+
+    def flag(r) -> str:
+        old = legacy.get(r["id"])
+        if not r["ok"]:
+            return f"형식 실패({r['error']})"
+        if r["c"] == rules.UNKNOWN:
+            return "UNKNOWN"
+        if old in rules.JUDGE_CATEGORIES and old != r["c"]:
+            return f"현행은 {old}"
+        if r["id"] in acts:
+            return "슬랙에 물었을 것 · " + ", ".join(acts[r["id"]])
+        return ""
+
+    cell = lambda x: str(x or "").replace("|", "/").replace("\n", " ")            # noqa: E731
+    when = lambda ms: datetime.fromtimestamp((ms or 0) / 1000, timezone.utc).strftime("%m-%d")   # noqa: E731
+    flagged = [(r, flag(r)) for r in rows if flag(r)]
+    dist = {}
+    for r in rows:
+        dist[r["c"] or "실패"] = dist.get(r["c"] or "실패", 0) + 1
+    head = (f"판정 {len(rows)}통 · 먼저 볼 것 {len(flagged)}통 | "
+            + " · ".join(f"{k} {v}" for k, v in sorted(dist.items(), key=lambda x: -x[1])))
+    md = [f"# 메일 관찰 보고 — {since} 이후", "", head, "", f"{status(con)}", "", "## 🚩 먼저 볼 것", ""]
+    md += [f"- **{why}** · `{r['c']}` · {cell(r['subject'])[:70]}  \n  {cell(r['reason'])}  \n  `{r['id']}` · {r['sender']}"
+           for r, why in flagged] or ["없음"]
+    md += ["", "## 전체", "", "| 날짜 | 분류 | 후속 | 규칙 | 현행 | 제목 | 발신 | 이유 | id |", "|---|---|---|---|---|---|---|---|---|"]
+    md += [f"| {when(r['internal_ms'])} | `{r['c']}` | {r['f'] or ''} | {r['rc'] or ''} | {legacy.get(r['id'], '')} "
+           f"| {cell(r['subject'])[:60]} | {r['sender']} | {cell(r['reason'])[:160]} | `{r['id']}` |" for r in rows]
+    md += ["", "## 고치는 법", "",
+           "```bash", "cd ~/kv",
+           "./.venv/bin/python -m skills.mail.run observe --op label --id <id> --category <정답> --why \"…\"   # 이 메일의 정답",
+           "# 기준을 고친다: skills/mail/classify_criteria.md   (criteria.md 는 현행이 읽는다 — 고치지 않는다)",
+           "./.venv/bin/python -m skills.mail.run observe --op replay --limit 50",
+           "./.venv/bin/python -m skills.mail.run observe --op diff --a live --b r-<sha>", "```", ""]
+    slack = (f"*메일 관찰* — {head}\n"
+             + "\n".join(f"• {why} · `{r['c']}` · {cell(r['subject'])[:60]}" for r, why in flagged[:15])
+             + (f"\n… 외 {len(flagged) - 15}통" if len(flagged) > 15 else ""))
+    return "\n".join(md), slack
+
+
 # ---------------------------------------------------------------- 백업
 
 def backup(con, dest_dir: Path) -> Path:
@@ -344,6 +399,12 @@ def main(a) -> int:
     if a.op == "status":
         print(status(con))
         return 0
+    if a.op == "report":
+        md, _ = report(con, (datetime.now(timezone.utc) - timedelta(days=a.days or 1)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        out = paths.data("mail", "reports") / "latest.md"        # 날짜 파일은 아침 실행의 것이다 — 그게 있으면 슬랙 요약을 건너뛴다
+        out.write_text(md, encoding="utf-8")
+        print(md.split("## 전체")[0] + f"전체 표: {out}")
+        return 0
     if a.op == "diff":
         rows = diff(con, a.a, a.b)
         changed = [r for r in rows if r["a"] != r["b"]]
@@ -397,6 +458,11 @@ def main(a) -> int:
         if r["asked"] or r["decided"] or r["waiting"]:
             print(f"  · 판단 흐름: 새로 물음 {r['asked']} · 결정 반영 {r['decided']} · 대기 {r['waiting']}"
                   f" | 밖으로 나가는 문 {constraints.get('mail_observe.outbound')}")
+        out = paths.data("mail", "reports") / f"{ledger.today()}.md"
+        if not out.exists():                                     # 하루 한 번. 손으로 또 돌려도 슬랙에 다시 안 올린다
+            md, summary = report(con, (datetime.now(timezone.utc) - timedelta(hours=26)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            out.write_text(md, encoding="utf-8")
+            print(f"  · 보고서 {out} | 슬랙 {flow.post_report(summary + f'\n전체 표: `{out}`')}")
         if not (bdir / f"mail-{datetime.now(timezone.utc):%Y-%m-%d}.sqlite").exists():
             backup(con, bdir)                                    # 하루 한 번. 스케줄 행을 따로 안 만든다
         return rc

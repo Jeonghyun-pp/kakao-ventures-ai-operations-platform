@@ -163,6 +163,23 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual((rows["a"]["a"], rows["a"]["b"], rows["a"]["human"]), ("INBOUND_KO", "AD_NOISE", "INBOUND_KO"))
 
 
+class Report(unittest.TestCase):
+    def test_flags_unknown_and_disagreement_with_the_legacy_plan(self):
+        con = observe.connect(":memory:")
+        self.addCleanup(con.close)
+        outs = iter(["CATEGORY: UNKNOWN\nREASON: 본문이 비어 있다\nFOLLOWUP: no", OK])
+        with contextlib.redirect_stdout(io.StringIO()):
+            observe.run_once(con, Reader([mail("u", subject="빈 메일", ms=20), mail("k", ms=10)]),
+                             lambda p, s: next(outs), days=2, max_judge=50, no_judge=False)
+        with unittest.mock.patch.object(observe, "_legacy", return_value={"k": "AD_NOISE", "u": "UNKNOWN"}):
+            md, slack = observe.report(con, "2000-01-01T00:00:00Z")
+        flagged = md.split("## 전체")[0]
+        self.assertIn("**UNKNOWN**", flagged)
+        self.assertIn("**현행은 AD_NOISE**", flagged)                      # 같은 메일을 현행은 광고로 치웠다
+        self.assertIn("판정 2통 · 먼저 볼 것 2통", slack)
+        self.assertIn("| `k` |", md)                                       # 전체 표에 id 가 있어야 label 을 칠 수 있다
+
+
 class Backup(unittest.TestCase):
     def test_backup_of_open_db_restores(self):
         with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):

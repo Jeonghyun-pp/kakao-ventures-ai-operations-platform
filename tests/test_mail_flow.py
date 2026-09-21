@@ -121,3 +121,19 @@ class FlowCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Report(unittest.TestCase):
+    def test_report_switch(self):
+        h = Hands()
+        real = flow.constraints.get
+        for value, want, n in (("off", "꺼짐", 0), ("on", "게시함", 1)):
+            with mock.patch.object(flow.constraints, "get", lambda k, v=value: v if k == "mail_observe.report_slack" else real(k)):
+                self.assertEqual(flow.post_report("요약", io=h), want)
+            self.assertEqual(len(h.calls), n)
+        self.assertEqual(h.calls[0], ("post", "test"))                    # 보고는 test 채널로만
+
+    def test_report_failure_does_not_raise(self):
+        h = Hands()
+        h.slack_post = mock.Mock(side_effect=RuntimeError("not_in_channel"))
+        self.assertTrue(flow.post_report("요약", io=h).startswith("실패("))

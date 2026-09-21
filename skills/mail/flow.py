@@ -157,6 +157,17 @@ class Flow:
         self.app.invoke(Command(resume={"decision": decision, "by": by}), self._cfg(mid))
 
 
+def post_report(text: str, io=None) -> str:
+    """하루 보고 요약을 슬랙에. 판단 질문의 문(`outbound`)과 **별개의 스위치**다 — 보고서만 먼저 연다."""
+    if constraints.get("mail_observe.report_slack") != "on":
+        return "꺼짐"
+    try:
+        (io or RealIO()).slack_post(constraints.get("mail_observe.report_channel"), text[:route._CHUNK])
+        return "게시함"
+    except Exception as e:                                       # 보고 실패가 관찰 실행을 죽이지 않는다. 파일은 남아 있다
+        return f"실패({type(e).__name__}: {e})"
+
+
 class RealIO:
     """진짜 통로. `_out` 이 문을 열었을 때만 불린다(반응 읽기는 예외 — 읽기다)."""
 

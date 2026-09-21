@@ -71,6 +71,15 @@ DB               ~/kv-data/mail/db/mail.sqlite (권한 600 · 메일 본문이 �
 백업             ~/kv-data/mail/db/backup/mail-<날짜>.sqlite (SQLite 온라인 백업 · 7세대)
 ```
 
+### 매일 결과 보기
+
+```
+매일 10:00 실행이 끝나면   ~/kv-data/mail/reports/<날짜>.md  (전체 표)  +  슬랙 review_test 에 요약과 '먼저 볼 것'
+아무 때나                 ./.venv/bin/python -m skills.mail.run observe --op report [--days N]   → reports/latest.md
+```
+먼저 볼 것 = UNKNOWN · 현행 plan 과 갈린 것 · 형식 실패 · 슬랙에 물었을 것. 보고서 맨 아래에 고치는 명령이 있다.
+슬랙 요약은 `mail_observe.report_slack` 으로 끈다 (판단 질문의 문 `outbound` 와 별개다).
+
 ### 판단 흐름 (flow.py · LangGraph) — 🔴 밖으로 나가는 문은 닫혀 있다
 
 행사·섭외와 신뢰 경로로 분류된 메일은 슬랙에 묻고 **기다린다**: `post → wait → act`.
