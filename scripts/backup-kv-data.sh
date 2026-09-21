@@ -43,7 +43,11 @@ if [ ! -d "$SRC" ]; then
   echo "🔴 원본 없음: $SRC — 중단한다(빈 백업으로 멀쩡한 스냅샷을 밀어내지 않는다)" >&2
   exit 1
 fi
-SRC_FILES=$(find "$SRC" -type f | wc -l | tr -d ' ')
+# 🔴 돌고 있는 SQLite 파일은 **그냥 복사하지 않는다**(2026-09-21). 쓰는 도중의 파일을 rsync 하면 깨진 사본이 된다.
+#    메일 관찰 DB 는 스스로 일관된 사본을 mail/db/backup/ 에 뜬다(SQLite 온라인 백업) — 그 사본은 아래에서 같이 담긴다.
+#    파일 수 대조가 어긋나지 않게 원본 집계에서도 똑같이 뺀다.
+LIVE_DB='mail/db/mail.sqlite'
+SRC_FILES=$(find "$SRC" -type f ! -path "$SRC/$LIVE_DB*" | wc -l | tr -d ' ')
 if [ "$SRC_FILES" -lt 100 ]; then
   echo "🔴 원본 파일이 $SRC_FILES 개뿐이다(기대: 수천) — 중단한다." >&2
   echo "   마운트 실패·경로 오타일 가능성이 높다. 확인 후 KV_BACKUP_FORCE=1 로 강행하라." >&2
@@ -61,7 +65,7 @@ echo "· 대상 $DST/$TODAY${PREV:+  (하드링크 기준: $PREV)}"
 
 # --delete: 원본에서 지운 파일이 오늘 스냅샷에도 없어야 한다(스냅샷은 그날의 정확한 상)
 # 어제 스냅샷은 그대로 남으므로 실수 삭제는 여전히 되돌릴 수 있다.
-rsync -a --delete $LINK_DEST "$SRC/" "$DST/$TODAY/"
+rsync -a --delete --exclude "/$LIVE_DB" --exclude "/$LIVE_DB-wal" --exclude "/$LIVE_DB-shm" $LINK_DEST "$SRC/" "$DST/$TODAY/"
 
 DST_FILES=$(find "$DST/$TODAY" -type f | wc -l | tr -d ' ')
 if [ "$DST_FILES" -lt "$SRC_FILES" ]; then
