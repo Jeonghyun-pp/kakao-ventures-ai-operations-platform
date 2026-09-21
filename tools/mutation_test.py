@@ -59,6 +59,15 @@ MUTATIONS = [
      "def send_sdk(svc, draft_id: str):   # 변이: SDK 로 발송한다\n"
      "    return svc.users().drafts().send(userId=\"me\", body={\"id\": draft_id})\n\n\n"
      "def inbox_count() -> Fetched:"),
+    ("A8", "발송 — 허용되지 않은 곳에서 발송 통로를 import (A8b)",
+     "skills/mail/observe.py",
+     "from . import clean, rules",
+     "from . import clean, rules\nfrom kv_transport import gmail_send  # 변이: 발송 직전 검사를 안 거치고 부를 수 있게 된다"),
+    ("A8", "발송 — 발송 파일 안이라도 영구삭제는 안 된다 (A8a 의 나머지 금지)",
+     "kv_transport/gmail_send.py",
+     "def send_draft(draft_id: str) -> Fetched:",
+     "def wipe(msg_id: str):   # 변이\n    return _req(\"POST\", f\"/messages/{msg_id}/trash\")\n\n\n"
+     "def send_draft(draft_id: str) -> Fetched:"),
     ("A8", "발송 — smtplib 우회",
      "skills/mail/judge.py",
      "from pathlib import Path",

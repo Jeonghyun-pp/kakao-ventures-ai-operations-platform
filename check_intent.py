@@ -223,6 +223,14 @@ def a6_no_magic_constraints() -> None:
 GMAIL_FORBIDDEN_ENDPOINTS = ("/send", "/trash", "/batchDelete", "/import", "/insert")
 SMTP_MODULES = {"smtplib", "aiosmtplib"}
 
+# 🔴 [2026-09-21] "발송 경로 0건" → "**발송 경로는 하나이고 부르는 곳도 하나다.**"
+#    폼 안내 회신을 사람 없이 보내야 해서 발송 코드가 들어온다. 검사를 끄지 않고 **허용 목록 둘**로 좁힌다.
+#        A8a  `/send` 는 SEND_FILE 에만. 나머지 금지 엔드포인트·smtplib·SDK 패턴은 그 파일을 포함해 어디서도 안 된다
+#        A8b  SEND_FILE 을 import 할 수 있는 곳은 SEND_CALLERS 뿐 — 발송 직전 검사(flow.reply_all)를 안 거치고는 못 부른다
+#    둘 다 허용 목록이다: 새 발송 코드·새 호출처가 생기면 **여기를 고치지 않는 한** 실패한다.
+SEND_FILE = "kv_transport/gmail_send.py"
+SEND_CALLERS = {"skills/mail/flow.py", "tests/test_gmail_send.py"}
+
 
 def _docstring_lines(tree: ast.AST) -> set[int]:
     """독스트링이 차지하는 줄 번호.
@@ -244,7 +252,7 @@ def _docstring_lines(tree: ast.AST) -> set[int]:
 
 
 def a8_no_send() -> None:
-    """메일이 바깥으로 나가는 경로가 코드에 없나.
+    """메일이 바깥으로 나가는 경로가 **허용된 한 곳**뿐인가 (A8a · A8b).
 
     스코프로는 못 막는다 — 토큰이 가진 gmail.modify 에 send 가 포함된다. 막는 자리는 여기뿐이다.
     """
@@ -264,21 +272,25 @@ def a8_no_send() -> None:
                     else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
             if any(str(m).split(".")[0] in SMTP_MODULES for m in mods):
                 bad.append(f"{r}:{node.lineno} smtp")
+            # A8b — 발송 통로를 부를 수 있는 곳은 허용 목록뿐이다 (`import x.gmail_send` · `from x import gmail_send` 둘 다)
+            names = mods + ([a.name for a in node.names] if isinstance(node, ast.ImportFrom) else [])
+            if any(str(m).split(".")[-1] == "gmail_send" for m in names) and r not in SEND_CALLERS:
+                bad.append(f"{r}:{node.lineno} 발송 통로를 허용되지 않은 곳에서 import")
         skip_lines = _docstring_lines(tree)
         for i, line in enumerate(src.splitlines(), 1):
             if i in skip_lines:
                 continue
             code = line.split("#")[0]
             for ep in GMAIL_FORBIDDEN_ENDPOINTS:
-                if ep in code:
+                if ep in code and not (ep == "/send" and r == SEND_FILE):      # A8a
                     bad.append(f"{r}:{i} {ep}")
             # 옛 SDK 패턴도 계속 본다 — 누가 googleapiclient 를 다시 들여올 수 있다
             if re.search(r"\.send\s*\(", code) and ("messages()" in code or "drafts()" in code):
                 bad.append(f"{r}:{i} sdk-send")
-    check("A8", "메일 발송 경로 0건", not bad,
+    check("A8", "발송 경로는 하나 · 부르는 곳도 하나", not bad,
           f"{len(bad)}건: {bad[:4]}" if bad
-          else f"금지 엔드포인트 {len(GMAIL_FORBIDDEN_ENDPOINTS)}종 · SDK send · smtplib — 전부 0 "
-               f"(아카이브·초안은 허용)")
+          else f"/send 는 {SEND_FILE} 에만 · import 는 {len(SEND_CALLERS)}곳만 · "
+               f"나머지 금지 엔드포인트 {len(GMAIL_FORBIDDEN_ENDPOINTS) - 1}종 · SDK send · smtplib — 전부 0")
 
 
 # ---------------------------------------------------------------- 아직 못 세는 것
