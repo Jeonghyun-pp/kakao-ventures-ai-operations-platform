@@ -16,8 +16,8 @@ class Hands:
     def __init__(self, reactions=()):
         self.calls, self.reactions = [], list(reactions)
 
-    def slack_post(self, ch, text):
-        self.calls.append(("post", ch)); return "ts-1"
+    def slack_post(self, ch, text, thread_ts=None):
+        self.calls.append(("thread" if thread_ts else "post", ch, text)); return "ts-1"
 
     def slack_reactions(self, ch, ts):
         return self.reactions
@@ -70,6 +70,7 @@ class FlowCase(unittest.TestCase):
         self.assertEqual(self.acts(), {("ev", "post"): "dry", ("tr", "post"): "dry", ("tr", "draft"): "dry", ("ev", "archive"): "dry"})
         text = self.con.execute("SELECT detail FROM actions WHERE message_id='ev' AND kind='post'").fetchone()[0]
         self.assertIn("한 문장 요약", text)                                          # 게시했을 글이 그대로 남는다
+        self.assertNotIn("자동 거절", text)                                          # 🔴 여기선 무응답을 거절로 안 바꾼다
 
     def test_second_advance_asks_nothing_new(self):
         f = self.flow(Hands())
@@ -80,10 +81,12 @@ class FlowCase(unittest.TestCase):
         h = Hands()
         with gate("on"):
             self.flow(h).advance()
-            self.assertEqual([c[0] for c in h.calls], ["post", "post"])
+            self.assertEqual([c[0] for c in h.calls if c[0] == "post"], ["post", "post"])
+            self.assertTrue(any(c[0] == "thread" and "검토 부탁드립니다" in c[2] for c in h.calls))   # 전문은 스레드에
+            n = len(h.calls)
             f2 = self.flow(h)                                                       # 다음 실행 = 새 Flow (체크포인트에서 잇는다)
             self.assertEqual(f2.advance(), {"asked": 0, "decided": 0, "waiting": 2})
-            self.assertEqual(len(h.calls), 2)                                       # 🔴 다시 올리지 않았다
+            self.assertEqual(len(h.calls), n)                                       # 🔴 다시 올리지 않았다
             h.reactions = ["white_check_mark"]
             self.assertEqual(f2.advance()["decided"], 2)
         self.assertIn(("draft", "tr", "ref@example.com"), [c[:3] for c in h.calls])  # 신뢰 경로 ⭕ → 접수 안내 초안
@@ -94,7 +97,7 @@ class FlowCase(unittest.TestCase):
         h = Hands(reactions=["x"])
         with gate("on"):
             self.flow(h).advance()
-        self.assertEqual(sorted(c[0] for c in h.calls), ["archive", "archive", "post", "post"])
+        self.assertEqual(sorted(c[0] for c in h.calls if c[0] != "thread"), ["archive", "archive", "post", "post"])
 
     def test_dry_question_is_posted_when_the_gate_opens(self):
         h = Hands()
@@ -102,16 +105,41 @@ class FlowCase(unittest.TestCase):
         self.assertEqual(h.calls, [])
         with gate("on"):
             self.flow(h).advance()
-        self.assertEqual([c[0] for c in h.calls], ["post", "post"])
+        self.assertEqual([c[0] for c in h.calls if c[0] == "post"], ["post", "post"])
 
     def test_failed_post_is_recorded_and_retried(self):
         h = Hands()
-        h.slack_post = mock.Mock(side_effect=[RuntimeError("not_in_channel"), "ts-2", RuntimeError("not_in_channel"), "ts-3"])
+        heads = iter([RuntimeError("not_in_channel"), "ts-2", RuntimeError("not_in_channel"), "ts-3"])
+
+        def post(ch, text, thread_ts=None):
+            if thread_ts:
+                return "t"
+            r = next(heads)
+            if isinstance(r, Exception):
+                raise r
+            return r
+        h.slack_post = post
         with gate("on"):
             f = self.flow(h)
             f.advance()
             self.assertIn("failed", self.acts().values())
             f.advance()
+        self.assertEqual(set(v for (m, k), v in self.acts().items() if k == "post"), {"done"})
+
+    def test_thread_failure_does_not_repost_the_question(self):
+        h, heads = Hands(), []
+
+        def post(ch, text, thread_ts=None):
+            if thread_ts:
+                raise RuntimeError("msg_too_long")
+            heads.append(text)
+            return "ts-1"
+        h.slack_post = post
+        with gate("on"):
+            f = self.flow(h)
+            f.advance()
+            f.advance()
+        self.assertEqual(len(heads), 2)                                              # 두 통, 각각 한 번씩만
         self.assertEqual(set(v for (m, k), v in self.acts().items() if k == "post"), {"done"})
 
     def test_decide_on_a_mail_that_is_not_waiting_is_refused(self):
@@ -131,7 +159,7 @@ class Report(unittest.TestCase):
             with mock.patch.object(flow.constraints, "get", lambda k, v=value: v if k == "mail_observe.report_slack" else real(k)):
                 self.assertEqual(flow.post_report("요약", io=h), want)
             self.assertEqual(len(h.calls), n)
-        self.assertEqual(h.calls[0], ("post", "test"))                    # 보고는 test 채널로만
+        self.assertEqual(h.calls[0][:2], ("post", "test"))                # 보고는 test 채널로만
 
     def test_report_failure_does_not_raise(self):
         h = Hands()

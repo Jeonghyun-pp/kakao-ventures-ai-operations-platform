@@ -383,7 +383,7 @@ def run_once(con, reader, llm, *, days: int, max_judge: int | None, no_judge: bo
                   + (f"  🔴 멈춤: {j['stopped']}" if j["stopped"] else ""))
         if j["stopped"]:
             rc = 2
-    print(f"  {status(con)} | 메일함 쓰기 0 · 슬랙 쓰기 0")
+    print(f"  {status(con)} | 메일함 쓰기 0")
     return rc
 
 

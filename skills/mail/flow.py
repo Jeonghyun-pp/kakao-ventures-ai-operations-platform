@@ -34,7 +34,7 @@ from langgraph.types import Command, interrupt                  # noqa: E402
 
 from kvlib import constraints                                   # noqa: E402
 
-from . import route, rules                                      # noqa: E402
+from . import clean, route, rules                               # noqa: E402
 
 ASK = (rules.EVENT_SPEAKER, rules.TRUSTED_REF)                  # route.decide 가 'slack' 으로 보내는 갈래
 YES_DRAFT = {"trusted_ref": "trusted_direct_ko"}                # ⭕ 에 나가는 초안. event 의 ⭕ 는 사람이 잇는다(일정 조율은 범위 밖)
@@ -91,13 +91,29 @@ class Flow:
             "SELECT m.*, j.category, j.reason FROM messages m JOIN judgments j ON j.message_id=m.id AND j.run='live'"
             " WHERE m.id=?", (mid,)).fetchone()
         m = json.loads(row["raw_json"])
-        return {**m, "sender": row["sender"], "subject": row["subject"]}, row
+        m.update(sender=row["sender"], subject=row["subject"])
+        if row["webflow_kind"] is not None:                              # 폼은 문의자가 보낸 글로 보인다 (알림 껍데기가 아니라)
+            m.update(sender_raw=row["sender"], body=clean.webflow(m.get("body") or "")["content"])
+        else:
+            m["body"] = clean.text(m.get("body") or "")
+        return m, row
 
     def _post(self, s: State) -> dict:
         m, row = self._msg(s["mid"])
         act = route.decide(m, {"category": row["category"], "why": row["reason"]})
-        text = route._post_text(m, act["lead"], act["ask"], summary=row["reason"])   # 요약은 분류가 이미 쓴 한 문장
-        self._out(s["mid"], "post", {"ch": act["ch"], "text": text}, lambda: self.io.slack_post(act["ch"], text))
+        ask = act["ask"].split(" · 무반응")[0]                            # 현행 문구에서 '무반응 7일이면 자동 거절'만 뺀다 — 여기선 안 한다
+        text = route._post_text(m, act["lead"], ask, summary=row["reason"])          # 요약은 분류가 이미 쓴 한 문장
+
+        def do() -> str:
+            ts = self.io.slack_post(act["ch"], text)
+            try:                                                         # 맨 위는 훑는 자리, 전문은 스레드에 (현행과 같은 모양)
+                for chunk in [*route.body_chunks(m), f"*메일함에서 보기*\n{route.mail_link(s['mid'])}"]:
+                    self.io.slack_post(act["ch"], chunk, thread_ts=ts)
+            except Exception:                                            # 🔴 질문은 이미 올라갔다. 여기서 실패로 치면 재시도가 질문을 **또** 올린다
+                pass
+            return ts
+
+        self._out(s["mid"], "post", {"ch": act["ch"], "text": text}, do)
         return {"kind": act["kind"]}
 
     def _act(self, s: State) -> dict:
@@ -176,8 +192,8 @@ class RealIO:
         from . import run                                        # noqa: F401  채널 등록이 거기 있다
         self.gmail, self.slack = gmail, slack
 
-    def slack_post(self, ch: str, text: str) -> str:
-        return self.slack.post(ch, text).require()
+    def slack_post(self, ch: str, text: str, thread_ts: str | None = None) -> str:
+        return self.slack.post(ch, text, thread_ts=thread_ts).require()
 
     def slack_reactions(self, ch: str, ts: str) -> list[str]:
         return [x.get("name") for x in self.slack.reactions(ch, ts).require()]
