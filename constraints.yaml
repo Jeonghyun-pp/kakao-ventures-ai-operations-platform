@@ -198,10 +198,10 @@ mail_observe:
   # 관찰 파이프라인(skills/mail/observe.py) — 메일함·슬랙에 **쓰지 않는다.** 읽고 분류하고 기록만 한다.
   # 현행 plan/apply 는 이 절을 안 읽는다.
   own_addresses: ["deals@example.vc", "deals@example.vc"]   # 우리가 보낸 메일을 가리는 기준(별칭 포함)
-  lookback_days: 2             # 매 실행마다 이만큼 다시 훑고 이미 본 건 건너뛴다. 첫 실행은 --days 로 늘린다
+  lookback_days: 7             # 매 실행마다 이만큼 다시 훑고 이미 본 건 건너뛴다(id 만 받으므로 싸다). 맥이 며칠 자도 빈틈이 없다
   list_max: 500                # 목록 상한. 닿으면 partial 로 끝난다(조용히 자르지 않는다)
   fetch_per_run: 60            # 한 실행이 새로 읽는 메일 수. 밀린 건 다음 실행이 잇는다
-  judge_per_run: 10            # 한 실행의 claude 호출 수. 10분 락을 오래 안 잡으려는 값
+  judge_per_run: 30            # 한 실행의 claude 호출 수. 하루 한 번 도니 하루치를 한 번에 (30통 ≈ 15분)
   judge_per_day: 30            # 🔴 claude.daily_calls_block(50)은 전 스킬 공유다. 나머지는 링크드인·앱스토어·현행 plan 몫
   judge_attempts_max: 3        # 같은 메일을 이만큼 실패하면 그만 부른다(무한 재호출 방지)
   body_chars: 6000             # 새로 쓴 본문 상한. 한 통씩 부르므로 현행(2500)보다 넉넉하다
