@@ -90,3 +90,35 @@ fi
 printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ) files=$DST_FILES snapshots=$NSNAP" > "$DST/.last-success"
 
 echo "✅ $TODAY · $DST_FILES 파일 · 스냅샷 ${NSNAP}벌 · 총 $(du -sh "$DST" | cut -f1)"
+
+# ---------------------------------------------------------------- 코드 (2026-09-21 추가)
+# 맨 위의 "코드는 git 에 있다"는 절반만 맞았다 — ~/kv 에는 **원격이 없고**, 2026-09-21 까지
+# 메일 스킬·비플랜·gmail 통로는 git 에 추적조차 안 됐다. 리포를 지우거나 .git 이 깨지면 끝이었다.
+# 그래서 git bundle(이력 전체가 든 파일 하나)을 데이터 스냅샷 옆에 둔다.
+#
+#   복원:  git clone ~/kv-data-backup/_code/kv-<날짜>.bundle ~/kv
+#
+# 🔴 데이터 백업이 **끝나고 표식까지 쓴 뒤에** 한다. 여기서 실패해도 데이터 백업은 성공으로 남고,
+#    이 스크립트는 0 이 아닌 코드로 끝나 스케줄러에 실패로 찍힌다 — 조용히 넘어가지 않는다.
+# 🔴 같은 디스크다. 디스크·맥 고장은 여전히 못 막는다(오프사이트 1벌은 이 스크립트 밖의 일).
+CODE_REPO="${KV_CODE_REPO:-$HOME/kv}"
+CODE_DST="$DST/_code"
+if [ -d "$CODE_REPO/.git" ]; then
+  mkdir -p "$CODE_DST"
+  BUNDLE="$CODE_DST/kv-$TODAY.bundle"
+  git -C "$CODE_REPO" bundle create "$BUNDLE.tmp" --all >/dev/null 2>&1
+  git -C "$CODE_REPO" bundle verify "$BUNDLE.tmp" >/dev/null 2>&1
+  mv -f "$BUNDLE.tmp" "$BUNDLE"
+  # 커밋 안 된 변경은 번들에 안 들어간다 — 그 사실을 세어 말한다
+  DIRTY=$(git -C "$CODE_REPO" status --porcelain | wc -l | tr -d ' ')
+  ls -1 "$CODE_DST" | grep -E '^kv-[0-9]{4}-[0-9]{2}-[0-9]{2}\.bundle$' | sort | \
+    awk -v keep="$KEEP" '{a[NR]=$0} END{for(i=1;i<=NR-keep;i++) print a[i]}' | while read -r old; do
+      [ -n "$old" ] && rm -f "${CODE_DST:?}/${old:?}"
+    done
+  NOTE=""
+  [ "$DIRTY" -gt 0 ] && NOTE=" · 🔴 커밋 안 된 변경 ${DIRTY}건은 번들 밖"
+  echo "✅ 코드 번들 $(basename "$BUNDLE") · $(git -C "$CODE_REPO" rev-parse --short HEAD)$NOTE"
+else
+  echo "🔴 코드 리포를 못 찾았다: $CODE_REPO" >&2
+  exit 1
+fi
