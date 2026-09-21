@@ -209,3 +209,6 @@ mail_observe:
   body_chars: 6000             # 새로 쓴 본문 상한. 한 통씩 부르므로 현행(2500)보다 넉넉하다
   quoted_chars: 1500           # 인용·전달된 글 상한
   backup_keep: 7
+  # 🔴 밖으로 나가는 문. off 인 동안 슬랙 게시·초안·아카이브를 **하지 않고** 무엇을 했을지만 적는다(flow.py `_out`).
+  #    on 으로 바꾸는 건 사람이다. 열려도 게시 채널은 route.POST_CH(test)이고 메일은 초안까지다.
+  outbound: "off"

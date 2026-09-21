@@ -71,6 +71,22 @@ DB               ~/kv-data/mail/db/mail.sqlite (권한 600 · 메일 본문이 �
 백업             ~/kv-data/mail/db/backup/mail-<날짜>.sqlite (SQLite 온라인 백업 · 7세대)
 ```
 
+### 판단 흐름 (flow.py · LangGraph) — 🔴 밖으로 나가는 문은 닫혀 있다
+
+행사·섭외와 신뢰 경로로 분류된 메일은 슬랙에 묻고 **기다린다**: `post → wait → act`.
+상태는 같은 DB 의 체크포인트에 있어서, 며칠 뒤의 다른 실행이 이어 받는다. 정책은 현행 `route.decide()` 그대로이고
+다른 건 하나 — 무응답을 거절로 바꾸지 않는다.
+
+```
+constraints.yaml  mail_observe.outbound: "off"    ← 지금. 게시·초안·아카이브를 안 하고 actions 에 dry 로만 적는다
+                                          "on"     ← 사람이 바꾼다. 게시 채널은 route.POST_CH(test), 메일은 초안까지
+```
+
+```bash
+sqlite3 ~/kv-data/mail/db/mail.sqlite "SELECT message_id, kind, status FROM actions"          # 무엇을 했을지 / 했는지
+./.venv/bin/python -m skills.mail.run observe --op decide --id <메일id> --decision yes|no     # 슬랙 없이 결정을 넣어 본다
+```
+
 replay 는 기준 파일의 해시로 run 이름(`r-<sha>`)을 만든다. 같은 기준으로 다시 부르면 이어서 하고,
 기준을 고치면 새 run 이 된다. 운영 판정(`live`)은 어떤 경우에도 안 바뀐다.
 

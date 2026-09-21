@@ -366,6 +366,14 @@ def main(a) -> int:
         print(f"✅ 정답 기록: {a.id} = {a.category}")
         return 0
     with lock.hold("mail-observe"):
+        if a.op == "decide":
+            from . import flow
+            f = flow.Flow(con, str(db_path()), flow.RealIO(), now=_now)
+            f.decide(a.id, a.decision, by="manual")
+            print(f"✅ {a.id} = {a.decision} → " + ", ".join(f"{r[0]}:{r[1]}" for r in con.execute(
+                "SELECT kind, status FROM actions WHERE message_id=?", (a.id,))))
+            f.close()
+            return 0
         if a.op == "backup":
             print(f"✅ {backup(con, bdir).name}")
             return 0
@@ -382,6 +390,13 @@ def main(a) -> int:
             return 1
         rc = run_once(con, gmail, llm, days=a.days or constraints.get("mail_observe.lookback_days"),
                       max_judge=a.max_judge, no_judge=a.no_judge)
+        from . import flow                                       # 판단 흐름. 밖으로 나가는 문은 그쪽에 있고 기본은 닫혀 있다
+        f = flow.Flow(con, str(db_path()), flow.RealIO(), now=_now)
+        r = f.advance()
+        f.close()
+        if r["asked"] or r["decided"] or r["waiting"]:
+            print(f"  · 판단 흐름: 새로 물음 {r['asked']} · 결정 반영 {r['decided']} · 대기 {r['waiting']}"
+                  f" | 밖으로 나가는 문 {constraints.get('mail_observe.outbound')}")
         if not (bdir / f"mail-{datetime.now(timezone.utc):%Y-%m-%d}.sqlite").exists():
             backup(con, bdir)                                    # 하루 한 번. 스케줄 행을 따로 안 만든다
         return rc
