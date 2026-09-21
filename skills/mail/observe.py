@@ -1,4 +1,5 @@
-"""관찰 — 메일을 모으고, 한 통에 한 번 분류하고, 기록한다. **메일함에도 슬랙에도 쓰지 않는다.**
+"""관찰 — 메일을 모으고, 한 통에 한 번 분류하고, 기록한다. **이 파일은 메일함에도 슬랙에도 쓰지 않는다.**
+밖으로 나가는 일(질문·초안·발송·하루 보고)은 전부 `flow.py` 의 문을 지난다 — `run` 이 끝에서 그쪽을 부른다.
 
     run           새 메일 수집 → 분류(한 통 한 번) → 하루 한 번 백업
     status        지금 무엇이 쌓여 있나
@@ -18,7 +19,7 @@
 ## 쓰지 않는다는 보장
 
 이 파일이 통로에서 부르는 건 `auth_check`·`search_ids`·`message` 셋뿐이고,
-`tests/test_mail_observe.py` 가 쓰기 함수 이름이 이 파일에 **등장하지 않음**을 확인한다.
+`tests/test_mail_observe.py` 가 **그 셋 밖의 통로 호출이 전부 실패**하게 막는다(허용 목록).
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ import json
 import re
 import secrets as _rand
 import sqlite3
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -64,8 +66,8 @@ CREATE TABLE IF NOT EXISTS judgments(
 """
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _now(ago: timedelta = timedelta(0)) -> str:
+    return (datetime.now(timezone.utc) - ago).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def db_path() -> Path:
@@ -244,8 +246,7 @@ def diff(con, a: str, b: str) -> list[dict]:
     for r in rows:
         cb = legacy.get(r["id"]) if b == "legacy" else r["cb"]
         if cb is not None:
-            out.append({"id": r["id"], "subject": r["subject"], "a": r["ca"], "b": cb, "human": r["ch"],
-                        "legacy": legacy.get(r["id"])})
+            out.append({"id": r["id"], "subject": r["subject"], "a": r["ca"], "b": cb, "human": r["ch"]})
     return out
 
 
@@ -270,12 +271,13 @@ def _send_section(con, since: str) -> list[str]:
                            " JOIN messages m ON m.id=a.message_id WHERE a.kind='send' ORDER BY a.created DESC").fetchall()
     except sqlite3.OperationalError:
         return ["아직 없음"]
+    rows = [{**dict(r), **json.loads(r["detail"])} for r in rows]    # detail 의 to·category·why·blocked 를 행에 편다
     out, p = [], constraints.get("gmail.promote")
-    floor = (datetime.now(timezone.utc) - timedelta(days=p["window_days"])).strftime("%Y-%m-%dT%H:%M:%SZ")
-    cats = sorted({json.loads(r["detail"]).get("category") for r in rows if r["status"] != "skipped"})
+    floor = _now(timedelta(days=p["window_days"]))
+    cats = sorted({r.get("category") for r in rows if r["status"] != "skipped"})
     for cat in cats:
         ids = [r["message_id"] for r in rows if r["status"] != "skipped" and r["created"] >= floor
-               and json.loads(r["detail"]).get("category") == cat]
+               and r.get("category") == cat]
         marks = con.execute(f"SELECT category FROM judgments WHERE run=? AND message_id IN ({','.join('?' * len(ids))})",
                             (HUMAN, *ids)).fetchall() if ids else []
         hit = sum(1 for (c,) in marks if c == cat)
@@ -285,16 +287,12 @@ def _send_section(con, since: str) -> list[str]:
         out.append(f"- `{cat}` 후보 {len(ids)}통 · 사람 정답 {len(marks)}/{p['min_samples']} · 일치 {rate:.0%} (기준 {p['rate']:.0%})"
                    f" → **{'켜져 있다' if on else '켜도 된다' if ok else '아직'}**")
     recent = [r for r in rows if r["created"] >= since]
-    why = {}
-    for r in recent:
-        d = json.loads(r["detail"])
-        if r["status"] == "skipped":
-            why[d.get("why", "")] = why.get(d.get("why", ""), 0) + 1
+    why = Counter(r.get("why", "") for r in recent if r["status"] == "skipped")
     out += ["", f"이번 보고 기간: 발송 {sum(r['status'] == 'done' for r in recent)} · 보냈을 것 {sum(r['status'] == 'dry' for r in recent)}"
                 f" · 제외 {sum(r['status'] == 'skipped' for r in recent)}"
                 + (" (" + " · ".join(f"{k} {v}" for k, v in why.items()) + ")" if why else ""), ""]
-    out += [f"- {'✅ 발송' if r['status'] == 'done' else '보냈을 것'} → {json.loads(r['detail']).get('to')} · {str(r['subject'])[:60]}"
-            f" · `{r['message_id']}`" + (f"  ⛔ {json.loads(r['detail'])['blocked']}" if json.loads(r['detail']).get('blocked') else "")
+    out += [f"- {'✅ 발송' if r['status'] == 'done' else '보냈을 것'} → {r.get('to')} · {str(r['subject'])[:60]}"
+            f" · `{r['message_id']}`" + (f"  ⛔ {r['blocked']}" if r.get("blocked") else "")
             for r in recent if r["status"] in ("done", "dry", "failed", "sending")] or ["없음"]
     return out
 
@@ -331,11 +329,8 @@ def report(con, since: str) -> tuple[str, str]:
     cell = lambda x: str(x or "").replace("|", "/").replace("\n", " ")            # noqa: E731
     when = lambda ms: datetime.fromtimestamp((ms or 0) / 1000, timezone.utc).strftime("%m-%d")   # noqa: E731
     flagged = [(r, w) for r in rows if (w := flag(r))]
-    dist = {}
-    for r in rows:
-        dist[r["c"] or "실패"] = dist.get(r["c"] or "실패", 0) + 1
     head = (f"판정 {len(rows)}통 · 먼저 볼 것 {len(flagged)}통 | "
-            + " · ".join(f"{k} {v}" for k, v in sorted(dist.items(), key=lambda x: -x[1])))
+            + " · ".join(f"{k} {v}" for k, v in Counter(r["c"] or "실패" for r in rows).most_common()))
     md = [f"# 메일 관찰 보고 — {since} 이후", "", head, "", f"{status(con)}", "", "## 🚩 먼저 볼 것", ""]
     md += [f"- **{why}** · `{r['c']}` · {cell(r['subject'])[:70]}  \n  {cell(r['reason'])}  \n  `{r['id']}` · {r['sender']}"
            for r, why in flagged] or ["없음"]
@@ -430,7 +425,7 @@ def main(a) -> int:
         print(status(con))
         return 0
     if a.op == "report":
-        md, _ = report(con, (datetime.now(timezone.utc) - timedelta(days=a.days or 1)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        md, _ = report(con, _now(timedelta(days=a.days or 1)))
         out = paths.data("mail", "reports") / "latest.md"        # 날짜 파일은 아침 실행의 것이다 — 그게 있으면 슬랙 요약을 건너뛴다
         out.write_text(md, encoding="utf-8")
         print(md.split("## 전체")[0] + f"전체 표: {out}")
@@ -469,7 +464,7 @@ def main(a) -> int:
             print(f"✅ {backup(con, bdir).name}")
             return 0
         if a.op == "replay":
-            crit = Path(a.criteria).read_text(encoding="utf-8") if a.criteria else CRITERIA.read_text(encoding="utf-8")
+            crit = Path(a.criteria or CRITERIA).read_text(encoding="utf-8")
             run = f"r-{criteria_sha(crit)}"
             j = judge(con, llm, run=run, criteria=crit, limit=a.limit or -1)
             print(f"replay {run}: 판정 {j['judged']} · 형식 실패 {j['invalid']}"
@@ -480,7 +475,7 @@ def main(a) -> int:
             print(f"🔴 지메일 인증이 안 된다: {auth.reason}")
             return 1
         rc = run_once(con, gmail, llm, days=a.days or constraints.get("mail_observe.lookback_days"),
-                      max_judge=a.max_judge, no_judge=a.no_judge)
+                      max_judge=a.limit, no_judge=a.no_judge)
         from . import flow                                       # 판단 흐름. 밖으로 나가는 문은 그쪽에 있고 기본은 닫혀 있다
         f = flow.Flow(con, str(db_path()), flow.RealIO(), now=_now, llm=llm)
         r = f.advance()
@@ -492,7 +487,7 @@ def main(a) -> int:
                   f" | 밖으로 나가는 문 {constraints.get('mail_observe.outbound')}")
         out = paths.data("mail", "reports") / f"{ledger.today()}.md"
         if not out.exists():                                     # 하루 한 번. 손으로 또 돌려도 슬랙에 다시 안 올린다
-            md, summary = report(con, (datetime.now(timezone.utc) - timedelta(hours=26)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            md, summary = report(con, _now(timedelta(hours=26)))
             out.write_text(md, encoding="utf-8")
             print(f"  · 보고서 {out} | 슬랙 {flow.post_report(summary + f'\n전체 표: `{out}`')}")
         if not (bdir / f"mail-{datetime.now(timezone.utc):%Y-%m-%d}.sqlite").exists():

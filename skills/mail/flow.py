@@ -9,7 +9,7 @@
 
     off     아무것도 안 한다. 무엇을 했을지만 `actions` 에 dry 로 적는다          ← 기본
     slack   슬랙 글만 실제로 올린다(질문·리마인드·인계). 초안·아카이브는 여전히 dry   ← 시험은 여기서
-    on      메일함에도 쓴다(초안·아카이브). 발송 경로는 이 리포에 없다(A8)
+    on      메일함에도 쓴다(초안·아카이브·발송). 발송은 그 위에 `send_branches` 허용 목록을 또 지난다(A8 · `reply_all`)
 
 게시 채널은 `route.POST_CH`(지금 test)다.
 
@@ -123,9 +123,12 @@ class Flow:
                 extra, status = {"result": do()}, "done"
             except Exception as e:                                       # 실패는 적고 넘어간다 — 다음 실행이 다시 시도한다
                 extra, status = {"error": f"{type(e).__name__}: {e}"}, "failed"
-        self.con.execute("INSERT OR REPLACE INTO actions VALUES(?,?,?,?,?)",
-                         (mid, kind, status, json.dumps({**detail, **extra}, ensure_ascii=False), self.now()))
+        self._put(mid, kind, status, {**detail, **extra})
         return status
+
+    def _put(self, mid: str, kind: str, status: str, detail: dict) -> None:
+        self.con.execute("INSERT OR REPLACE INTO actions VALUES(?,?,?,?,?)",
+                         (mid, kind, status, json.dumps(detail, ensure_ascii=False), self.now()))
 
     def _act_row(self, mid: str, kind: str) -> dict | None:
         r = self.con.execute("SELECT status, detail, created FROM actions WHERE message_id=? AND kind=?", (mid, kind)).fetchone()
@@ -233,14 +236,12 @@ class Flow:
                 else "")
             detail = {"to": to, "category": cat}
             if why:
-                self.con.execute("INSERT OR REPLACE INTO actions VALUES(?,?,?,?,?)",
-                                 (mid, "send", "skipped", json.dumps({**detail, "why": why}, ensure_ascii=False), self.now()))
+                self._put(mid, "send", "skipped", {**detail, "why": why})
                 n["skipped"] += 1
                 continue
             blocked = self._blocked(mid, cat, row["thread_id"]) if gate_on else ""
             if blocked:                                                      # 문은 열렸지만 이 메일은 아직 — 다음 실행에 다시 본다
-                self.con.execute("INSERT OR REPLACE INTO actions VALUES(?,?,?,?,?)",
-                                 (mid, "send", "dry", json.dumps({**detail, "blocked": blocked}, ensure_ascii=False), self.now()))
+                self._put(mid, "send", "dry", {**detail, "blocked": blocked})
                 n["would_send"] += 1
                 continue
             prev = (self._act_row(mid, "send") or {}).get("draft_id")
@@ -269,8 +270,7 @@ class Flow:
             return "이전 시도에서 이미 나갔다"                                 # 초안이 사라졌다 = 발송됐다
         if not did:
             did = detail["draft_id"] = self.io.draft_reply(mid, to, body, subject)
-            self.con.execute("INSERT OR REPLACE INTO actions VALUES(?,?,?,?,?)",   # 보내기 **전에** 적는다 — 여기서 죽어도 다음 실행이 이 초안을 잇는다
-                             (mid, "send", "sending", json.dumps(detail, ensure_ascii=False), self.now()))
+            self._put(mid, "send", "sending", detail)                        # 보내기 **전에** 적는다 — 여기서 죽어도 다음 실행이 이 초안을 잇는다
         return self.io.send_draft(did)
 
     def advance(self) -> dict:
@@ -338,9 +338,7 @@ class Flow:
         got = dict(re.findall(r"^\s*(DECISION|NOTE)\s*:\s*(.*)$", raw or "", re.M))
         d = (re.search(r"\b(yes|no|unclear)\b", got.get("DECISION", "").lower()) or [None, "unclear"])[1]
         note = "" if got.get("NOTE", "NONE").strip().upper() == "NONE" else got.get("NOTE", "").strip()
-        self.con.execute("INSERT OR REPLACE INTO actions VALUES(?,?,?,?,?)",
-                         (mid, "reply_seen", "done", json.dumps({"ts": new[-1]["ts"], "decision": d, "note": note},
-                                                                ensure_ascii=False), self.now()))
+        self._put(mid, "reply_seen", "done", {"ts": new[-1]["ts"], "decision": d, "note": note})
         if d == "unclear":
             self._thread(mid, "clarify", "답글은 기록했습니다. 결정은 맨 위 글에 ⭕ / ❌ 로 알려 주세요.")
             return None
