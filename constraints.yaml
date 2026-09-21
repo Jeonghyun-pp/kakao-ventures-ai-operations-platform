@@ -209,9 +209,13 @@ mail_observe:
   body_chars: 6000             # 새로 쓴 본문 상한. 한 통씩 부르므로 현행(2500)보다 넉넉하다
   quoted_chars: 1500           # 인용·전달된 글 상한
   backup_keep: 7
-  # 🔴 밖으로 나가는 문. off 인 동안 슬랙 게시·초안·아카이브를 **하지 않고** 무엇을 했을지만 적는다(flow.py `_out`).
-  #    on 으로 바꾸는 건 사람이다. 열려도 게시 채널은 route.POST_CH(test)이고 메일은 초안까지다.
+  # 🔴 밖으로 나가는 문(flow.py `_out`). 바꾸는 건 사람이다.
+  #    off    아무것도 안 하고 무엇을 했을지만 적는다
+  #    slack  슬랙 글만 올린다(질문·리마인드·인계). 초안·아카이브는 계속 기록만 — 시험은 여기서 한다
+  #    on     메일함에도 쓴다(초안·아카이브). 게시 채널은 route.POST_CH(test), 메일은 초안까지다
   outbound: "off"
+  remind_days: 2               # 질문·인계 글에 이만큼 반응이 없으면 스레드에 한 줄. 무응답을 거절로 바꾸지 않는다
+  remind_max: 3
   # 하루 보고 요약을 슬랙에 올린다 [사용자 결정 2026-09-21]. 위의 outbound 와 별개다 — 보고서만 먼저 열었다.
   report_slack: "on"
   report_channel: "test"       # review_test. 전체 표는 ~/kv-data/mail/reports/<날짜>.md

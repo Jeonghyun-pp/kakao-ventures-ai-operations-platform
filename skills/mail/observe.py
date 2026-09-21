@@ -429,7 +429,7 @@ def main(a) -> int:
     with lock.hold("mail-observe"):
         if a.op == "decide":
             from . import flow
-            f = flow.Flow(con, str(db_path()), flow.RealIO(), now=_now)
+            f = flow.Flow(con, str(db_path()), flow.RealIO(), now=_now, llm=llm)
             f.decide(a.id, a.decision, by="manual")
             print(f"✅ {a.id} = {a.decision} → " + ", ".join(f"{r[0]}:{r[1]}" for r in con.execute(
                 "SELECT kind, status FROM actions WHERE message_id=?", (a.id,))))
@@ -452,11 +452,12 @@ def main(a) -> int:
         rc = run_once(con, gmail, llm, days=a.days or constraints.get("mail_observe.lookback_days"),
                       max_judge=a.max_judge, no_judge=a.no_judge)
         from . import flow                                       # 판단 흐름. 밖으로 나가는 문은 그쪽에 있고 기본은 닫혀 있다
-        f = flow.Flow(con, str(db_path()), flow.RealIO(), now=_now)
+        f = flow.Flow(con, str(db_path()), flow.RealIO(), now=_now, llm=llm)
         r = f.advance()
         f.close()
-        if r["asked"] or r["decided"] or r["waiting"]:
-            print(f"  · 판단 흐름: 새로 물음 {r['asked']} · 결정 반영 {r['decided']} · 대기 {r['waiting']}"
+        if any(r.values()):
+            print(f"  · 판단 흐름: 새로 물음 {r['asked']} · 결정 {r['decided']} · 인수 {r['acked']} · 리마인드 {r['reminded']}"
+                  f" · 결정 대기 {r['waiting']} · 맡을 사람 대기 {r['unclaimed']}"
                   f" | 밖으로 나가는 문 {constraints.get('mail_observe.outbound')}")
         out = paths.data("mail", "reports") / f"{ledger.today()}.md"
         if not out.exists():                                     # 하루 한 번. 손으로 또 돌려도 슬랙에 다시 안 올린다
