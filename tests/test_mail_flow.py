@@ -276,7 +276,7 @@ class SendCase(unittest.TestCase):
 
     def test_eligibility_is_decided_from_the_db(self):
         h = Hands()
-        r = self.flow(h).reply_all()                                                 # 문은 닫혀 있다(리포 기본값)
+        r = self.flow(h).act_all()                                                 # 문은 닫혀 있다(리포 기본값)
         s = self.sends()
         self.assertEqual(h.calls, [])                                                # 🔴 아무 손도 안 불렀다
         self.assertEqual(s["a"][0], "dry")                                           # 보냈을 것
@@ -290,29 +290,29 @@ class SendCase(unittest.TestCase):
         """🔴 허용 목록의 기본은 빈 목록이다. 문만 열어서는 안 나간다."""
         h = Hands()
         with gate("on"):
-            self.flow(h).reply_all()
+            self.flow(h).act_all()
         self.assertEqual(h.calls, [])
         self.assertIn("안 켜져", self.sends()["a"][1]["blocked"])
 
     def test_slack_level_never_sends(self):
         h = Hands()
         with gate("slack", **self.ON):
-            self.flow(h).reply_all()
+            self.flow(h).act_all()
         self.assertEqual([c for c in h.calls if c[0] in ("draft", "send")], [])
 
     def test_open_gate_and_allowed_branch_sends_once(self):
         h = Hands()
         with gate("on", **self.ON):
             f = self.flow(h)
-            self.assertEqual(f.reply_all()["sent"], 1)
-            f.reply_all()
+            self.assertEqual(f.act_all()["sent"], 1)
+            f.act_all()
         self.assertEqual([c[:2] for c in h.calls], [("draft", "a"), ("send", "draft-a")])   # 초안 하나, 발송 하나. 두 번째 실행은 아무것도 안 한다
         self.assertEqual(self.sends()["a"][0], "done")
 
     def test_never_auto_send_branch_is_skipped(self):
         real = flow.constraints.get
         with mock.patch.object(flow.constraints, "get", lambda k: ["INBOUND_KO"] if k == "gmail.never_auto_send" else real(k)):
-            self.flow(Hands()).reply_all()
+            self.flow(Hands()).act_all()
         self.assertIn("영원히 수동", self.sends()["a"][1]["why"])
 
     def test_send_time_gates_block_without_sending(self):
@@ -322,14 +322,14 @@ class SendCase(unittest.TestCase):
             f = self.flow(h)
             self.con.execute("DELETE FROM actions")
             with gate("on", **self.ON):
-                f.reply_all()
+                f.act_all()
             self.assertEqual(h.calls, [], word)
             self.assertIn(word, self.sends()["a"][1]["blocked"])                     # dry 로 남아 다음 실행에 다시 본다
 
     def test_daily_cap(self):
         h = Hands()
         with gate("on", send_per_day=0, **self.ON):
-            self.flow(h).reply_all()
+            self.flow(h).act_all()
         self.assertEqual(h.calls, [])
         self.assertIn("상한", self.sends()["a"][1]["blocked"])
 
@@ -337,10 +337,10 @@ class SendCase(unittest.TestCase):
         h = Hands()
         h.send_fails = True
         with gate("on", **self.ON):
-            self.flow(h).reply_all()
+            self.flow(h).act_all()
             self.assertEqual(self.sends()["a"][0], "failed")
             h.send_fails = False
-            self.flow(h).reply_all()
+            self.flow(h).act_all()
         self.assertEqual([c[0] for c in h.calls], ["draft", "send", "send"])         # 🔴 초안은 한 번만 만들었다
         self.assertEqual(self.sends()["a"][0], "done")
 
@@ -348,9 +348,9 @@ class SendCase(unittest.TestCase):
         h = Hands()
         h.send_fails = True
         with gate("on", **self.ON):
-            self.flow(h).reply_all()
+            self.flow(h).act_all()
             h.drafts_exist = False                                                   # 응답은 못 받았지만 실제로는 나갔다
-            self.flow(h).reply_all()
+            self.flow(h).act_all()
         self.assertEqual([c[0] for c in h.calls], ["draft", "send"])                 # 다시 보내지 않았다
         self.assertEqual(self.sends()["a"][0], "done")
 
@@ -384,3 +384,58 @@ class Report(unittest.TestCase):
         h = Hands()
         h.slack_post = mock.Mock(side_effect=RuntimeError("not_in_channel"))
         self.assertTrue(flow.post_report("요약", io=h).startswith("실패("))
+
+
+class ActCase(unittest.TestCase):
+    """기다림 없는 행동 — 아카이브·포워드. 옛 apply 가 하던 일을 새 시스템이 '했을 것'으로 남긴다."""
+
+    def setUp(self):
+        d = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.path = str(Path(d) / "mail.sqlite")
+        self.con = observe.connect(self.path)
+        self.addCleanup(self.con.close)
+        msgs = [mail("pt", sender="p@example.com", subject="제휴 제안", ms=10),
+                mail("ad", sender="ad@example.com", subject="광고 안내", ms=20),
+                mail("uk", sender="u@example.com", subject="알 수 없음", ms=30)]
+        cats = {"제휴": "PARTNERSHIP", "광고": "AD_NOISE"}
+        llm = lambda p, s: "CATEGORY: %s\nREASON: 요약\nFOLLOWUP: no" % next((c for k, c in cats.items() if k in p.split("제목:")[1][:20]), "UNKNOWN")
+        observe.run_once(self.con, Reader(msgs), llm, days=2, max_judge=50, no_judge=False)
+
+    def flow(self, hands):
+        f = flow.Flow(self.con, self.path, hands, now=lambda: "2026-09-22T01:00:00Z")
+        self.addCleanup(f.close)
+        return f
+
+    def acts(self):
+        return {(r[0], r[1]): r[2] for r in self.con.execute("SELECT message_id, kind, status FROM actions")}
+
+    def test_closed_gate_records_only(self):
+        h = Hands()
+        n = self.flow(h).act_all()
+        self.assertEqual(h.calls, [])
+        self.assertEqual(self.acts(), {("ad", "archive"): "dry", ("pt", "forward"): "dry", ("pt", "draft"): "dry", ("uk", "forward"): "dry"})
+        self.assertEqual((n["archive"], n["forward"]), (1, 2))
+
+    def test_slack_level_posts_forward_to_the_configured_channel_only(self):
+        """포워드는 슬랙 글이라 'slack' 단계에서 올라간다. 거절 초안·아카이브는 여전히 기록만."""
+        h = Hands()
+        with gate("slack"):
+            self.flow(h).act_all()
+        posts = [c for c in h.calls if c[0] == "post"]
+        self.assertEqual([c[1] for c in posts], ["test", "test"])                       # forward_channel 기본값
+        self.assertTrue(any("제휴 제안" in c[2] for c in posts))
+        self.assertTrue(any(c[0] == "thread" for c in h.calls))                         # 전문은 스레드에
+        self.assertEqual((self.acts()[("pt", "draft")], self.acts()[("ad", "archive")]), ("dry", "dry"))
+
+    def test_open_gate_acts_once(self):
+        h = Hands()
+        with gate("on"):
+            f = self.flow(h)
+            f.act_all()
+            self.assertIn(("archive", "ad"), h.calls)
+            self.assertEqual([c[:3] for c in h.calls if c[0] == "draft"], [("draft", "pt", "p@example.com")])   # 제휴 거절 초안
+            k = len(h.calls)
+            n = f.act_all()
+        self.assertEqual((len(h.calls), n["archive"], n["forward"]), (k, 0, 0))         # 두 번째 실행은 아무것도 안 한다
+

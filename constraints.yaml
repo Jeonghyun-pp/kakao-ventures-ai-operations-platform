@@ -221,6 +221,9 @@ mail_observe:
   send_per_day: 20             # 하루 발송 상한. 폭주 방지다 — 평소 콜드 문의는 하루 서너 통
   remind_days: 2               # 질문·인계 글에 이만큼 반응이 없으면 스레드에 한 줄. 무응답을 거절로 바꾸지 않는다
   remind_max: 3
+  # 제휴·분류 애매(UNKNOWN) 메일을 올리는 채널(flow._forward). 옛 시스템은 #Squad-비플랜 의 이메일 주소로 가는 초안을 만들었다 —
+  #    새 시스템은 채널에 바로 올린다. 실채널("bplan")로 바꾸는 건 전환일에 사람이 한다.
+  forward_channel: "test"
   # 하루 보고 요약을 슬랙에 올린다 [사용자 결정 2026-09-21]. 위의 outbound 와 별개다 — 보고서만 먼저 열었다.
   report_slack: "on"
   report_channel: "test"       # review_test. 전체 표는 ~/kv-data/mail/reports/<날짜>.md

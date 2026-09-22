@@ -482,7 +482,7 @@ def main(a) -> int:
         r = f.advance()
         f.close()
         if any(r.values()):
-            print(f"  · 회신: 발송 {r['sent']} · 보냈을 것 {r['would_send']} · 제외 {r['skipped']}"
+            print(f"  · 회신: 발송 {r['sent']} · 보냈을 것 {r['would_send']} · 제외 {r['skipped']} · 아카이브 {r['archive']} · 포워드 {r['forward']}"
                   f" | 판단 흐름: 새로 물음 {r['asked']} · 결정 {r['decided']} · 인수 {r['acked']} · 리마인드 {r['reminded']}"
                   f" · 결정 대기 {r['waiting']} · 맡을 사람 대기 {r['unclaimed']}"
                   f" | 밖으로 나가는 문 {constraints.get('mail_observe.outbound')}")
