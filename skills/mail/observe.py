@@ -322,8 +322,9 @@ def report(con, since: str) -> tuple[str, str]:
             return "UNKNOWN"
         if old in rules.JUDGE_CATEGORIES and old != r["c"]:
             return f"현행은 {old}"
-        if r["id"] in acts:
-            return "슬랙에 물었을 것 · " + ", ".join(acts[r["id"]])
+        if r["id"] in acts:                                      # 질문(post)이 있으면 판단 건, 아니면 자동 회신 후보
+            head = "슬랙에 물었을 것" if any(a.startswith("post:") for a in acts[r["id"]]) else "자동 회신"
+            return f"{head} · " + ", ".join(acts[r["id"]])
         return ""
 
     cell = lambda x: str(x or "").replace("|", "/").replace("\n", " ")            # noqa: E731
