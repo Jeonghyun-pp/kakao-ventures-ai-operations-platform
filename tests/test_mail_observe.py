@@ -171,13 +171,22 @@ class Report(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             observe.run_once(con, Reader([mail("u", subject="빈 메일", ms=20), mail("k", ms=10)]),
                              lambda p, s: next(outs), days=2, max_judge=50, no_judge=False)
-        with unittest.mock.patch.object(observe, "_legacy", return_value={"k": "AD_NOISE", "u": "UNKNOWN"}):
+        con.executescript("CREATE TABLE actions(message_id TEXT, kind TEXT, status TEXT, detail TEXT, created TEXT, PRIMARY KEY(message_id, kind));"
+                          "INSERT INTO actions VALUES('k','send','dry','{}','2026-09-22T00:00:00Z');"
+                          "INSERT INTO actions VALUES('k','draft','dry','{}','2026-09-22T00:00:00Z');"
+                          "INSERT INTO actions VALUES('u','forward','dry','{}','2026-09-22T00:00:00Z');")
+        legacy = {"k": {"category": "AD_NOISE", "action": "archive"}, "u": {"category": "UNKNOWN", "action": "forward"}}
+        with unittest.mock.patch.object(observe, "_legacy", return_value=legacy):
             md, slack = observe.report(con, "2000-01-01T00:00:00Z")
-        flagged = md.split("## 전체")[0]
+        flagged = md.split("## 📤")[0]
         self.assertIn("**UNKNOWN**", flagged)
         self.assertIn("**현행은 AD_NOISE**", flagged)                      # 같은 메일을 현행은 광고로 치웠다
         self.assertIn("판정 2통 · 먼저 볼 것 2통", slack)
         self.assertIn("| `k` |", md)                                       # 전체 표에 id 가 있어야 label 을 칠 수 있다
+        cmp = md.split("## ⚖️")[1].split("## 전체")[0]
+        self.assertIn("| AD_NOISE→archive | INBOUND_KO→reply | ", cmp)     # 🔴 옛은 치웠고 새는 폼 안내를 보냈을 것 — 갈렸다
+        self.assertNotIn("`u`", cmp)                                        # 포워드 ↔ 포워드는 일치라 표에 없다
+        self.assertIn("옛과 갈림 1/2", slack)
 
 
 class Promotion(unittest.TestCase):

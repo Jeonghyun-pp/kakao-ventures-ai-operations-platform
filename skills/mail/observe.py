@@ -225,12 +225,42 @@ def judge(con, llm, *, run: str, criteria: str, limit: int = -1) -> dict:
 # ---------------------------------------------------------------- 보기
 
 def _legacy() -> dict:
-    """현행 plan 이 마지막으로 붙인 카테고리. 비교용으로 읽기만 한다."""
+    """현행 plan 이 마지막으로 붙인 카테고리·행동 `{id: {category, action}}`. 비교용으로 읽기만 한다."""
     out = {}
     for p in sorted(paths.data("mail", "plans", create=False).glob("*.json")):
         for r in json.loads(p.read_text(encoding="utf-8")):
-            out[r["id"]] = r["category"]
+            out[r["id"]] = {"category": r["category"], "action": r["action"]}
     return out
+
+
+# 새 시스템의 기록(kind)을 옛 plan 의 행동 어휘로. 한 메일에 여럿이면 앞의 것이 대표다(질문 뒤의 초안·아카이브는 결정의 결과다).
+# 여기 없는 kind 는 '-' 로 드러난다 — 조용히 일치로 세지 않는다.
+_KIND2ACT = (("post", "slack"), ("send", "reply"), ("forward", "forward"), ("archive", "archive"), ("draft", "reply"))
+
+
+def _compare_section(con, since: str, legacy: dict) -> tuple[list[str], str]:
+    """옛 시스템의 결정 ↔ 새 시스템이 했을 것. 갈린 메일만 표로. 🔴 이 표가 비는 것이 전환 조건이다."""
+    rows = con.execute("SELECT m.id, m.subject, j.category FROM judgments j JOIN messages m ON m.id=j.message_id"
+                       " WHERE j.run=? AND j.ok=1 AND j.created>=?", (LIVE, since)).fetchall()
+    kinds = {}
+    try:
+        for mid, kind in con.execute("SELECT message_id, kind FROM actions"):
+            kinds.setdefault(mid, set()).add(kind)
+    except sqlite3.OperationalError:
+        pass
+    out, n = [], 0
+    for r in rows:
+        old = legacy.get(r["id"])
+        if not old:
+            continue                                                 # 옛 plan 이 안 본 메일(인박스 밖 등) — 견줄 게 없다
+        n += 1
+        new = next((a for k, a in _KIND2ACT if k in kinds.get(r["id"], ())),
+                   "protect" if r["category"] in (rules.BPLAN_INTAKE, rules.INTERNAL) else "-")
+        if new != old["action"]:
+            out.append(f"| {old['category']}→{old['action']} | {r['category']}→{new} | {str(r['subject'])[:50]} | `{r['id']}` |")
+    head = f"갈림 {len(out)}/{n}"
+    return ([f"견준 메일 {n}통 · {head}", "", "| 옛 | 새 | 제목 | id |", "|---|---|---|---|", *out] if out else
+            [f"견준 메일 {n}통 · 전부 일치" if n else "견줄 메일 없음"]), head
 
 
 def diff(con, a: str, b: str) -> list[dict]:
@@ -244,7 +274,7 @@ def diff(con, a: str, b: str) -> list[dict]:
         " ORDER BY m.internal_ms DESC", (a, b)).fetchall()
     out = []
     for r in rows:
-        cb = legacy.get(r["id"]) if b == "legacy" else r["cb"]
+        cb = legacy.get(r["id"], {}).get("category") if b == "legacy" else r["cb"]
         if cb is not None:
             out.append({"id": r["id"], "subject": r["subject"], "a": r["ca"], "b": cb, "human": r["ch"]})
     return out
@@ -315,7 +345,7 @@ def report(con, since: str) -> tuple[str, str]:
         acts = {}
 
     def flag(r) -> str:
-        old = legacy.get(r["id"])
+        old = legacy.get(r["id"], {}).get("category")
         if not r["ok"]:
             return f"형식 실패({r['error']})"
         if r["c"] == rules.UNKNOWN:
@@ -336,8 +366,10 @@ def report(con, since: str) -> tuple[str, str]:
     md += [f"- **{why}** · `{r['c']}` · {cell(r['subject'])[:70]}  \n  {cell(r['reason'])}  \n  `{r['id']}` · {r['sender']}"
            for r, why in flagged] or ["없음"]
     md += ["", "## 📤 보냈을 메일 (폼 안내)", ""] + _send_section(con, since)
+    cmp, gap = _compare_section(con, since, legacy)
+    md += ["", "## ⚖️ 옛 시스템과 견줌 (갈린 것만)", ""] + cmp
     md += ["", "## 전체", "", "| 날짜 | 분류 | 후속 | 규칙 | 현행 | 제목 | 발신 | 이유 | id |", "|---|---|---|---|---|---|---|---|---|"]
-    md += [f"| {when(r['internal_ms'])} | `{r['c']}` | {r['f'] or ''} | {r['rc'] or ''} | {legacy.get(r['id'], '')} "
+    md += [f"| {when(r['internal_ms'])} | `{r['c']}` | {r['f'] or ''} | {r['rc'] or ''} | {legacy.get(r['id'], {}).get('category', '')} "
            f"| {cell(r['subject'])[:60]} | {r['sender']} | {cell(r['reason'])[:160]} | `{r['id']}` |" for r in rows]
     md += ["", "## 고치는 법", "",
            "```bash", "cd ~/kv",
@@ -345,7 +377,7 @@ def report(con, since: str) -> tuple[str, str]:
            "# 기준을 고친다: skills/mail/classify_criteria.md   (criteria.md 는 현행이 읽는다 — 고치지 않는다)",
            "./.venv/bin/python -m skills.mail.run observe --op replay --limit 50",
            "./.venv/bin/python -m skills.mail.run observe --op diff --a live --b r-<sha>", "```", ""]
-    slack = (f"*메일 관찰* — {head}\n"
+    slack = (f"*메일 관찰* — {head} · 옛과 {gap}\n"
              + "\n".join(f"• {why} · `{r['c']}` · {cell(r['subject'])[:60]}" for r, why in flagged[:15])
              + (f"\n… 외 {len(flagged) - 15}통" if len(flagged) > 15 else ""))
     return "\n".join(md), slack
@@ -484,11 +516,13 @@ def main(a) -> int:
         if any(r.values()):
             print(f"  · 회신: 발송 {r['sent']} · 보냈을 것 {r['would_send']} · 제외 {r['skipped']} · 아카이브 {r['archive']} · 포워드 {r['forward']}"
                   f" | 판단 흐름: 새로 물음 {r['asked']} · 결정 {r['decided']} · 인수 {r['acked']} · 리마인드 {r['reminded']}"
-                  f" · 결정 대기 {r['waiting']} · 맡을 사람 대기 {r['unclaimed']}"
+                  f" · 결정 대기 {r['waiting']} · 맡을 사람 대기 {r['unclaimed']} · 답 없음 {r['stale']}"
                   f" | 밖으로 나가는 문 {constraints.get('mail_observe.outbound')}")
         out = paths.data("mail", "reports") / f"{ledger.today()}.md"
         if not out.exists():                                     # 하루 한 번. 손으로 또 돌려도 슬랙에 다시 안 올린다
             md, summary = report(con, _now(timedelta(hours=26)))
+            if r["stale"]:                                           # 🔴 리마인드가 끝났는데 답이 없다 — 기계가 더 할 게 없다. 사람이 봐야 한다
+                summary = f"⚠️ *답 없이 남은 질문 {r['stale']}건* — 리마인드 상한이 끝났습니다. 사람이 봐야 합니다.\n" + summary
             out.write_text(md, encoding="utf-8")
             print(f"  · 보고서 {out} | 슬랙 {flow.post_report(summary + f'\n전체 표: `{out}`')}")
         if not (bdir / f"mail-{datetime.now(timezone.utc):%Y-%m-%d}.sqlite").exists():

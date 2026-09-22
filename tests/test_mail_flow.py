@@ -106,6 +106,14 @@ class FlowCase(unittest.TestCase):
         self.assertIn("한 문장 요약", text)                                          # 게시했을 글이 그대로 남는다
         self.assertNotIn("자동 거절", text)                                          # 🔴 여기선 무응답을 거절로 안 바꾼다
 
+    def test_unanswered_after_the_last_reminder_is_counted_stale(self):
+        """리마인드 상한(3)이 끝나도 답이 없으면 '답 없음'으로 센다 — 기계는 더 안 하고 보고서가 사람을 부른다."""
+        h = Hands()
+        with gate("slack"):
+            rs = [self.flow(h, now=f"2026-{d}T01:00:00Z").advance() for d in ("09-21", "09-24", "09-27", "09-30", "10-03")]
+        self.assertEqual([r["reminded"] for r in rs], [0, 2, 2, 2, 0])
+        self.assertEqual([r["stale"] for r in rs], [0, 0, 0, 2, 2])
+
     def test_second_advance_asks_nothing_new(self):
         f = self.flow(Hands())
         f.advance()

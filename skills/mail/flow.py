@@ -330,7 +330,11 @@ class Flow:
                 n["acked"] += 1
             else:
                 n["reminded"] += self._remind(mid, "맡으실 분이 아직 없습니다 — 맨 위 글에 🙋 를 눌러 주세요.")
-        return {**n, "waiting": len(self._at("wait")), "unclaimed": len(self._at("ack"))}
+        wait, ack = self._at("wait"), self._at("ack")
+        stale = sum(1 for mid in [*wait, *ack] if self.con.execute(                 # 리마인드가 끝났는데 아직 답이 없다 — 보고서가 경고한다
+            "SELECT count(*) FROM actions WHERE message_id=? AND kind LIKE 'remind%' AND status='done'", (mid,)
+        ).fetchone()[0] >= constraints.get("mail_observe.remind_max"))
+        return {**n, "waiting": len(wait), "unclaimed": len(ack), "stale": stale}
 
     def _remind(self, mid: str, text: str) -> int:
         """마지막 글에서 `remind_days` 가 지났으면 스레드에 한 줄. `remind_max` 번까지. 무응답을 거절로 바꾸지 않는다."""
