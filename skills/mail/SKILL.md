@@ -6,7 +6,7 @@ schedule:
   - { cmd: "apply --no-slack", when: "매일 09:30", why: "plan(claude 판정 ~2분) 이 끝난 뒤. 아카이브·초안만 하고 슬랙은 막는다" }
   - { cmd: followup, when: "10분마다", why: "심사역이 언제 누를지 우리가 못 정한다. ❌ 를 누르면 10분 안에 정리된다" }
   - { cmd: observe,  when: "매일 10:00", why: "관찰 — 읽고 분류하고 기록만 한다. 결과로 움직이는 게 아직 없어 하루 한 번이면 된다. plan·apply 뒤, 링크드인 카드(11:00) 앞. Slack 판단을 붙일 때 간격을 줄인다" }
-  - { cmd: "observe --op health", when: "매일 12:00", why: "observe 는 자기가 안 돌았다고 말할 수 없다. 두 시간 뒤 다른 작업이 오늘 보고서 파일이 있는지 보고, 없으면 슬랙에 한 줄" }
+  - { cmd: health,   when: "매일 12:00", why: "observe 는 자기가 안 돌았다고 말할 수 없다. 두 시간 뒤 다른 작업이 오늘 보고서 파일이 있는지 보고, 없으면 슬랙에 한 줄. 하위명령을 따로 둔 이유: 라벨은 cmd 첫 낱말이라 'observe --op health' 는 observe 잡을 덮어쓴다" }
 ---
 
 # 메일 트리아지
@@ -119,7 +119,7 @@ sqlite3 ~/kv-data/mail/db/mail.sqlite "SELECT message_id, kind, status FROM acti
 같은 날, 이 순서로. 되돌리기는 거꾸로 — 옛 작업을 다시 올리고, 새 흐름이 처리한 메일 id 를 옛 장부에 옮겨 적는다(옛 apply 는 자기 장부에 없는 메일을 다시 처리한다).
 발송은 그 뒤에 `send_branches` 에 갈래를 하나씩 넣어 켠다.
 
-**꺼짐 알림**: `observe --op health`(12:00) 가 오늘 보고서 파일이 없으면 슬랙(`report_channel`)에 한 줄. 질문이 리마인드 상한이 끝나도 답이 없으면 아침 요약 첫 줄에 ⚠️.
+**꺼짐 알림**: `health`(12:00 · `observe --op health` 와 같다) 가 오늘 보고서 파일이 없으면 슬랙(`report_channel`)에 한 줄. 질문이 리마인드 상한이 끝나도 답이 없으면 아침 요약 첫 줄에 ⚠️.
 스케줄 행은 위에 있다 — **설치(`schedule.py install --apply`)는 launchd 전체를 다시 올리므로 사람이 한다.**
 
 ### 폼 안내 자동 회신 (flow._reply) — 🔴 세 겹으로 닫혀 있다

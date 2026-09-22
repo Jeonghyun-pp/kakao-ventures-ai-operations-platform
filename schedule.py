@@ -90,6 +90,11 @@ def declared() -> list[dict]:
                 raise ValueError(
                     f"{md}: when 을 못 읽었다: {raw!r} (예: '매일 07:00' 또는 '10분마다')")
             out.append(job)
+    dup = sorted({j["label"] for j in out if sum(k["label"] == j["label"] for k in out) > 1})
+    if dup:
+        # 🔴 라벨이 같으면 뒤 행의 플리스트가 앞 행을 **조용히 덮어쓴다** — 앞 잡이 사라진다.
+        #    (2026-09-22 실측: "observe" 와 "observe --op health" 가 둘 다 com.kv.mail.observe 였다)
+        raise ValueError(f"스케줄 라벨이 겹친다 — 첫 낱말이 같은 cmd 는 하위명령을 따로 둔다: {', '.join(dup)}")
     return out
 
 

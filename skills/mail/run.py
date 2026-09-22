@@ -721,6 +721,7 @@ def main(argv: list[str] | None = None) -> int:
     fu = sub.add_parser("followup", help="슬랙 반응 수거 · 만기 처리")
     fu.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
+    sub.add_parser("health", help="오늘 observe 보고서가 있나 — 없으면 슬랙에 한 줄 (라벨이 달라야 해서 하위명령)")
     ob = sub.add_parser("observe", help="관찰 — 모으고 분류하고 기록한다. 밖으로 나가는 건 mail_observe.outbound 문이 정한다(기본 off)")
     ob.add_argument("--op", default="run",
                     choices=["run", "status", "report", "replay", "diff", "label", "decide", "backup", "restore-test", "health"])
@@ -749,6 +750,9 @@ def main(argv: list[str] | None = None) -> int:
                 return followup(dry_run=a.dry_run)
         if a.cmd == "status":
             return status()
+        if a.cmd == "health":
+            from . import observe
+            return observe.health()
         if a.cmd == "observe":
             # 🔴 여기서 import 한다. 새 코드가 import 단계에서 죽어도 09:10 plan 은 산다.
             from . import observe
