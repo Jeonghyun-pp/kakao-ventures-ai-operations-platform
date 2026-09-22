@@ -51,7 +51,9 @@ UNKNOWN = "UNKNOWN"
 #    claude 가 내용을 읽고 홍보라고 하면 아카이빙한다 — 언어와 무관하게.
 JUDGE_CATEGORIES = (INBOUND_KO, INBOUND_EN, TRUSTED_REF, EVENT_SPEAKER,
                     PARTNERSHIP, VENDOR_PITCH, LP_CUSTODY, RECRUIT, IMPERSONATION,
-                    AD_NOISE, FORM_ERROR, UNKNOWN)
+                    AD_NOISE, FORM_ERROR, SYSTEM_NOTICE, UNKNOWN)
+# SYSTEM_NOTICE 는 규칙(발신 주소 정확 일치)이 먼저 잡고, 모델도 붙일 수 있다 [2026-09-22] — 기계 알림에 넣을 칸이 없어
+# 하루 60통이 UNKNOWN → 포워드로 새던 것. 현행 criteria.md 는 이 이름을 안 쓰므로 현행 판정은 안 바뀐다.
 
 # 🔴 옛 코드의 NAMED_PARTNER 상수는 지웠다. 어디서도 대입되지 않는 죽은 상수였다.
 #    지명은 카테고리가 아니라 **행동을 덮어쓰는 것**이고, 코드가 실제로 그렇게 동작한다.
