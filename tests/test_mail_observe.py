@@ -272,3 +272,22 @@ class ReadOnly(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Health(unittest.TestCase):
+    """꺼짐 알림 — 오늘 보고서 파일이 없으면 한 줄, 있으면 조용하다."""
+
+    def test_alerts_only_when_todays_report_is_missing(self):
+        from kvlib import ledger
+        from skills.mail import flow
+        d = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        said = []
+        with contextlib.redirect_stdout(io.StringIO()), \
+                unittest.mock.patch.object(observe.paths, "data", lambda *a, **k: d), \
+                unittest.mock.patch.object(flow, "post_report", lambda text, io=None: said.append(text) or "게시함"):
+            self.assertEqual(observe.health(), 2)
+            (d / f"{ledger.today()}.md").write_text("보고서")
+            self.assertEqual(observe.health(), 0)
+        self.assertEqual(len(said), 1)
+        self.assertIn("안 돌았습니다", said[0])
+

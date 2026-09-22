@@ -6,15 +6,17 @@ schedule:
   - { cmd: "apply --no-slack", when: "매일 09:30", why: "plan(claude 판정 ~2분) 이 끝난 뒤. 아카이브·초안만 하고 슬랙은 막는다" }
   - { cmd: followup, when: "10분마다", why: "심사역이 언제 누를지 우리가 못 정한다. ❌ 를 누르면 10분 안에 정리된다" }
   - { cmd: observe,  when: "매일 10:00", why: "관찰 — 읽고 분류하고 기록만 한다. 결과로 움직이는 게 아직 없어 하루 한 번이면 된다. plan·apply 뒤, 링크드인 카드(11:00) 앞. Slack 판단을 붙일 때 간격을 줄인다" }
+  - { cmd: "observe --op health", when: "매일 12:00", why: "observe 는 자기가 안 돌았다고 말할 수 없다. 두 시간 뒤 다른 작업이 오늘 보고서 파일이 있는지 보고, 없으면 슬랙에 한 줄" }
 ---
 
 # 메일 트리아지
 
-## 🔴 경계: 아카이브·초안까지. 발송은 없다
+## 🔴 경계: 아카이브·초안까지. 발송은 **한 문**(닫혀 있다)
 
 ```
 할 수 있다   읽기 · 인박스 라벨 떼기(아카이브) · 초안 만들기
-없다        messages/send · drafts/send · smtplib — 어떤 형태의 발송도
+발송        kv_transport/gmail_send.py 한 파일 · 부르는 곳은 flow.py 뿐(A8) · 문(outbound)과 허용 목록(send_branches)이 둘 다 열려야 나간다
+없다        messages/send · smtplib · 삭제 — 어디서도
 ```
 
 아카이브는 되돌릴 수 있고 초안은 나가지 않는다. **회사 이름으로 바깥에 나가는 순간만 사람이
@@ -96,7 +98,31 @@ sqlite3 ~/kv-data/mail/db/mail.sqlite "SELECT message_id, kind, status FROM acti
 ./.venv/bin/python -m skills.mail.run observe --op decide --id <메일id> --decision yes|no     # 슬랙 없이 결정을 넣어 본다
 ```
 
-### 폼 안내 자동 회신 (flow.reply_all) — 🔴 세 겹으로 닫혀 있다
+### 기다림 없는 행동 (flow.act_all) — 옛 apply 가 하던 일을 새 시스템도 한다 [4단계 · 2026-09-22]
+
+`route.decide()` 의 행동 여섯 중 기다림이 없는 셋을 한 루프에서 한다. 정책은 그대로고 실행만 옮겼다. 전부 `_out` 문 뒤다.
+
+| 행동 | 옛 apply | 새 흐름 | 문이 off 일 때 |
+|---|---|---|---|
+| `reply` (콜드 문의) | 폼 안내 **초안** | `send_branches` 에 있으면 발송, 없으면(기본) **초안** — 옛과 같다 | `send:dry` + `draft:dry` |
+| `archive` (광고·영업·출자·채용·폼 오류·사칭·시스템 안내) | 아카이브 | 아카이브. 멱등이라(이미 없으면 성공) "인박스에 있나"는 안 본다 | `archive:dry` |
+| `forward` (제휴 · UNKNOWN) | 슬랙 이메일 주소로 가는 **초안** | `mail_observe.forward_channel`(기본 test) 에 **바로 게시** + 스레드에 전문. 제휴 거절 회신은 초안까지(영원히 수동) | `forward:dry` (+`draft:dry`) |
+| `slack` (행사 · 신뢰 경로) | 보류(`--no-slack`) | 그래프(질문 → 대기 → 결정) — 위 절 | `post:dry` |
+| `protect` · `escalate` | 안 함 | 안 함. escalate 는 새 흐름에 도달하지 않는다 — 모델 어휘에 WEBFLOW 가 없어 주소 없는 폼도 내용으로 분류되고, 회신이면 no-reply 수신자 검사에서 `skipped` 로 남는다 | — |
+
+옛과 다른 점 하나: 옛 apply 는 슬랙 게시 앞에서도 `thread_after` 를 봤다. 새 흐름은 초안·발송 앞에서만 본다 — 되돌릴 수 없는 행동 앞에서만 현실을 본다.
+
+**옛 ↔ 새 비교**: 매일 보고서 "⚖️ 옛 시스템과 견줌" 절이 옛 plan 의 결정과 새 흐름의 기록을 메일별로 맞대고 **갈린 것만** 표로 낸다.
+🔴 이 표가 비는 것이 전환 조건이다. 갈린 건은 `--op label` 로 정답을 붙이고 `classify_criteria.md` 를 고친다.
+
+**전환일 절차 (5단계 · 사람이 한다)**: ① 옛 launchd 작업 셋(plan·apply·followup)을 내린다 → ② `outbound: "on"` → ③ `forward_channel: "bplan"`.
+같은 날, 이 순서로. 되돌리기는 거꾸로 — 옛 작업을 다시 올리고, 새 흐름이 처리한 메일 id 를 옛 장부에 옮겨 적는다(옛 apply 는 자기 장부에 없는 메일을 다시 처리한다).
+발송은 그 뒤에 `send_branches` 에 갈래를 하나씩 넣어 켠다.
+
+**꺼짐 알림**: `observe --op health`(12:00) 가 오늘 보고서 파일이 없으면 슬랙(`report_channel`)에 한 줄. 질문이 리마인드 상한이 끝나도 답이 없으면 아침 요약 첫 줄에 ⚠️.
+스케줄 행은 위에 있다 — **설치(`schedule.py install --apply`)는 launchd 전체를 다시 올리므로 사람이 한다.**
+
+### 폼 안내 자동 회신 (flow._reply) — 🔴 세 겹으로 닫혀 있다
 
 콜드 투자 문의(`INBOUND_KO`·`INBOUND_EN`)에 승인된 템플릿(`inbound_form_ko/en`)을 보낸다. 정책은 현행 `route.decide()` 그대로다.
 신뢰 경로·제휴 거절·채용·사칭은 `gmail.never_auto_send` 라 여기 오지 않는다.

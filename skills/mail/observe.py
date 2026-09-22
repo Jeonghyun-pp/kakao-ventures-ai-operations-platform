@@ -445,7 +445,21 @@ def run_once(con, reader, llm, *, days: int, max_judge: int | None, no_judge: bo
     return rc
 
 
+def health() -> int:
+    """observe 는 자기가 안 돌았다고 말할 수 없다. 이건 **다른 시각의 작업**이 오늘 보고서 파일이 있는지 보는 것이다."""
+    from . import flow
+    today = paths.data("mail", "reports") / f"{ledger.today()}.md"
+    if today.exists():
+        print(f"✅ 오늘 보고서 있음 · {today.name}")
+        return 0
+    print("🔴 " + flow.post_report(f"🔴 *오늘({ledger.today()}) 메일 observe 가 안 돌았습니다* — 보고서 파일이 없습니다. "
+                                   "맥이 잠들었거나 launchd 작업이 내려갔을 수 있습니다: `launchctl list | grep kv.mail`"))
+    return 2
+
+
 def main(a) -> int:
+    if a.op == "health":
+        return health()
     from kv_transport import claude, gmail                       # 통로는 여기서만 잡는다
 
     llm = lambda prompt, system: claude.run_session(prompt, system=system, tools="")   # noqa: E731

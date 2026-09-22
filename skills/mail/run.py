@@ -723,7 +723,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status")
     ob = sub.add_parser("observe", help="관찰 — 모으고 분류하고 기록한다. 밖으로 나가는 건 mail_observe.outbound 문이 정한다(기본 off)")
     ob.add_argument("--op", default="run",
-                    choices=["run", "status", "report", "replay", "diff", "label", "decide", "backup", "restore-test"])
+                    choices=["run", "status", "report", "replay", "diff", "label", "decide", "backup", "restore-test", "health"])
     ob.add_argument("--decision", choices=["yes", "no"], default=None)
     ob.add_argument("--days", type=int, default=None, help="이만큼 거슬러 수집 (첫 실행·밀린 날)")
     ob.add_argument("--no-judge", action="store_true")
