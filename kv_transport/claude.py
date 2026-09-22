@@ -110,7 +110,7 @@ def run_session(prompt: str, *, system: str | None = None, tools: str | None = N
         raise SessionError("빈 출력 — 인증 만료 의심 (rc=%d)" % r.returncode)
     if r.returncode != 0:
         _record(False, f"rc{r.returncode}")
-        raise SessionError(f"rc={r.returncode}: {(r.stderr or '')[:200]}")
+        raise SessionError(f"rc={r.returncode}: {(r.stderr or out)[:200]}")   # CLI 는 사용량 초과 등을 stdout 으로 말한다
     _record(True)
     return out
 
