@@ -9,7 +9,7 @@
 
     off     아무것도 안 한다. 무엇을 했을지만 `actions` 에 dry 로 적는다          ← 기본
     slack   슬랙 글만 실제로 올린다(질문·리마인드·인계·포워드). 초안·아카이브는 여전히 dry   ← 시험은 여기서
-    on      메일함에도 쓴다(초안·아카이브·발송). 발송은 그 위에 `send_branches` 허용 목록을 또 지난다(A8 · `reply_all`)
+    on      메일함에도 쓴다(초안·아카이브·발송). 발송은 그 위에 `send_branches` 허용 목록을 또 지난다 — 목록 밖 갈래는 초안까지다(A8 · `act_all`)
 
 게시 채널은 `route.POST_CH`(지금 test)다.
 
@@ -266,6 +266,12 @@ class Flow:
             self._put(mid, "send", "skipped", {**detail, "why": why})
             n["skipped"] += 1
             return
+        subject = row["subject"] if webflow else None
+        if cat not in constraints.get("mail_observe.send_branches"):         # 허용 목록 밖(기본) — 발송 대신 **초안**. 현행과 같은 동작이다
+            self._out(mid, "draft", {**detail, "template": "form_guide"}, lambda: self.io.draft_reply(mid, to, act["body"], subject))
+            self._put(mid, "send", "dry", {**detail, "blocked": "갈래 미개방 — 초안으로"})
+            n["would_send"] += 1
+            return
         blocked = self._blocked(mid, cat, row["thread_id"]) if constraints.get("mail_observe.outbound") == "on" else ""
         if blocked:                                                      # 문은 열렸지만 이 메일은 아직 — 다음 실행에 다시 본다
             self._put(mid, "send", "dry", {**detail, "blocked": blocked})
@@ -274,13 +280,11 @@ class Flow:
         prev = (self._act_row(mid, "send") or {}).get("draft_id")
         if prev:
             detail["draft_id"] = prev
-        status = self._out(mid, "send", detail, lambda: self._send(mid, to, act["body"], row["subject"] if webflow else None, detail))
+        status = self._out(mid, "send", detail, lambda: self._send(mid, to, act["body"], subject, detail))
         n["sent" if status == "done" else "would_send"] += 1
 
     def _blocked(self, mid: str, cat: str, thread_id: str) -> str:
-        """발송 직전의 문. 🔴 돌이킬 수 없는 행동 앞에서는 DB 가 아니라 **지금의 현실**을 본다."""
-        if cat not in constraints.get("mail_observe.send_branches"):        # 허용 목록 — 기본은 빈 목록이다
-            return "이 갈래는 자동 발송이 안 켜져 있다"
+        """발송 직전의 문(허용 목록을 통과한 갈래만 온다). 🔴 돌이킬 수 없는 행동 앞에서는 DB 가 아니라 **지금의 현실**을 본다."""
         if self.io.legacy_acted(mid):
             return "현행 시스템이 이미 이 메일에 초안을 만들었거나 아카이브했다"
         if self.io.thread_after(thread_id, mid) > 0:

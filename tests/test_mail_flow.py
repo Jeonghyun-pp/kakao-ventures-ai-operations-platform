@@ -90,7 +90,7 @@ class FlowCase(unittest.TestCase):
         f.decide("ev", "no", by="manual")
         self.assertEqual(h.calls, [])
         self.assertEqual(self.acts(), {("ev", "post"): "dry", ("tr", "post"): "dry", ("tr", "draft"): "dry", ("ev", "archive"): "dry",
-                                       ("ko", "send"): "dry"})                       # 인바운드는 묻지 않고 폼 안내를 '보냈을 것'
+                                       ("ko", "send"): "dry", ("ko", "draft"): "dry"})   # 인바운드는 묻지 않고 폼 안내를 '보냈을 것' — 갈래가 안 열려 초안까지
 
     def test_slack_level_posts_but_never_touches_the_mailbox(self):
         """🔴 시험용 단계. 슬랙 글은 실제로 올라가고, ❌·⭕ 가 와도 아카이브·초안은 기록만 한다."""
@@ -133,7 +133,7 @@ class FlowCase(unittest.TestCase):
         h = Hands(reactions=["x"])
         with gate("on"):
             self.flow(h).advance()
-        self.assertEqual(sorted(c[0] for c in h.calls if c[0] != "thread"), ["archive", "archive", "post", "post"])
+        self.assertEqual(sorted(c[0] for c in h.calls if c[0] != "thread"), ["archive", "archive", "draft", "post", "post"])   # draft = ko 의 폼 안내 초안
 
     def test_dry_question_is_posted_when_the_gate_opens(self):
         h = Hands()
@@ -286,13 +286,13 @@ class SendCase(unittest.TestCase):
         self.assertIn("수신자", s["nr"][1]["why"])
         self.assertEqual((r["would_send"], r["skipped"], r["sent"]), (1, 4, 0))
 
-    def test_open_gate_but_empty_branch_list_sends_nothing(self):
-        """🔴 허용 목록의 기본은 빈 목록이다. 문만 열어서는 안 나간다."""
+    def test_open_gate_but_empty_branch_list_drafts_instead_of_sending(self):
+        """🔴 허용 목록의 기본은 빈 목록이다. 문만 열면 **초안**까지다 — 현행과 같은 동작. 발송은 갈래를 목록에 넣어야 한다."""
         h = Hands()
         with gate("on"):
             self.flow(h).act_all()
-        self.assertEqual(h.calls, [])
-        self.assertIn("안 켜져", self.sends()["a"][1]["blocked"])
+        self.assertEqual([c[0] for c in h.calls], ["draft"])                          # a 하나. 나머지는 자격에서 탈락
+        self.assertEqual(self.sends()["a"][1]["blocked"], "갈래 미개방 — 초안으로")
 
     def test_slack_level_never_sends(self):
         h = Hands()
