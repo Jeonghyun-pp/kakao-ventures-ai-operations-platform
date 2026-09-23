@@ -352,9 +352,12 @@ def report(con, since: str) -> tuple[str, str]:
             return "UNKNOWN"
         if old in rules.JUDGE_CATEGORIES and old != r["c"]:
             return f"현행은 {old}"
-        if r["id"] in acts:                                      # 질문(post)이 있으면 판단 건, 아니면 자동 회신 후보
-            head = "슬랙에 물었을 것" if any(a.startswith("post:") for a in acts[r["id"]]) else "자동 회신"
-            return f"{head} · " + ", ".join(acts[r["id"]])
+        kinds = {a.split(":")[0] for a in acts.get(r["id"], ())}
+        if "post" in kinds:                                      # 슬랙에 물었을 건 — 사람이 결정한다
+            return "슬랙에 물었을 것 · " + ", ".join(acts[r["id"]])
+        if kinds & {"send", "draft"}:                            # 회신이 나갈(나갔을) 건 — 문안·수신자를 사람이 본다
+            return "자동 회신 · " + ", ".join(acts[r["id"]])
+        # 아카이브·포워드만 있는 건은 일상이다 — 여기 올리면 절이 전체 표와 같아진다(09-23 실측: 35통 중 28통이 걸렸다)
         return ""
 
     cell = lambda x: str(x or "").replace("|", "/").replace("\n", " ")            # noqa: E731
