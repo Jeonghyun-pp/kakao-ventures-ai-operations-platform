@@ -193,11 +193,8 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
     print(f"· 착지 {landed} · 실패 {failed}")
     _report(run_id, landed=landed, unknowns=len(unknowns), attempts=attempts, failed=failed)
 
-    # 착지 후 포팅 (DB로 업데이트 체크된 앱 → 극초기 DB)
-    try:
-        port()
-    except Exception as e:
-        print(f"  ⚠️  포팅 중 오류 (수집은 정상): {e}")
+    # 🔴 포팅은 노션 자동화가 한다 (2026-09-23 활성). 체크한 사람이 발굴자로 들어가야 해서
+    #    코드는 그 사람을 알 수 없다. 코드 port() 는 수동 명령으로만 남긴다 — 둘 다 돌면 두 줄씩 생긴다.
 
     if unknowns or failed:
         raise Degraded(f"미상 {len(unknowns)} · 착지실패 {failed}")
