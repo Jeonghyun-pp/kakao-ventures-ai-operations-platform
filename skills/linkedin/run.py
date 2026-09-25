@@ -23,11 +23,11 @@ from datetime import date, datetime, timedelta, timezone
 
 import yaml
 
-from kvlib import Fetched, constraints, ledger, lock, paths, report, store
+from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, store
 from kvlib.gate import Gate
 from kv_transport import apify, notion, slack
 
-from . import axes, brief, judge, judgments, outreach, profile
+from . import axes, brief, judge, outreach, profile
 
 TASK = "linkedin"
 DB = "ch_링크드인"
@@ -72,7 +72,10 @@ def db_path():
 
 def _gate(dry_run: bool = False) -> Gate:
     """--dry-run 은 이 실행만 문을 내리는 것이다(force="off"). 장부(ledger)는 문 밖 — 한 일의 기록이라 dry 면 쓰지 않는다."""
-    return Gate(store.connect(db_path(), judgments.SCHEMA), "linkedin", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
+    con = store.connect(db_path(), judgments.SCHEMA)
+    if "tier" in [r[1] for r in con.execute("PRAGMA table_info(judgments)")]:   # 09-25 하루짜리 열 이름 — kvlib 공용(verdict)으로
+        con.execute("ALTER TABLE judgments RENAME COLUMN tier TO verdict")
+    return Gate(con, "linkedin", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
 
 
 def _reviewers() -> dict[str, str]:
@@ -251,7 +254,7 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
         if not v:
             continue        # 위에서 시끄럽게 셌다
         props = _props(item, v, run_id)
-        st = g.out(k, "land", {"tier": v["tier"], "axis": item["_axis"], "name": _summary(item)["name"]},
+        st = g.out(k, "land", {"tier": v["verdict"], "axis": item["_axis"], "name": _summary(item)["name"]},
                    lambda props=props: notion.create(DB, props).require())
         if st != "done":
             if st == "failed":
@@ -262,8 +265,8 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
         judgments.set_page(g.con, k, page_id)                        # 노션 Tier(사람 정답)와 이어 준다
         ledger.append(TASK, k, ledger.LANDED, page_id=page_id, run=run_id,
                       keys=item.get("_keys") or [k],      # 별칭 전부 — 다음에 어느 쪽으로 와도 잡힌다
-                      axis=item["_axis"], tier=v["tier"], name=_summary(item)["name"])
-        if v["tier"] == "Catch":
+                      axis=item["_axis"], tier=v["verdict"], name=_summary(item)["name"])
+        if v["verdict"] == "Catch":
             ledger.append(TASK, k, MEETING, page_id=page_id, axis=item["_axis"])
         landed += 1
 
@@ -306,7 +309,7 @@ def _props(item: dict, v: dict, run_id: str) -> dict:
         "Author Headline": s["headline"],
         "One Liner": " · ".join(x for x in (s["company"], s["title"]) if x),
         "Raw Text": " · ".join(x for x in (s["headline"], s["company"], s["about"]) if x),
-        "Tier": v["tier"],
+        "Tier": v["verdict"],
         "AI Reason": v["reason"],
         "Axis": [s["axis"]] if s["axis"] in notion.allowed_options(
             notion.writable_id(DB), "Axis") else [],
@@ -359,7 +362,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
         print(f"🔴 노션을 못 읽었다: {f.reason}")
         return 1
     rows = f.require()
-    n_human = judgments.label(g.con, rows)                           # 노션에서 고쳐진 Tier 가 곧 정답 — 매일 여기서 동기화
+    n_human = judgments.label(g.con, rows, "Tier")                           # 노션에서 고쳐진 Tier 가 곧 정답 — 매일 여기서 동기화
     if n_human:
         print(f"· 사람이 노션에서 고친 Tier {n_human}명 — judgments(human) 에 반영")
 
@@ -888,8 +891,8 @@ def daily_report(g: Gate, *, pool: int, picked: int) -> None:
     day = {ev: sum(1 for r in ledger.rows(TASK, ev=ev) if str(r.get("ts", "")).startswith(today) or r.get("day") == today)
            for ev in ("landed", "carded", "outreach", "resolved", "promoted")}
     week = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    dist = dict(g.con.execute("SELECT tier, count(*) FROM judgments WHERE run='live' AND ok=1 AND created>=? GROUP BY tier", (week,)))
-    human = g.con.execute("SELECT h.key, l.tier, h.tier FROM judgments h JOIN judgments l ON l.key=h.key AND l.run='live'"
+    dist = dict(g.con.execute("SELECT verdict, count(*) FROM judgments WHERE run='live' AND ok=1 AND created>=? GROUP BY verdict", (week,)))
+    human = g.con.execute("SELECT h.key, l.verdict, h.verdict FROM judgments h JOIN judgments l ON l.key=h.key AND l.run='live'"
                           " WHERE h.run='human' ORDER BY h.created DESC").fetchall()
     acts = dict(g.con.execute("SELECT kind||':'||status, count(*) FROM actions WHERE created>=? GROUP BY 1", (today,)))
     head = (f"카드 {picked}명 · 재고 {pool}명({pool // 5}일치) · ✅ 초안 {day['outreach']} · 승격 {day['promoted']} · 만기/결론 {day['resolved']}"
@@ -964,7 +967,7 @@ def main(argv: list[str] | None = None) -> int:
             if not f.is_measured:
                 print(f"🔴 노션을 못 읽었다: {f.reason}")
                 return 1
-            print(f"· 노션 Tier 가 live 와 다른 사람 {judgments.label(_gate().con, f.require())}명 → human")
+            print(f"· 노션 Tier 가 live 와 다른 사람 {judgments.label(_gate().con, f.require(), "Tier")}명 → human")
             return 0
         if a.cmd == "status":
             print(ledger.summary(TASK))

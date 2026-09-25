@@ -15,6 +15,8 @@ from __future__ import annotations
 import html
 import re
 
+from kvlib.text import clip  # noqa: F401 — observe 가 clean.clip 으로 부른다
+
 from . import route, rules
 
 # 웹플로우 알림의 꼬리. 여기부터는 문의 내용이 아니다.
@@ -63,16 +65,3 @@ def webflow(body: str) -> dict:
     if m:
         form["content"] = text(m.group(1).split(_WF_FOOTER)[0])
     return form
-
-
-def clip(s: str, cap: int) -> tuple[str, int]:
-    """상한을 넘으면 **머리와 꼬리**를 남긴다. (글, 잘라낸 글자 수).
-
-    요청은 대개 끝에 있다("…검토 부탁드립니다"). 앞에서만 자르면 그걸 버린다.
-    """
-    if len(s) <= cap:
-        return s, 0
-    head = cap * 2 // 3
-    tail = cap - head
-    cut = len(s) - cap
-    return f"{s[:head]}\n[…중략 {cut}자…]\n{s[-tail:]}", cut

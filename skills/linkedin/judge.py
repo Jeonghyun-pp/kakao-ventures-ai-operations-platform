@@ -38,7 +38,7 @@ def criteria_text() -> str:
 
 
 def sha(criteria: str) -> str:
-    from . import judgments
+    from kvlib import judgments
     return judgments.criteria_sha(_SYSTEM, criteria)
 
 
@@ -90,7 +90,7 @@ def judge_lines(lines: list[str], valid: set[str], criteria: str) -> Fetched:
             else:
                 if ti != 1:
                     drift.append(ti)          # 예상 위치가 아니었다 — 조용히 넘기지 않는다
-                good.append({"key": key, "tier": parts[ti],
+                good.append({"key": key, "verdict": parts[ti],
                              "reason": " ".join(parts[ti + 1:]).strip(), "raw": line})
 
     if drift:

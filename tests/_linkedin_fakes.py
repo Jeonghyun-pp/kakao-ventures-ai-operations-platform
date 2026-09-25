@@ -13,7 +13,8 @@ import sqlite3
 from kvlib import Fetched, ledger
 from kvlib.gate import Gate
 from kv_transport import notion as _notion
-from skills.linkedin import judgments, run
+from kvlib import judgments
+from skills.linkedin import run
 
 THU = date(2026, 9, 24)      # 목요일
 SAT = date(2026, 9, 26)
