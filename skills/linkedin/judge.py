@@ -47,7 +47,8 @@ def judge_people(people: list[dict], *, criteria: str | None = None) -> Fetched:
     return judge_lines([_line(p) for p in people], {p["key"] for p in people}, criteria or criteria_text())
 
 
-def judge_lines(lines: list[str], valid: set[str], criteria: str) -> Fetched:
+def judge_lines(lines: list[str], valid, criteria: str) -> Fetched:
+    valid = set(valid)
     """모델이 보는 것은 **줄**이다 — collect 가 만든 줄이든 judgments 에 저장된 줄이든 같다(replay 가 그걸 쓴다)."""
     good, bad, drift = [], [], []
 

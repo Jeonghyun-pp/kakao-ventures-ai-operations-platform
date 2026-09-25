@@ -53,8 +53,11 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from kvlib import ledger, lock, paths, secrets
-from kv_transport import gmail, notion, sheets
+from kvlib import Fetched, constraints, judgments, ledger, lock, paths, secrets, store
+from kvlib.gate import Gate
+from kv_transport import claude, drive, gmail, notion, sheets
+
+from . import judge
 
 TASK = "bplan"
 DB_KEY = "bplan"
@@ -453,6 +456,94 @@ def _report(stamp, dry_run, floor, n_sheet, why, made, tally, orphans, replies, 
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------- 판정 (한 접수 한 번)
+
+_JUDGE_PROPS = ["기업명", "대표명", "이메일", "접수키", "사업계획서", TODO_PROP, "점수", CREATED_PROP, *judge.FIELDS]
+# 심사역의 `to do` 가 곧 정답. 갈래 둘 — drop / keep. 그 밖(Newly Added·Review Done·Hold)은 미결이라 None.
+_TODO_LABEL = {"To Drop": "drop", "미팅요청": "keep", "Mail Fwd": "keep", "Q&A": "keep"}
+DROP_SCORES = ("칼드랍", "Red")                     # 드랍 초안이 나가는 갈래. Orange·Green 은 카드, ? 는 사람
+SLACK_KINDS = ("card", "remind1", "remind2", "remind3")
+
+
+def bucket(score: str | None) -> str:
+    return "drop" if score in DROP_SCORES else "keep" if score in ("Orange", "Green") else "?"
+
+
+def db_path():
+    return paths.data("bplan", "db") / "bplan.sqlite"
+
+
+def _gate(dry_run: bool = False) -> Gate:
+    return Gate(store.connect(db_path(), judgments.SCHEMA), "bplan", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
+
+
+def _row_key(row: dict) -> str:
+    return (row.get(KEY_PROP) or "").strip() or row["_page_id"]          # 옛 68행은 접수키가 없다 — 그때만 page_id
+
+
+def _llm(criteria: str, data: str) -> str:
+    return claude.run_session(f"{criteria}\n\n{data}", system=judge.SYSTEM, tools="")
+
+
+def judge_rows(con, rows: list[dict], all_rows: list[dict], *, llm=_llm, deck=drive.text, run: str = judgments.LIVE,
+               criteria: str | None = None) -> dict:
+    """행마다 덱을 읽고 모델을 한 번 부른다. 호출 자체가 실패하면(인증·차단선) **멈춘다** — 나머지도 같은 이유로 실패한다."""
+    crit = criteria or judge.criteria_text()
+    sha = judgments.criteria_sha(judge.SYSTEM, crit)
+    allowed = notion.allowed_options(notion.writable_id(DB_KEY), "점수")
+    by_email = Counter((r.get("이메일") or "").strip().lower() for r in all_rows)
+    done = bad = 0
+    for row in rows:
+        key = _row_key(row)
+        d = deck(row.get("사업계획서") or "")
+        email = (row.get("이메일") or "").strip().lower()
+        facts = [f"접수 {utc_to_kst_iso(row.get(CREATED_PROP) or '')[:10]}",
+                 f"같은 이메일의 접수 {by_email.get(email, 1)}건(이번 포함)"]
+        text = judge.build_input(row, d, allowed, facts)
+        try:
+            raw = llm(crit, text)
+        except Exception as e:                                       # noqa: BLE001 — 통로의 SessionError. 여기서 멈춘다
+            return {"judged": done, "invalid": bad, "stopped": f"{type(e).__name__}: {e}"}
+        p = judge.parse(raw, allowed)
+        v = [{"key": key, "verdict": p["verdict"], "reason": p["reason"], "raw": raw}] if p["ok"] else []
+        judgments.save(con, run, sha, {key: text}, v,
+                       extra={key: {"summary": p.get("summary"), "team": p.get("team"), "risk": p.get("risk")}} if p["ok"] else None)
+        if not p["ok"]:
+            con.execute("UPDATE judgments SET error=? WHERE key=? AND run=?", (p["error"], key, run))
+        judgments.set_page(con, key, row["_page_id"])
+        done, bad = done + p["ok"], bad + (1 - p["ok"])
+    return {"judged": done, "invalid": bad, "stopped": None}
+
+
+def _notion_rows() -> list[dict]:
+    notion.register_writable(DB_KEY, secrets.get("NOTION_DATABASE_ID"))
+    f = notion.query(notion.writable_id(DB_KEY), _JUDGE_PROPS)
+    if not f.is_measured:
+        raise Degraded(f"노션을 못 읽었다: {f.reason}")
+    if f.partial:
+        raise Degraded("노션 목록이 상한에서 잘렸다")
+    return f.require()
+
+
+def judge_new(con, rows: list[dict], *, past: int = 0, limit: int = -1) -> dict:
+    """미판정 행. 기본은 `to do = Newly Added`(아직 아무도 안 본 접수). `past=N` 은 **결정 난** 옛 행 N건 — 기준 보정용, 행동은 안 한다."""
+    have = {r[0] for r in con.execute("SELECT key FROM judgments WHERE run=?", (judgments.LIVE,))}
+    if past:
+        pool = [r for r in rows if r.get(TODO_PROP) in _TODO_LABEL and _row_key(r) not in have]
+        pool.sort(key=lambda r: r.get(CREATED_PROP) or "", reverse=True)
+        pool = pool[:past]
+    else:
+        pool = [r for r in rows if r.get(TODO_PROP) == NEW_TODO and _row_key(r) not in have]
+        pool.sort(key=lambda r: r.get(CREATED_PROP) or "")
+        if limit > 0:
+            pool = pool[:limit]
+    return judge_rows(con, pool, rows)
+
+
+def label(con, rows: list[dict]) -> int:
+    return judgments.label(con, rows, TODO_PROP, _TODO_LABEL.get, same=lambda live, human: bucket(live) == human)
+
+
 def status() -> int:
     s = ledger.summary(TASK)
     print(f"장부 {s['ledger_lines']}줄 · 마지막 {s['last_ts'] or '없음'} · 오늘 {s['counts'] or '0'}")
@@ -516,6 +607,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--since", default=None, help="바닥선을 명시한다 (예: 2026-08-13T00:00:00). 과거를 되살릴 때만")
     sub.add_parser("status")
     sub.add_parser("selftest")
+    j = sub.add_parser("judge", help="미판정 접수(to do=Newly Added)를 판정해 저장한다. 노션·슬랙·메일에 쓰지 않는다")
+    j.add_argument("--past", type=int, default=0, help="결정 난 옛 행 N건을 판정 — 기준 보정용")
+    j.add_argument("--limit", type=int, default=-1)
+    sub.add_parser("label", help="노션 to do(심사역 결정) → human")
+    rp = sub.add_parser("replay"); rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
+    df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
     a = p.parse_args(argv)
     try:
         if a.cmd == "sync":
@@ -525,6 +622,44 @@ def main(argv: list[str] | None = None) -> int:
             return status()
         if a.cmd == "selftest":
             return selftest()
+        if a.cmd == "judge":
+            with lock.hold("bplan-judge"):
+                con = _gate().con
+                rows = _notion_rows()
+                n_lab = label(con, rows)
+                r = judge_new(con, rows, past=a.past, limit=a.limit)
+                print(f"· 판정 {r['judged']} · 형식 실패 {r['invalid']}" + (f" · 🔴 멈춤: {r['stopped']}" if r["stopped"] else "")
+                      + f" · 정답 갈림 {n_lab}")
+                return 2 if r["stopped"] else 0
+        if a.cmd == "label":
+            con = _gate().con
+            print(f"· 심사역 결정이 판정과 갈린 접수 {label(con, _notion_rows())}건 → human")
+            return 0
+        if a.cmd == "replay":
+            con = _gate().con
+            crit = open(a.criteria, encoding="utf-8").read() if a.criteria else judge.criteria_text()
+            notion.register_writable(DB_KEY, secrets.get("NOTION_DATABASE_ID"))
+            allowed = notion.allowed_options(notion.writable_id(DB_KEY), "점수")
+
+            def judge_lines(lines, keys, criteria):
+                out = []
+                for k, text in zip(keys, lines):
+                    pr = judge.parse(_llm(criteria, text), allowed)
+                    if pr["ok"]:
+                        out.append({"key": k, "verdict": pr["verdict"], "reason": pr["reason"], "raw": ""})
+                return Fetched.measured(out)
+            r = judgments.replay(con, judge_lines, crit, judgments.criteria_sha(judge.SYSTEM, crit), limit=a.limit)
+            print(f"replay {r['run']}: 판정 {r['judged']} · 누락 {r['missing']}\n  다음: bplan diff --b {r['run']}")
+            return 0
+        if a.cmd == "diff":
+            rows = judgments.diff(_gate().con, a.a, a.b, bucket=bucket)
+            for r in rows:
+                if r["a"] != r["b"]:
+                    print(f"  {r['raw_a']:5} → {r['raw_b']:5} 정답={r['human'] or '-':5} {r['key'][:50]}")
+            lab = [r for r in rows if r["human"]]
+            print(f"{a.a} ↔ {a.b}: 비교 {len(rows)}건 · 갈림 {sum(r['a'] != r['b'] for r in rows)}건"
+                  + (f" | 정답 {len(lab)}건 중 일치 {a.a}={sum(r['a'] == r['human'] for r in lab)} · {a.b}={sum(r['b'] == r['human'] for r in lab)}" if lab else ""))
+            return 0
     except lock.Busy as e:
         print(f"🔴 {e}")
         return 3
