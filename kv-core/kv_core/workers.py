@@ -26,7 +26,6 @@ from . import paths
 from .registry import Task
 
 _PROJ = paths.repo_root() / "skills" / "net-sourcing" / "project"
-_MAIL_PROJ = paths.repo_root() / "skills" / "mail-harness" / "project"
 # 🔴 [2026-08-16] `.venv` 가 **없을 수 있다.** CI 는 `setup-python` + `pip install -e` 로
 #    돌아 리포에 `.venv` 가 생기지 않는다. 예전에 `_synthetic_loud_failure` 가 같은 함정에
 #    빠져 푸시를 막았고(08-16 새벽), 결정 ⑫ 로 판정기를 subprocess 로 부르면서 **같은 실수를
@@ -142,58 +141,6 @@ def run_meeting_mail(task: Task, period: date) -> bool:
     return rc == 0
 
 
-# ─────────────────────────── bplan-score ───────────────────────────
-
-def run_bplan_score(task: Task, period: date) -> bool:
-    """[W11] 비플랜 1차 스크리닝. **`점수` 만 쓴다 — `To do` 는 안 건드린다.**
-
-    그래서 판정이 틀려도 드랍 메일 경로가 안 열린다(사람이 To do 를 옮겨야 열린다).
-    타임아웃 30분: 미판정 행이 하루 수십 건 규모라 배치 몇 개면 끝난다.
-    """
-    print(f"▶ bplan-score ({period}) — jobs/bplan_score_job.py")
-    try:
-        rc = subprocess.run([str(_PY), "jobs/bplan_score_job.py"],
-                            cwd=_MAIL_PROJ, timeout=1800, check=False).returncode
-    except subprocess.TimeoutExpired:
-        print("🔴 bplan-score: 30분 timeout — 실패 처리")
-        return False
-    return rc == 0
-
-
-# ─────────────────────────── mail-triage ───────────────────────────
-
-def run_mail_triage(task: Task, period: date) -> bool:
-    """[W11] hello@ 인바운드 **분류만** — 읽기 전용. 계획 파일만 남긴다.
-
-    🔴 **`run` 이 아니라 `triage` 다.** 2026-08-13 정정.
-    어제(08-12) 배선할 때 `run`(= triage + apply)을 걸었는데, 그건
-    `skills/mail-harness/SKILL.md:22-26` 의 HARD-GATE #1 위반이다:
-
-        "컷오버가 완료되기 전에는 apply·sync·drop 이 실행되는 어떤 형태
-         (크론·수동 run)도 시작하지 않는다. **예외 없음.**
-         컷오버 전 허용되는 것은 `--dry-run` 과 `triage`(읽기 전용) 뿐이다."
-
-    `apply` 는 `gmail.archive()` 로 **실 메일함을 바꾼다**(triage/main.py:163).
-    인박스·구글시트 A1 커서·노션 Bplan DB 가 원본 스킬과 물리적으로 공유되므로,
-    컷오버 전 병행 실행은 중복 초안·행 건너뜀을 만든다 — 그게 이 게이트의 이유다.
-
-    다행히 **한 번도 안 돌았다**: 배선(21:57:50)이 그날 마지막 스케줄러 발화(21:54:05)보다
-    3분 45초 늦었다. 우연이 막아준 것이지 설계가 막은 게 아니다.
-    → 그래서 `_synthetic_outbound.py` 에 게이트 검사를 추가한다(선언이 아니라 코드로).
-
-    지금 이 잡이 하는 일: 인박스를 읽고 분류해 **계획 파일만** 쓴다. 아카이브·초안 0.
-    컷오버(W5)가 끝나면 `run` 으로 승격한다 — 그때는 게이트가 해제된 뒤다.
-    """
-    print(f"▶ mail-triage ({period}) — triage/main.py triage (읽기 전용 · HARD-GATE 준수)")
-    try:
-        rc = subprocess.run([str(_PY), "triage/main.py", "triage"],
-                            cwd=_MAIL_PROJ, timeout=1800, check=False).returncode
-    except subprocess.TimeoutExpired:
-        print("🔴 mail-triage: 30분 timeout — 실패 처리")
-        return False
-    return rc == 0
-
-
 def run_backup(task: Task, period: date) -> bool:
     """[2026-08-16] `~/kv-data` 스냅샷 백업.
 
@@ -254,11 +201,17 @@ def run_retention(task: Task, period: date) -> bool:
 WIRED: dict[str, Runner] = {
     "backup": run_backup,
     "retention": run_retention,
-    "bplan-score": run_bplan_score,
-    "mail-triage": run_mail_triage,
+    # [2026-09-25] mail-harness 의 bplan-score · mail-triage 러너 삭제 — 스킬을 지웠다(메일은 ~/kv skills/mail, 비플랜은 ~/kv skills/bplan)
     "appstore-snapshot": run_appstore_snapshot,
-    "judge": run_judge,
-    "meeting-mail": run_meeting_mail,
+    # 🔴 [2026-09-02] 배선 해제. 새 시스템(~/kv skills/linkedin judge)이 대신한다. 옛 소싱 DB 는
+    #    미판정 0건이라 이 잡은 매일 빈 일을 하고 "성공" 을 찍고 있었다.
+    #    되돌리려면 이 줄만 살린다.
+    # "judge": run_judge,
+    # 🔴 [2026-09-02] 배선 해제. 새 시스템(~/kv skills/linkedin outreach)이 대신한다.
+    #    🔴 08-12 부터 승인 큐에 60건이 쌓였고 하나도 결정되지 않았다.
+    #    같은 사람들에게 두 시스템이 콜드 아웃리치를 준비하고 있었다.
+    #    되돌리려면 이 줄만 살린다.
+    # "meeting-mail": run_meeting_mail,
 }
 
 

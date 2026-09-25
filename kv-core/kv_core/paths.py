@@ -15,7 +15,7 @@
 
     from kv_core import paths
     p = paths.data("net-sourcing", "snapshots")     # ~/kv-data/net-sourcing/snapshots/
-    f = paths.data("mail-harness") / "state.json"
+    f = paths.data("net-sourcing") / "state.json"
 """
 from __future__ import annotations
 

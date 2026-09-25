@@ -72,23 +72,6 @@ judge-tier:
 #   `?` = 미채점 — 도메인 라우팅한 건에 쓴다. **빈칸으로 두면 안 된다**: 빈칸은
 #   "아직 판정 안 함"과 구별되지 않아 다음 회차 큐에 영원히 다시 들어온다
 #   (그물망에서 컷 값이 없어 `is_empty` 에 매주 재순환하던 것과 같은 함정).
-bplan-score:
-  on_invalid: quarantine          # 판정 기입은 select 덮어쓰기 = 가역
-  min_records: 1                  # 대상을 넣고 0건이면 계통 장애(인증 만료·형식 붕괴)
-  # 전송 형식은 파일 상단 「전송 형식」 절 참조. 자유 텍스트 열은 **반드시 맨 뒤**.
-  wire: tsv
-  columns: [page_id, score, fwd, reason]
-  schema:
-    page_id: {type: str, required: true, nonempty: true}
-    score:   {type: str, required: true, enum: ["칼드랍", "Red", "Orange", "Green", "?"]}
-    # [2026-08-16] enum 에서 `""` 를 뺐다. 이건 "빈 값도 허용값"이라는 선언이 아니라,
-    # 필수 아닌 필드의 `""` 가 enum 위반으로 잡히던 것을 우회하려 끼워 넣은 값이었다.
-    # 이제 `validate.check_record` 가 **필수 아닌 필드의 빈 문자열을 "없음"으로 본다**.
-    # enum 에는 실제 도메인만 적는다.
-    fwd:     {type: str, required: false, enum: ["ReviewerTwo", "ReviewerOne", "zero"]}
-    reason:  {type: str, required: false, nonempty: true}
-
-# ── 앱스토어 판정 (노션 '판정' select = 가역) ── [W6 신규]
 judge-appstore:
   on_invalid: quarantine
   min_records: 1

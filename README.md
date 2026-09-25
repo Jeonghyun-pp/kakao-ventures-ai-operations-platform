@@ -35,7 +35,7 @@ kv-core/          공통 런타임 (editable 설치, `import kv_core`)
   gate/job/health 골격 — 본체는 W2/W3/W6
 
 skills/           활성 스킬 5종
-  ai-consumer-pulse · appstore-rank · investment-memo · mail-harness · net-sourcing
+  ai-consumer-pulse · appstore-rank · investment-memo · net-sourcing
   _archive/       콜드 스탠바이 (hello-mail · bplan-automation) — 실행 금지, 사유는 그쪽 README
 
 docs/

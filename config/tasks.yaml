@@ -12,18 +12,12 @@
 #   status:    done | partial | slot
 
 # ── 스케줄 task (cadence) ──
-- name: sourcing
-  skill: net-sourcing
-  kind: routine
-  cadence: weekly
-  catch_up: coalesce         # Apify 회당 ~$10.5 — backfill 은 새 데이터 0 인데 돈만 태움
-  watermark: last_success    # 수집 실패 = 후보 0 → 다시 시도
-  resources: [apify, notion]                  # [W8] claude·gmail 은 분리된 judge·meeting-mail task 소관
-  stages: [collect, land]                     # [W8] meeting-mail 도 별도 task 로 분리(승인 브릿지와 함께)
-  origin: system
-  covers: [그물망]
-  status: partial
-  notes: judge 는 별도 judge task 로 분리(W6, 무인) · meeting-mail(auto-mail) 노션에만·리포 미이식(W8 승인브릿지와 함께)
+# 🔴 [2026-09-02] `sourcing` · `sourcing-followup` 선언 삭제.
+#    새 시스템(~/kv skills/linkedin · skills/appstore)이 대신한다. 둘 다 워터마크가
+#    비어 있었다 — 선언만 있고 **한 번도 안 돌았다**. 지운 이유는 그거다:
+#    안 도는 선언이 남아 있으면 "돈다"고 착각한다.
+#    🔴 `bplan-sync` · `bplan-drop` 은 남긴다 — 저건 안 돈 게 아니라 **막아둔** 것이고,
+#       새 비플랜 스킬을 지을 때 참고할 판단이 notes 에 들어 있다.
 
 - name: judge                # [W6] 무인 판정 — 미판정(Tier/판정 is_empty) 행 → claude → 검증 → 기입(가역)
   skill: net-sourcing
@@ -57,18 +51,6 @@
   covers: [그물망]
   status: partial
   notes: 수신자 W8 고정 hello@ · halt 계약 · dedup_key=page_id (선필터=claude 절약 커서)
-
-- name: sourcing-followup
-  skill: net-sourcing
-  kind: routine
-  cadence: quarterly         # DB 인물 3~4개월 재확인
-  catch_up: coalesce
-  watermark: last_success
-  resources: [claude, notion]   # 재판정 = claude -p [ADR 0003]
-  stages: [followup]
-  origin: system
-  covers: [그물망]
-  status: partial
 
 - name: appstore-snapshot
   skill: net-sourcing
@@ -108,103 +90,8 @@
   status: done
   notes: main.py run --channel appstore ($0·수집→노션 착지 138행/일). 스케줄러 이관은 appstore-snapshot 컷오버 검증 후 검토.
 
-- name: bplan-score              # [W11] 비플랜 1차 스크리닝 — 미판정 행 → claude → 노션 `점수`
-  skill: mail-harness
-  kind: routine
-  cadence: daily
-  catch_up: coalesce
-  watermark: last_success
-  resources: [claude, notion-bplan]
-  stages: [criteria-gate, export, score-apply]
-  origin: system
-  covers: [비플랜]
-  status: partial
-  notes: |
-    🔴 **안전선: `점수`·`포워드 이유`·`fwd to whom?` 만 쓴다. `To do` 를 안 건드린다.**
-    드랍 메일 초안은 `To do == To Drop AND 드랍메일 == False` 인 행에만 생기므로
-    (jobs/bplan_drop_job.py:s_collect 의 To Drop 필터), 판정이 틀려도 하류가 한 칸도 안 움직인다.
-    `_assert_safe_patch()` 가 기입 직전에 강제하고 --synthetic 이 회귀를 잠근다.
-    정확도가 전량-Red 기준선(73%)을 못 넘은 상태다(tools/bplan_backtest.py) — 그래서
-    돌리되 하류는 사람이 연다. 매일 산출물이 보여야 기준을 깎을 재료가 생긴다.
-
-- name: mail-triage
-  skill: mail-harness
-  kind: routine
-  cadence: daily
-  catch_up: coalesce
-  watermark: last_attempt    # 미처리 메일은 인박스에 남아 다음 sweep 이 집음
-  resources: [claude, gmail-inbox]   # classify·draft = claude -p [ADR 0003]
-  stages: [sweep, classify, draft]
-  origin: system
-  covers: [메일관리]
-  status: partial
-  runner: local
-  notes: |
-    [W11 배선 2026-08-12] 분류·라우팅 규칙은 이미 있었는데 **아무도 안 돌리고 있었다**
-    (runner 미지정 → WIRED 밖 → 스케줄러가 loud 스킵). 코드를 새로 쓴 게 아니라 켠 것이다.
-    🔴 안전 경계: 아카이브만 자동(가역)이고 회신·포워드는 **초안까지**다.
-    `messages().send` 가 리포 전체에 0개이고 `autonomy.send_enabled: false` 다.
-    상세 룰(라이언 해외 헬스케어 예외·학회/기업탐방 분리 등)은 인프라 완성 후 다시 정한다 —
-    현재 미반영분은 폴백(#Squad-비플랜 공유)으로 흘러 사람이 본다.
-
-# ── 비플랜: 한 이름에 묶여 있던 세 스테이지를 셋으로 쪼갠 결과 ──
-#
-# 🔴 [2026-08-13 W12 · F1-1/F1-2] 옛 task `bplan` 이 담고 있던 두 거짓말을 여기서 끝낸다.
-#
-#   ① **"자체 plist 가 돌린다"가 거짓이었다.** 설치된 LaunchAgent 는 approvals·appstore·
-#      scheduler 셋뿐이고 `com.kv.mail-harness` 는 **없다**(2026-08-13 `launchctl list` 실측).
-#      선언이 "다른 러너가 돌린다"고 말하는 동안 관측기는 그 침묵을 정상으로 승인했다.
-#      틀린 방향이 마침 안전한 쪽이었을 뿐이다 — 게이트를 어기고 돈 게 아니라, 안 돌았다.
-#   ② **`stages: [sync, scoring, deliver]` 셋 중 어느 것도 워터마크를 갖지 않았다.**
-#      한 이름 아래 세 실행 주체가 있으면 부분 정지가 원리적으로 관측 불가다 —
-#      sync 만 죽어도 task 는 초록이다. `bplan-score` 를 이미 뗀 것과 같은 이유로 나머지도 뗀다.
-#
-# scoring = `bplan-score`(위, 이미 분리·배선됨) · sync = 아래 · deliver 의 드랍 = 아래.
-# deliver 의 **후속미팅 초안은 아직 코드가 없다** — 없는 것을 스테이지 이름으로 선언해
-# "있는데 안 돈다"로 보이게 하지 않는다(W11 잔여, 별도 task 로 만들 때 등재한다).
-
-- name: bplan-sync
-  skill: mail-harness
-  kind: routine
-  cadence: daily
-  catch_up: coalesce
-  watermark: last_success    # ADR 0004: 실패하면 다시 시도해야 한다. 옛 `last_attempt` 는
-                             # 실패해도 워터마크가 전진해 그날 접수분을 영구히 건너뛴다.
-  resources: [sheet-a1, notion-bplan, gmail-inbox]   # 시트 읽기 + 노션 행 생성 + Gmail 라벨/아카이빙
-  stages: [sync]
-  origin: system
-  runner: local
-  covers: [비플랜]
-  status: partial
-  notes: |
-    `jobs/bplan_sync_job.py` (2026-08-13 재빌드). 접수 시트 → 노션 Bplan DB 행 생성.
-    멱등 단위 = **접수키**(이메일|접수시각) — 옛 코드의 시트 서수(A1 커서)가 아니다.
-    커서가 없다: 노션이 진실이고, `bplan_sync_floor.json` 이 "이 시각 이후만"의 단조 바닥이다.
-
-    🔴 **아직 WIRED 아니다 — 게이트가 막는다.** SKILL.md HARD-GATE #1 이 `apply·sync·drop`
-    을 이름으로 막으므로 컷오버 전에는 `workers.py` 에 러너를 둘 수 없다(검사 O5 가 잡는다).
-    2026-08-13 의 42건 생성은 사람이 승인한 1회 수동 실행이었지 배선이 아니다.
-    컷오버 절차: `skills/mail-harness/references/cutover.md`
-
-- name: bplan-drop
-  skill: mail-harness
-  kind: routine
-  cadence: daily
-  catch_up: coalesce
-  watermark: last_success
-  resources: [gmail-inbox, notion-bplan]   # Gmail **초안** + 노션 체크박스. claude 안 쓴다.
-  stages: [drop]
-  origin: system             # 초안 생성은 시스템 시작 · 발송 결정은 사람
-  runner: local
-  covers: [비플랜]
-  status: partial
-  notes: |
-    `jobs/bplan_drop_job.py` (2026-08-13 재빌드). `To Drop` 행 → Gmail **초안**(발송 아님).
-    멱등 단위 = **이메일**(정규화)·유효기간 1주일 — 옛 코드는 `page_id` 라 같은 사람이
-    여러 번 접수하면 초안을 여러 통 받았다(실측 최다 5통).
-
-    🔴 **아직 WIRED 아니다 — 게이트가 이중으로 막는다.** ① HARD-GATE #1 ② 잡 자신이
-    `--synthetic` 외 진입점에서 SystemExit 를 던진다. 컷오버 때 둘 다 사람이 명시적으로 연다.
+# 🔴 [2026-09-25] mail-harness 의 task 넷(bplan-score · mail-triage · bplan-sync · bplan-drop) 선언 삭제.
+#    스킬 자체를 지웠다 — 메일은 ~/kv skills/mail(observe·flow), 비플랜은 ~/kv skills/bplan 이 한다.
 
 # ── 온디맨드 task ──
 - name: investment-memo
