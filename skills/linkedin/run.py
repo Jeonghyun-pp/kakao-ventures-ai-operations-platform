@@ -22,7 +22,8 @@ from datetime import date, datetime, timedelta, timezone
 
 import yaml
 
-from kvlib import Fetched, constraints, ledger, lock, paths
+from kvlib import Fetched, constraints, ledger, lock, paths, store
+from kvlib.gate import Gate
 from kv_transport import apify, notion, slack
 
 from . import axes, brief, judge, outreach, profile
@@ -57,6 +58,20 @@ PEOPLE = paths.repo_root() / "people.yaml"                      # 심사역 명�
 
 def _cfg(k: str):
     return constraints.get(f"linkedin.{k}")
+
+
+# 🔴 밖으로 나가는 다섯(buy·land·card·outreach·promote)은 전부 `Gate.out` 을 지난다 (constraints.yaml linkedin.outbound).
+#    `slack` 단계에서 실제로 나가는 종류 — **허용 목록**. 카드·초안은 슬랙 글이고, 구매·착지·승격은 아니다.
+SLACK_KINDS = ("card", "outreach")
+
+
+def db_path():
+    return paths.data("linkedin", "db") / "linkedin.sqlite"
+
+
+def _gate(dry_run: bool = False) -> Gate:
+    """--dry-run 은 이 실행만 문을 내리는 것이다(force="off"). 장부(ledger)는 문 밖 — 한 일의 기록이라 dry 면 쓰지 않는다."""
+    return Gate(store.connect(db_path(), ""), "linkedin", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
 
 
 def _reviewers() -> dict[str, str]:
@@ -97,7 +112,8 @@ def _next_page(axis: str) -> int:
 # ---------------------------------------------------------------- collect
 
 def collect(*, only_axis: str | None = None, pages: int | None = None,
-            dry_run: bool = False) -> int:
+            dry_run: bool = False, gate: Gate | None = None) -> int:
+    g = gate or _gate(dry_run)
     run_id = f"{date.today():%Y-%m-%d}-{uuid.uuid4().hex[:6]}"
     today = ledger.today()
     print(f"▶ collect run={run_id}")
@@ -139,7 +155,7 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
     except Exception as e:                      # 옵션 조회 실패가 수집을 막지는 않는다
         print(f"  ⚠️  Axis 옵션을 못 읽었다: {e}")
 
-    if dry_run:
+    if g.level() == "off":
         print("  (dry-run — 돈을 쓰지 않았다)")
         return 0
 
@@ -154,12 +170,21 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
     for a, n, start in plan:
         total = None                       # 이 축의 모수 (첫 페이지가 알려준다)
         for i in range(n):
-            f = apify.run_actor(axes.SLUG, axes.payload(a, start + i),
-                                skill=TASK, est_usd=axes.USD_PER_PAGE)
-            if not f.is_measured:
-                unknowns.append((f"{a}/p{start+i}", f.reason))
+            page, got = start + i, {}
+
+            def buy(a=a, page=page):
+                got["f"] = apify.run_actor(axes.SLUG, axes.payload(a, page), skill=TASK, est_usd=axes.USD_PER_PAGE)
+                return len(got["f"].require())                      # 원본은 통로가 아카이브한다 — actions 엔 수만
+
+            st = g.out(f"{a}/p{page}/{today}", "buy", {"axis": a, "page": page, "est_usd": axes.USD_PER_PAGE}, buy)
+            if "f" not in got:                                      # dry(문이 slack 이하) 또는 오늘 이미 산 페이지
+                if st == "dry":
+                    print(f"  · {a}/p{page} 구매 dry — 문이 {g.level()} 이다")
+                continue
+            if st != "done":
+                unknowns.append((f"{a}/p{page}", got["f"].reason))
                 break                       # 이 축은 중단, 다음 축으로
-            items = f.require()
+            items = got["f"].require()
             # 🔴 모수는 **이미 산 페이지에 실려 온다**(`_meta.pagination`). 이걸 안 남기면
             #    "이 티어를 다 봤나"를 셀 수 없다 — next_page 만으론 분모가 없다.
             if total is None and items:
@@ -220,12 +245,15 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
         v = vmap.get(k)
         if not v:
             continue        # 위에서 시끄럽게 셌다
-        res = notion.create(DB, _props(item, v, run_id))
-        if not res.is_measured:
-            failed += 1
-            print(f"  ✗ {k} 착지 실패: {res.reason}")
+        props = _props(item, v, run_id)
+        st = g.out(k, "land", {"tier": v["tier"], "axis": item["_axis"], "name": _summary(item)["name"]},
+                   lambda props=props: notion.create(DB, props).require())
+        if st != "done":
+            if st == "failed":
+                failed += 1
+                print(f"  ✗ {k} 착지 실패: {g.row(k, 'land')['error']}")
             continue
-        page_id = res.require()
+        page_id = g.row(k, "land")["result"]
         ledger.append(TASK, k, ledger.LANDED, page_id=page_id, run=run_id,
                       keys=item.get("_keys") or [k],      # 별칭 전부 — 다음에 어느 쪽으로 와도 잡힌다
                       axis=item["_axis"], tier=v["tier"], name=_summary(item)["name"])
@@ -300,7 +328,7 @@ def _props(item: dict, v: dict, run_id: str) -> dict:
 
 # ---------------------------------------------------------------- card
 
-def card(*, n: int = 5, dry_run: bool = False) -> int:
+def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
     """🔴 노션에서 Tier 를 다시 읽는다 — 사람이 고친 게 여기서 반영된다.
 
     🔴 후보는 **노션 행**에서 뽑는다(장부가 아니라). 장부 landed 1,857행 중 1,234행은
@@ -308,7 +336,8 @@ def card(*, n: int = 5, dry_run: bool = False) -> int:
        **카드에 영원히 안 나온다**(2026-08-19 실측: 1티어 115명 중 96명이 그 상태였다).
        Tier 도 어차피 노션에서 다시 읽으므로, 후보의 정본도 노션인 게 맞다.
     """
-    if not dry_run and date.today().weekday() >= 5:
+    g = gate or _gate(dry_run)
+    if g.level() != "off" and date.today().weekday() >= 5:        # ponytail: 요일은 닫힌 집합(월~금) — 설정으로 빼지 않는다 [사용자 결정 2026-09-25]
         print("· 주말이라 카드를 쏘지 않는다")
         return 0
     # 🔴 여기 없는 칸은 조용히 빈칸으로 흐른다. 08-18 에 `창업 개월`·`회사`·`Raw Text`·
@@ -386,7 +415,7 @@ def card(*, n: int = 5, dry_run: bool = False) -> int:
         #    매일 성공으로 보였고, 08-27~31 닷새간 카드가 0건인데 아무도 몰랐다.
         #    로그는 "남으면 3일 더 → 2 → 1 → 0" 하고 세어놓고도 그 숫자를 사람에게
         #    보낸 적이 없다. 세는 것과 알리는 것은 다른 일이다.
-        if not dry_run:                       # dry-run 은 바깥으로 아무것도 안 낸다
+        if g.level() != "off":                # 문이 닫혀 있으면 알림도 안 낸다
             _alert("card", "올릴 사람이 0명이다 — 카드가 안 나간다.", key="card:empty", head="🟡 *linkedin card* 재고 소진")
         # 🔴 4 = 재고 소진. 2(다 못 나갔다)와 갈라둔다 — 뜻이 다르고, 무엇보다
         #    card() 가 이미 정확한 문구로 알렸으니 바깥에서 또 보내면 두 번이 된다.
@@ -396,7 +425,7 @@ def card(*, n: int = 5, dry_run: bool = False) -> int:
     left_d = (left_n + n - 1) // n
     print(f"▶ card — 올릴 수 있는 것 {len(pool)} · 오늘 {len(pick)} "
           f"(남으면 {left_d}일 더)")
-    if left_d <= warn_d and not dry_run:
+    if left_d <= warn_d and g.level() != "off":
         _alert("card", f"남은 사람 {left_n}명 — {left_d}일치다. 바닥나기 전에 기준을 손봐야 한다.",
                key="card:low", head="🟡 *linkedin card* 재고 부족")
 
@@ -434,28 +463,31 @@ def card(*, n: int = 5, dry_run: bool = False) -> int:
     #    한 메시지에 5명을 넣으면 ✅ 가 **누구 건지 알 수가 없다** — 반응은 메시지에
     #    달리지 사람에게 달리지 않는다. 스레드로 쪼개야 반응이 사람과 이어진다.
     #    (노션 지침도 이 방식이다: "쓰레드 기능을 활용… 심사역님들이 이모지로 답변")
-    if dry_run:
+    if g.level() == "off":
         print("\n".join(lines))
         for _, k, live in pick:
             print(f"  └ {live.get('서비스명')}  {live.get('Tier')}")
         return 0
 
-    head = slack.post(_cfg("card_channel"), lines[0])
-    if not head.is_measured:
-        print(f"🔴 헤더를 못 올렸다: {head.reason}")
-        return 1
-    parent = head.require()
+    ch, parent = _cfg("card_channel"), {}
+
+    def head_ts() -> str:                                            # 헤더는 첫 사람을 올릴 때 한 번
+        if "ts" not in parent:
+            parent["ts"] = slack.post(ch, lines[0]).require()
+        return parent["ts"]
 
     posted = 0
     for (_, k, live), body in zip(pick, lines[1:]):
-        r = slack.post(_cfg("card_channel"), body.strip() + "\n\n_✅ 를 누르면 콜드 메시지 초안을 만들어 올립니다_",
-                       thread_ts=parent)
-        if not r.is_measured:
-            print(f"  🔴 {live.get('서비스명')} 답글 실패: {r.reason}")
+        st = g.out(k, "card", {"name": live.get("서비스명"), "tier": live.get("Tier"), "ch": ch},
+                   lambda body=body: slack.post(ch, body.strip() + "\n\n_✅ 를 누르면 콜드 메시지 초안을 만들어 올립니다_",
+                                                thread_ts=head_ts()).require())
+        if st != "done" or "ts" not in parent:
+            if st == "failed":
+                print(f"  🔴 {live.get('서비스명')} 답글 실패: {g.row(k, 'card')['error']}")
             continue
         # 착지 먼저, 장부 나중. ts 를 못 남기면 반응을 영영 못 찾는다.
         ledger.append(TASK, k, CARDED)
-        ledger.append(TASK, k, POSTED, ch=_cfg("card_channel"), ts=r.require(), parent=parent,
+        ledger.append(TASK, k, POSTED, ch=ch, ts=g.row(k, "card")["result"], parent=parent["ts"],
                       day=ledger.today(), page_id=live["_page_id"],
                       name=live.get("서비스명"),
                       # 🔴 claude 가 찾은 회사명. 극초기 승격의 title 이 된다 —
@@ -475,13 +507,15 @@ def _days_since(day: str) -> int:
     return (date(int(t[0]), int(t[1]), int(t[2])) - date(y, m, d)).days
 
 
-def followup(*, dry_run: bool = False) -> int:
+def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
     """✅ 를 걷어 콜드 메시지 초안을 만들어 그 스레드에 올린다.
 
     🔴 사람이 보낸다. 심사역 개인 링크드인 계정으로 나가는 메시지라 우리가 못 보낸다 —
        글만 써서 올리고 복사해서 쓰시게 한다.
     """
     print("▶ followup")
+    g = gate or _gate(dry_run)
+    dry = g.level() == "off"
     open_posts = {r["key"]: r for r in ledger.rows(TASK, ev=POSTED)}
     for r in ledger.rows(TASK, ev=RESOLVED):
         open_posts.pop(r["key"], None)
@@ -526,7 +560,7 @@ def followup(*, dry_run: bool = False) -> int:
             continue
         if _days_since(r.get("day") or ledger.today()) < due_d:
             continue
-        if not dry_run:
+        if not dry:
             ledger.append(TASK, k, RESOLVED, by="expiry", name=r.get("name"),
                           ts=r.get("ts"), ch=r.get("ch"))
         expired += 1
@@ -574,15 +608,16 @@ def followup(*, dry_run: bool = False) -> int:
                     + (f" — {who} 심사역 이름" if who else " — 🔴 발신자 이름을 채워주세요")
                     + f"\n\n*짧게 (연결 요청용)*\n{m['short']}"
                     f"\n\n*길게 (이미 연결된 경우)*\n{m['long']}")
-            if dry_run:
+            if dry:
                 print(f"\n--- {r.get('name')} ({who or '발신자 미상'}) ---\n{text}")
                 continue
-            res = slack.post(r["ch"], text, thread_ts=r["parent"])
-            if not res.is_measured:
-                fails.append(f"post {k}: {res.reason}")
+            st = g.out(k, "outreach", {"who": who, "name": r.get("name")},
+                       lambda r=r, text=text: slack.post(r["ch"], text, thread_ts=r["parent"]).require())
+            if st != "done":
+                fails.append(f"post {k}: {(g.row(k, 'outreach') or {}).get('error', st)}")
                 continue
-            ledger.append(TASK, k, OUTREACH, ts=res.require(), by=who, name=r.get("name"))
-            pr = _promote(k, r)
+            ledger.append(TASK, k, OUTREACH, ts=g.row(k, "outreach")["result"], by=who, name=r.get("name"))
+            pr = _promote(k, r, g)
             ledger.append(TASK, k, RESOLVED, by="reaction_yes", who=who, name=r.get("name"),
                           promoted=pr)
             done += 1
@@ -653,7 +688,7 @@ def _mark_promoted(page_id: str, title: str) -> None:
         print(f"  ⚠️  {title} 승격 표시 실패: {res.reason[:80]}")
 
 
-def _promote(key: str, row: dict) -> str:
+def _promote(key: str, row: dict, gate: Gate | None = None) -> str:
     """✅ 를 받은 사람을 극초기 DB 에 올린다. **회사 단위로 바꿔서** 넣는다.
 
     🔴 이미 있으면 안 만든다. 대조는 두 가지로 한다 —
@@ -661,6 +696,7 @@ def _promote(key: str, row: dict) -> str:
        이름 하나로만 대조하면 `SampleProduct`(회사)와 `Example Person B`(사람)이 두 행으로 갈린다.
        실제로 08-18 에 그렇게 갈렸다.
     """
+    gate = gate or _gate()
     if not _cfg("promote"):
         # 막혔다는 걸 말한다. 조용히 건너뛰면 "왜 극초기에 안 들어갔지"를 못 답한다.
         print(f"  · 극초기 승격은 꺼져 있다 (linkedin.promote: false) — {row.get('name')}")
@@ -694,27 +730,34 @@ def _promote(key: str, row: dict) -> str:
     names = {norm(r.get("법인(서비스)")) for r in f.require()}
     links = {norm(r.get("링크")) for r in f.require() if str(r.get("링크") or "").strip()}
     if norm(title) in names or (home and norm(home) in links):
-        ledger.append(TASK, key, PROMOTED, result="dup", title=title)
-        _mark_promoted(row.get("page_id"), title)     # 이미 올라가 있다는 사실도 보여야 한다
+        if gate.out(key, "promote", {"title": title, "result": "dup"}, lambda: _mark_promoted(row.get("page_id"), title)) == "dry":
+            return "dry"
+        ledger.append(TASK, key, PROMOTED, result="dup", title=title)     # 이미 올라가 있다는 사실도 보여야 한다
         print(f"  · {title} — 극초기에 이미 있다. 안 넣는다")
         return "dup"
 
-    res = notion.create(EARLY, {
-        "법인(서비스)": notion.clip16(title),
-        "링크": home or row.get("url") or None,
-        "한 줄 설명": notion.clip16(row.get("brief") or ""),
-        "발굴": "링크드인",
-        "Status": EARLY_STATUS,
-        # 🔴 교통 정리 뷰가 이 칸으로 거른다 — False 면 **Status 를 옳게 넣어도 화면에 안 뜬다.**
-        #    (2026-08-20: 4행을 `2. 미팅요청` 으로 넣었는데 보드에 안 보였다. 원인이 이거였다)
-        #    우리는 실제로 슬랙 카드를 보내고 나서 승격하므로 True 가 사실이다.
+    def do() -> str:
+        pid = notion.create(EARLY, {
+            "법인(서비스)": notion.clip16(title),
+            "링크": home or row.get("url") or None,
+            "한 줄 설명": notion.clip16(row.get("brief") or ""),
+            "발굴": "링크드인",
+            "Status": EARLY_STATUS,
+            # 🔴 교통 정리 뷰가 이 칸으로 거른다 — False 면 **Status 를 옳게 넣어도 화면에 안 뜬다.**
+            #    (2026-08-20: 4행을 `2. 미팅요청` 으로 넣었는데 보드에 안 보였다. 원인이 이거였다)
+            #    우리는 실제로 슬랙 카드를 보내고 나서 승격하므로 True 가 사실이다.
         "슬랙 발송?": True,
-    })
-    if not res.is_measured:
-        print(f"  🔴 극초기 착지 실패 {title}: {res.reason}")
+        }).require()
+        _mark_promoted(row.get("page_id"), title)     # 링크드인 행에도 남긴다 (교통정리용)
+        return pid
+
+    st = gate.out(key, "promote", {"title": title, "link": home or row.get("url")}, do)
+    if st == "dry":
+        return "dry"
+    if st != "done":
+        print(f"  🔴 극초기 착지 실패 {title}: {gate.row(key, 'promote')['error']}")
         return "fail"
-    ledger.append(TASK, key, PROMOTED, result="created", page_id=res.require(), title=title)
-    _mark_promoted(row.get("page_id"), title)     # 링크드인 행에도 남긴다 (교통정리용)
+    ledger.append(TASK, key, PROMOTED, result="created", page_id=gate.row(key, "promote")["result"], title=title)
     print(f"  · 극초기 승격: {title}")
     return "created"
 
