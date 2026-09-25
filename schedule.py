@@ -22,9 +22,9 @@ launchd 가 이미 "때가 되면 실행"을 한다. 옛 시스템은 그 위에
                         loaded() 는 `launchctl list` 대신 `crontab -l` 을 읽게 한다.
                         선언(SKILL.md)·스킬·장부·통로는 **안 건드린다** — 그게 이 구조의 요점이다
 
-🔴 다만 진짜 이식 걸림돌은 스케줄러가 아니라 **claude 구독**이다. `claude -p` 는 그 머신의
-   로그인에 묶인다(ADR 0003 대가 ④). 서버로 옮기면 API 로 바꾸거나 인증을 옮겨야 하고,
-   API 는 비용 축이 "쿼터"에서 "돈"으로 바뀐다 — 옛 결정이 정확히 그걸 피하려던 것이다.
+리눅스(cron)는 들어 있다 [2026-09-25]: `sys.platform` 이 darwin 이 아니면 crontab 블록을 만들고 `crontab -l` 을 읽는다.
+`claude -p` 로그인은 **계정**에 묶이는 것이라 서버에서 hello@ 로 `claude login` 한 번이면 된다(브라우저 URL 을 받아 붙인다).
+API 로 바꾸지 않는다 — 비용 축이 "쿼터"에서 "돈"으로 바뀌는 걸 ADR 0003 이 피했다.
 
 ## 🔴 check 가 이 파일의 존재 이유다
 
@@ -47,6 +47,8 @@ import yaml
 ROOT = Path(__file__).resolve().parent
 LABEL = "com.kv.{skill}.{cmd}"
 AGENTS = Path.home() / "Library/LaunchAgents"
+MAC = sys.platform == "darwin"                       # 아니면 cron. 두 백엔드의 차이는 이 파일 안에서 끝난다
+_CRON_BEGIN, _CRON_END = "# kv-schedule begin (생성물 — 정본은 skills/*/SKILL.md)", "# kv-schedule end"
 
 _WHEN = re.compile(r"(매일|월|화|수|목|금|토|일)\s+(\d{1,2}):(\d{2})")
 # 🔴 주기 실행. "때가 되면"이 아니라 "N분마다"가 필요한 일이 있다 —
@@ -130,10 +132,32 @@ def plist(job: dict) -> str:
 """
 
 
+def cron_line(job: dict) -> str:
+    """crontab 한 줄. 라벨은 끝의 주석이다 — loaded() 가 그걸 읽는다."""
+    if job.get("interval"):
+        n = job["interval"] // 60
+        if 60 % n:
+            raise ValueError(f"{job['label']}: cron 은 60 을 나누는 분 간격만 된다 ({n}분)")
+        when = f"*/{n} * * * *"
+    else:
+        wd = "*" if job["weekday"] is None else job["weekday"]          # 우리 요일표(일=0)가 cron 과 같다
+        when = f"{job['minute']} {job['hour']} * * {wd}"
+    log = Path.home() / "kv-data" / "_logs" / f"{job['label']}.log"
+    return (f"{when} cd {ROOT} && .venv/bin/python -m skills.{job['skill']}.run {' '.join(job['argv'])}"
+            f" >> {log} 2>&1  # {job['label']}")
+
+
+def _crontab() -> list[str]:
+    """지금 crontab. 없으면 stdout 이 비어 빈 목록이다(rc 를 보지 않는다 — A3)."""
+    return subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout.splitlines()
+
+
 def loaded() -> set[str]:
-    """실제로 launchd 에 적재된 우리 라벨."""
-    r = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
-    return {ln.split("\t")[-1] for ln in r.stdout.splitlines() if "com.kv." in ln}
+    """실제로 설치된 우리 라벨 — 맥은 launchd, 그 밖은 crontab."""
+    if MAC:
+        r = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
+        return {ln.split("\t")[-1] for ln in r.stdout.splitlines() if "com.kv." in ln}
+    return {ln.rsplit("# ", 1)[-1].strip() for ln in _crontab() if "# com.kv." in ln}
 
 
 def cmd_show() -> int:
@@ -165,6 +189,8 @@ def cmd_check() -> int:
 
 def cmd_install(apply: bool) -> int:
     jobs = declared()
+    if not MAC:
+        return _install_cron(jobs, apply)
     for j in jobs:
         p = AGENTS / f"{j['label']}.plist"
         print(f"  {'쓴다' if apply else '(dry)'} {p.name}  ← {j['when']}")
@@ -177,6 +203,24 @@ def cmd_install(apply: bool) -> int:
                            capture_output=True)
     if not apply:
         print("\n  --apply 를 붙이면 실제로 설치한다. 설치하면 그 시각부터 무인으로 돈다.")
+    return 0
+
+
+def _install_cron(jobs: list[dict], apply: bool) -> int:
+    """crontab 의 우리 블록만 바꿔 넣는다. 사람이 적어 둔 다른 줄은 그대로."""
+    old = _crontab()
+    keep = old[:old.index(_CRON_BEGIN)] + old[old.index(_CRON_END) + 1:] if _CRON_BEGIN in old else old
+    block = [_CRON_BEGIN, *(cron_line(j) for j in jobs), _CRON_END]
+    for ln in block[1:-1]:
+        print(f"  {'쓴다' if apply else '(dry)'} {ln}")
+    if apply:
+        (Path.home() / "kv-data" / "_logs").mkdir(parents=True, exist_ok=True)
+        subprocess.run(["crontab", "-"], input="\n".join([*keep, *block]) + "\n", text=True)
+        missing = {j["label"] for j in jobs} - loaded()                # 🔴 쓴 것은 되읽는다 — rc 가 아니라 crontab -l 로 판정
+        if missing:
+            raise RuntimeError(f"crontab 에 안 들어갔다: {sorted(missing)}")
+    else:
+        print("\n  --apply 를 붙이면 crontab 에 넣는다. 설치하면 그 시각부터 무인으로 돈다.")
     return 0
 
 

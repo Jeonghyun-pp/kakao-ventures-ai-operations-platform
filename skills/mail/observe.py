@@ -448,6 +448,31 @@ def run_once(con, reader, llm, *, days: int, max_judge: int | None, no_judge: bo
     return rc
 
 
+def handback(con) -> int:
+    """되돌리기용 — 새 흐름이 **실제로 한** 일을 옛 장부(`_ledger/mail.jsonl`)에 옮겨 적는다.
+
+    옛 apply 는 자기 장부에 없는 메일을 다시 처리한다. 전환 뒤 옛 시스템으로 되돌리는 날, 이걸 먼저 돌려야
+    같은 메일에 아카이브·초안이 두 번 생기지 않는다. 멱등 — 이미 적힌 것은 건너뛴다.
+    이벤트 이름은 옛 `run.py` 의 ARCHIVED·DRAFTED 와 같다. 질문(post)은 옮기지 않는다 — 옛 apply 는 슬랙을 보류(--no-slack)한다.
+    """
+    have_a = ledger.keys("mail", "archived")
+    have_d = {(r["key"], r.get("kind")) for r in ledger.rows("mail", ev="drafted")}
+    n = 0
+    for mid, kind, detail, subject in con.execute(
+            "SELECT a.message_id, a.kind, a.detail, m.subject FROM actions a JOIN messages m ON m.id=a.message_id"
+            " WHERE a.status='done' AND a.kind IN ('archive','draft','send','forward')"):
+        d = json.loads(detail)
+        if kind == "archive" and mid not in have_a:
+            ledger.append("mail", mid, "archived", subject=subject[:80], category=d.get("category"), via="handback")
+        elif kind != "archive" and (mid, "forward" if kind == "forward" else "reply") not in have_d:
+            ledger.append("mail", mid, "drafted", kind="forward" if kind == "forward" else "reply",
+                          draft_id=d.get("draft_id", ""), to=d.get("to", ""), category=d.get("category"), via="handback")
+        else:
+            continue
+        n += 1
+    return n
+
+
 def health() -> int:
     """observe 는 자기가 안 돌았다고 말할 수 없다. 이건 **다른 시각의 작업**이 오늘 보고서 파일이 있는지 보는 것이다."""
     from . import flow
@@ -512,6 +537,9 @@ def main(a) -> int:
             return 0
         if a.op == "backup":
             print(f"✅ {backup(con, bdir).name}")
+            return 0
+        if a.op == "handback":
+            print(f"✅ 옛 장부에 {handback(con)}건 옮겨 적음 — 이제 옛 apply 가 그 메일을 다시 처리하지 않는다")
             return 0
         if a.op == "replay":
             crit = Path(a.criteria or CRITERIA).read_text(encoding="utf-8")

@@ -291,3 +291,26 @@ class Health(unittest.TestCase):
         self.assertEqual(len(said), 1)
         self.assertIn("안 돌았습니다", said[0])
 
+
+class Handback(unittest.TestCase):
+    """되돌리기 — 실제로 한 것만, 옛 장부의 이벤트 이름으로, 두 번 돌려도 한 번만."""
+
+    def test_moves_done_actions_once(self):
+        from kvlib import ledger
+        d = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        con = observe.connect(":memory:")
+        self.addCleanup(con.close)
+        con.executescript("CREATE TABLE actions(message_id TEXT, kind TEXT, status TEXT, detail TEXT, created TEXT, PRIMARY KEY(message_id, kind));"
+                          "INSERT INTO messages(id, subject) VALUES('a','광고'),('b','문의'),('c','제휴'),('d','기록만');"
+                          "INSERT INTO actions VALUES('a','archive','done','{\"category\":\"AD_NOISE\"}','t');"
+                          "INSERT INTO actions VALUES('b','send','done','{\"to\":\"f@x\",\"draft_id\":\"D1\"}','t');"
+                          "INSERT INTO actions VALUES('c','forward','done','{}','t');"
+                          "INSERT INTO actions VALUES('d','archive','dry','{}','t');")
+        with unittest.mock.patch.object(ledger.paths, "ledger", lambda task: d / f"{task}.jsonl"):
+            self.assertEqual(observe.handback(con), 3)
+            self.assertEqual(observe.handback(con), 0)                     # 멱등
+            rows = ledger.rows("mail")
+        self.assertEqual([(r["key"], r["ev"], r.get("kind")) for r in rows],
+                         [("a", "archived", None), ("b", "drafted", "reply"), ("c", "drafted", "forward")])
+        self.assertEqual(rows[1]["draft_id"], "D1")
+

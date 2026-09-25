@@ -116,7 +116,7 @@ sqlite3 ~/kv-data/mail/db/mail.sqlite "SELECT message_id, kind, status FROM acti
 🔴 이 표가 비는 것이 전환 조건이다. 갈린 건은 `--op label` 로 정답을 붙이고 `classify_criteria.md` 를 고친다.
 
 **전환일 절차 (5단계 · 사람이 한다)**: ① 옛 launchd 작업 셋(plan·apply·followup)을 내린다 → ② `outbound: "on"` → ③ `forward_channel: "bplan"`.
-같은 날, 이 순서로. 되돌리기는 거꾸로 — 옛 작업을 다시 올리고, 새 흐름이 처리한 메일 id 를 옛 장부에 옮겨 적는다(옛 apply 는 자기 장부에 없는 메일을 다시 처리한다).
+같은 날, 이 순서로. 되돌리기는 거꾸로 — `observe --op handback`(새 흐름이 실제로 한 아카이브·초안·발송·포워드를 옛 장부에 옮겨 적는다. 옛 apply 는 자기 장부에 없는 메일을 다시 처리하므로 **이걸 먼저**) → 문을 닫고 → 옛 작업을 다시 올린다.
 발송은 그 뒤에 `send_branches` 에 갈래를 하나씩 넣어 켠다.
 
 **꺼짐 알림**: `health`(12:00 · `observe --op health` 와 같다) 가 오늘 보고서 파일이 없으면 슬랙(`report_channel`)에 한 줄. 질문이 리마인드 상한이 끝나도 답이 없으면 아침 요약 첫 줄에 ⚠️.
