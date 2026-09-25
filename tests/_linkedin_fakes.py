@@ -97,6 +97,8 @@ class Case:
         real = run.constraints.get                                # cfg={"linkedin.promote": False} 처럼 설정값을 바꿔 끼운다
         self._stack.enter_context(mock.patch.object(run.constraints, "get", lambda k: self.cfg[k] if k in self.cfg else real(k)))
         self._stack.enter_context(mock.patch.object(run, "_reviewers", lambda: {"U1": "Reviewer A"}))
+        self.data = d / "data"
+        self._stack.enter_context(mock.patch.object(run.paths, "data", lambda *a, **k: (self.data.joinpath(*a).mkdir(parents=True, exist_ok=True) or self.data.joinpath(*a))))
         self.db = sqlite3.connect(":memory:")
         self.db.executescript(judgments.SCHEMA)
         self._stack.enter_context(mock.patch.object(run, "_gate", lambda dry_run=False: Gate(

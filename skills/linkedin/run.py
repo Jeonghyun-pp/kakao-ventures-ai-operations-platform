@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import yaml
 
-from kvlib import Fetched, constraints, ledger, lock, paths, store
+from kvlib import Fetched, constraints, ledger, lock, paths, report, store
 from kvlib.gate import Gate
 from kv_transport import apify, notion, slack
 
@@ -428,6 +428,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
             _alert("card", "올릴 사람이 0명이다 — 카드가 안 나간다.", key="card:empty", head="🟡 *linkedin card* 재고 소진")
         # 🔴 4 = 재고 소진. 2(다 못 나갔다)와 갈라둔다 — 뜻이 다르고, 무엇보다
         #    card() 가 이미 정확한 문구로 알렸으니 바깥에서 또 보내면 두 번이 된다.
+        daily_report(g, pool=0, picked=0)
         return 4
     pick = pool[:n]
     left_n = len(pool) - len(pick)
@@ -496,7 +497,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
             continue
         # 착지 먼저, 장부 나중. ts 를 못 남기면 반응을 영영 못 찾는다.
         ledger.append(TASK, k, CARDED)
-        ledger.append(TASK, k, POSTED, ch=ch, ts=g.row(k, "card")["result"], parent=parent["ts"],
+        ledger.append(TASK, k, POSTED, ch=ch, slack_ts=g.row(k, "card")["result"], parent=parent["ts"],
                       day=ledger.today(), page_id=live["_page_id"],
                       name=live.get("서비스명"),
                       # 🔴 claude 가 찾은 회사명. 극초기 승격의 title 이 된다 —
@@ -505,6 +506,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
                       homepage=live.get("Homepage"), url=live.get("LinkedIn URL"))
         posted += 1
     print(f"· 스레드에 {posted}/{len(pick)}명 올림")
+    daily_report(g, pool=len(pool), picked=posted)
     return 0 if posted == len(pick) else 2
 
 
@@ -549,8 +551,9 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
         read_ok.add(parent)
         react = {m["ts"]: m.get("reactions") or [] for m in got.require()}
         for k, r in rows:
-            names = {x.get("name") for x in react.get(r["ts"], [])}
-            users = [u for x in react.get(r["ts"], []) if x.get("name") in yes
+            mine = react.get(r.get("slack_ts") or r.get("ts"), [])     # 09-25 전 행은 슬랙 ts 가 `ts` 칸에 있다(기록 시각을 덮었다)
+            names = {x.get("name") for x in mine}
+            users = [u for x in mine if x.get("name") in yes
                      for u in x.get("users", [])]
             if names & yes:
                 picked.append((k, r, users))
@@ -571,7 +574,7 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
             continue
         if not dry:
             ledger.append(TASK, k, RESOLVED, by="expiry", name=r.get("name"),
-                          ts=r.get("ts"), ch=r.get("ch"))
+                          slack_ts=r.get("slack_ts") or r.get("ts"), ch=r.get("ch"))
         expired += 1
     if expired:
         print(f"  · ⏰ {due_d}일 무반응 {expired}명 대기 해제 (노션·인박스는 그대로)")
@@ -625,7 +628,7 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
             if st != "done":
                 fails.append(f"post {k}: {(g.row(k, 'outreach') or {}).get('error', st)}")
                 continue
-            ledger.append(TASK, k, OUTREACH, ts=g.row(k, "outreach")["result"], by=who, name=r.get("name"))
+            ledger.append(TASK, k, OUTREACH, slack_ts=g.row(k, "outreach")["result"], by=who, name=r.get("name"))
             pr = _promote(k, r, g)
             ledger.append(TASK, k, RESOLVED, by="reaction_yes", who=who, name=r.get("name"),
                           promoted=pr)
@@ -864,12 +867,46 @@ def _alert(cmd: str, msg: str, *, key: str | None = None, head: str | None = Non
         return
     text = (f"{head or f'🔴 *linkedin {cmd}* 실패'} — {msg}\n"
             f"로그: `tail -30 ~/kv-data/_logs/com.kv.linkedin.{cmd}.log`")
-    r = slack.post(_cfg("report_channel"), text)
+    r = report.post("linkedin", text, _send)
     # 알림이 못 나가도 잡의 결과를 바꾸지 않는다. 다만 조용히 넘어가진 않는다.
-    if r.is_measured:
+    if r == "게시함":
         ledger.append(TASK, key, "alerted", day=today, msg=msg[:200])
     else:
-        print(f"  🔴 실패 알림도 못 보냈다: {r.reason}")
+        print(f"  🔴 실패 알림도 못 보냈다: {r}")
+
+
+def _send(ch: str, text: str) -> str:
+    return slack.post(ch, text).require()
+
+
+def daily_report(g: Gate, *, pool: int, picked: int) -> None:
+    """하루 한 번(평일 · card 뒤) 파일 + 슬랙 요약. 먼저 볼 것 = **노션에서 사람이 고친 Tier**(정답 ↔ 판정 갈림) — 기준을 깎을 재료다."""
+    out = paths.data("linkedin", "reports") / f"{ledger.today()}.md"
+    if out.exists():
+        return
+    today = ledger.today()
+    day = {ev: sum(1 for r in ledger.rows(TASK, ev=ev) if str(r.get("ts", "")).startswith(today) or r.get("day") == today)
+           for ev in ("landed", "carded", "outreach", "resolved", "promoted")}
+    week = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    dist = dict(g.con.execute("SELECT tier, count(*) FROM judgments WHERE run='live' AND ok=1 AND created>=? GROUP BY tier", (week,)))
+    human = g.con.execute("SELECT h.key, l.tier, h.tier FROM judgments h JOIN judgments l ON l.key=h.key AND l.run='live'"
+                          " WHERE h.run='human' ORDER BY h.created DESC").fetchall()
+    acts = dict(g.con.execute("SELECT kind||':'||status, count(*) FROM actions WHERE created>=? GROUP BY 1", (today,)))
+    head = (f"카드 {picked}명 · 재고 {pool}명({pool // 5}일치) · ✅ 초안 {day['outreach']} · 승격 {day['promoted']} · 만기/결론 {day['resolved']}"
+            + (f" · 이번 주 판정 {sum(dist.values())}명" if dist else ""))
+    md = [f"# 링크드인 하루 보고 — {today}", "", head, "",
+          "## 🚩 노션에서 사람이 고친 Tier (정답 ↔ 판정)", ""]
+    md += [f"- `{k}` 판정 {a} → 정답 **{b}**" for k, a, b in human] or ["없음 — 갈린 게 없으면 기준이 맞거나 아직 안 봤다"]
+    md += ["", "## 이번 주 판정 분포", "", " · ".join(f"{t} {n}" for t, n in sorted(dist.items(), key=lambda x: -x[1])) or "없음",
+           "", "## 오늘 문(actions)", "", " · ".join(f"{k} {v}" for k, v in sorted(acts.items())) or "없음",
+           "", "## 고치는 법", "", "```bash", "cd ~/kv",
+           "# 기준을 고친다: skills/linkedin/criteria.md → 저장된 사람으로 다시 판정 → 무엇이 달라졌나",
+           "./.venv/bin/python -m skills.linkedin.run replay [--limit 50]",
+           "./.venv/bin/python -m skills.linkedin.run diff --b r-<sha>",
+           "# 정답은 노션 Tier 칸을 고치면 된다 — 다음 card 가 human 으로 가져간다", "```", ""]
+    out.write_text("\n".join(md), encoding="utf-8")
+    summary = f"*링크드인 하루* — {head}" + (f"\n🚩 노션에서 고친 Tier {len(human)}명" if human else "") + f"\n전체: `{out}`"
+    print(f"· 보고서 {out} | 슬랙 {report.post('linkedin', summary, _send)}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -883,6 +920,7 @@ def main(argv: list[str] | None = None) -> int:
     fu = sub.add_parser("followup", help="✅ 를 걷어 콜드 메시지 초안을 스레드에 올린다")
     fu.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
+    sub.add_parser("health", help="평일에 오늘 보고서가 있나 — 없으면 슬랙 한 줄")
     rp = sub.add_parser("replay", help="고친 기준으로 저장된 사람을 다시 판정 (돈 0 · 노션 0)")
     rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
     df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
@@ -904,6 +942,8 @@ def main(argv: list[str] | None = None) -> int:
             if rc and not a.dry_run:
                 _alert("followup", f"종료코드 {rc} — ✅ 를 걷거나 초안을 올리지 못했다")
             return rc
+        if a.cmd == "health":
+            return report.health("linkedin", paths.data("linkedin", "reports"), _send, label="linkedin card", weekdays_only=True)
         if a.cmd == "replay":
             crit = Path(a.criteria).read_text(encoding="utf-8") if a.criteria else judge.criteria_text()
             r = judgments.replay(_gate().con, judge.judge_lines, crit, judge.sha(crit), limit=a.limit)

@@ -10,8 +10,8 @@ from tests._linkedin_fakes import Case, Notion, Slack, row
 YES = {"name": "white_check_mark", "users": ["U1"]}
 
 
-def posted(key="in/a", *, day="2026-09-23", page="p1"):
-    ledger.append("linkedin", key, run.POSTED, ch="net", ts="m1", parent="par", day=day, page_id=page,
+def posted(key="in/a", *, day="2026-09-23", page="p1", old=False):
+    ledger.append("linkedin", key, run.POSTED, ch="net", **({"ts": "m1"} if old else {"slack_ts": "m1"}), parent="par", day=day, page_id=page,
                   name="A", company="Aco", brief="b", homepage="https://a.co", url="https://www.linkedin.com/in/a")
 
 
@@ -34,6 +34,13 @@ class Followup(unittest.TestCase):
         self.assertEqual([(r["ev"], r.get("by")) for r in c.rows() if r["ev"] != "posted"],
                          [("outreach", "Reviewer A"), ("resolved", "reaction_yes")])
         self.assertEqual(c.rows("resolved")[0]["promoted"], "created")
+
+    def test_old_rows_with_slack_ts_in_ts_column_still_match(self):
+        """09-25 전 장부 195줄은 슬랙 ts 가 `ts` 칸에 있다 — 읽기는 둘 다 본다."""
+        with case({"par": [{"ts": "m1", "reactions": [YES]}]}) as c:
+            posted(old=True)
+            self.assertEqual(run.followup(), 0)
+        self.assertEqual(c.rows("outreach")[0]["by"], "Reviewer A")
 
     def test_unknown_reviewer_leaves_sender_blank(self):
         with case({"par": [{"ts": "m1", "reactions": [{"name": "white_check_mark", "users": ["U9"]}]}]}) as c:

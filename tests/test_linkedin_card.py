@@ -23,13 +23,17 @@ class Card(unittest.TestCase):
                 row("p3", "https://www.linkedin.com/in/c", "Trend")]
         with case(rows) as c:
             rc = run.card(n=2)
+            rep = (c.data / "linkedin" / "reports" / f"{ledger.today()}.md").read_text()
         self.assertEqual(rc, 0)
         net = [p for p in c.slack.posts if p[0] == "net"]
         self.assertEqual([p[2] for p in net], [None, net[0] and "ts-2", "ts-2"])          # 헤더 + 스레드 답글 2 (앞의 test 채널 글은 재고 경고)
         self.assertIn("이름p2", net[1][1])                                                 # Catch 먼저
         self.assertIn("이름p3", net[2][1])
         self.assertEqual([r["ev"] for r in c.rows()], ["alerted", "carded", "posted", "carded", "posted"])
-        self.assertEqual(c.rows("posted")[0]["ts"], "ts-3")                                 # 🔴 슬랙 ts 가 장부 ts 를 덮는다 (알려진 결함)
+        self.assertEqual(c.rows("posted")[0]["slack_ts"], "ts-3")                           # 슬랙 ts 는 제 칸에 — 장부 ts 는 기록 시각
+        self.assertTrue(c.rows("posted")[0]["ts"].endswith("Z"))
+        self.assertIn("카드 2명", rep)                                                      # 하루 보고서 파일
+        self.assertTrue(any(p[0] == "test" and "*링크드인 하루*" in p[1] for p in c.slack.posts))   # 요약은 test 채널로
 
     def test_skips_already_posted_target_updated_and_early_db(self):
         rows = [row("p1", "https://www.linkedin.com/in/a"), row("p2", "https://www.linkedin.com/in/b", **{"타깃": True}),
@@ -54,16 +58,16 @@ class Card(unittest.TestCase):
         with case([]) as c:
             self.assertEqual(run.card(n=5), 4)
             self.assertEqual(run.card(n=5), 4)
-        self.assertEqual([p[0] for p in c.slack.posts], ["test"])                            # 알림은 test 채널, 하루 한 번
-        self.assertIn("재고 소진", c.slack.posts[0][1])
+        alerts = [p for p in c.slack.posts if "재고 소진" in p[1]]
+        self.assertEqual([p[0] for p in alerts], ["test"])                                   # 알림은 test 채널, 하루 한 번
+        self.assertEqual(sum("*링크드인 하루*" in p[1] for p in c.slack.posts), 1)            # 보고서 요약도 하루 한 번
 
     def test_low_stock_warns(self):
         rows = [row(f"p{i}", f"https://www.linkedin.com/in/{i}") for i in range(6)]
         with case(rows) as c:
             run.card(n=5)
-        warn = [p for p in c.slack.posts if p[0] == "test"]
-        self.assertEqual(len(warn), 1)
-        self.assertIn("재고 부족", warn[0][1])
+        warn = [p for p in c.slack.posts if "재고 부족" in p[1]]
+        self.assertEqual([p[0] for p in warn], ["test"])
 
     def test_weekend_sends_nothing(self):
         with case([row("p1")], today=SAT) as c:
