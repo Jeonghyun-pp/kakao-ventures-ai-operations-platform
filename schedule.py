@@ -201,6 +201,12 @@ def cmd_install(apply: bool) -> int:
                            capture_output=True)
             subprocess.run(["launchctl", "bootstrap", f"gui/{__import__('os').getuid()}", str(p)],
                            capture_output=True)
+    gone = sorted(l for l in loaded() - {j["label"] for j in jobs} if l.startswith("com.kv.") and "." in l[7:])
+    for label in gone:                                              # 선언에서 빠진 우리 잡은 내린다 — 선언이 곧 현실이어야 한다
+        print(f"  {'내린다' if apply else '(dry) 내린다'} {label}")
+        if apply:
+            subprocess.run(["launchctl", "bootout", f"gui/{__import__('os').getuid()}/{label}"], capture_output=True)
+            (AGENTS / f"{label}.plist").unlink(missing_ok=True)
     if not apply:
         print("\n  --apply 를 붙이면 실제로 설치한다. 설치하면 그 시각부터 무인으로 돈다.")
     return 0
