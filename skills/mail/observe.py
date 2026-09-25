@@ -30,7 +30,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from kvlib import constraints, ledger, lock, paths
+from kvlib import constraints, ledger, lock, paths, report, store
 
 from . import clean, rules
 
@@ -73,13 +73,10 @@ def db_path() -> Path:
 
 
 def connect(path: Path | str) -> sqlite3.Connection:
-    con = sqlite3.connect(str(path), isolation_level=None)      # 자동 커밋 — 문장 하나가 한 단위다
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA synchronous=FULL")
-    con.executescript(_SCHEMA)
-    if str(path) != ":memory:":
-        Path(path).chmod(0o600)                                 # 메일 본문이 들어 있다
+    con = store.connect(path, _SCHEMA)
+    cols = [r[1] for r in con.execute("PRAGMA table_info(actions)")]
+    if "message_id" in cols:                                     # 2026-09-25 이전 DB — kvlib.gate 의 열 이름(key)으로
+        con.execute("ALTER TABLE actions RENAME COLUMN message_id TO key")
     return con
 
 
@@ -257,8 +254,8 @@ def _send_section(con, since: str) -> list[str]:
     """자동 회신의 후보와 제외, 그리고 갈래를 **켜도 되는지**. 🔴 승격 원칙은 gmail.promote 그대로다 —
     기간 안에 사람 정답이 붙은 표본이 min_samples 이상이고 분류 일치율이 rate 이상일 때만 "켜도 된다"고 말한다."""
     try:
-        rows = con.execute("SELECT a.message_id, a.status, a.detail, a.created, m.subject FROM actions a"
-                           " JOIN messages m ON m.id=a.message_id WHERE a.kind='send' ORDER BY a.created DESC").fetchall()
+        rows = con.execute("SELECT a.key AS message_id, a.status, a.detail, a.created, m.subject FROM actions a"
+                           " JOIN messages m ON m.id=a.key WHERE a.kind='send' ORDER BY a.created DESC").fetchall()
     except sqlite3.OperationalError:
         return ["아직 없음"]
     rows = [{**dict(r), **json.loads(r["detail"])} for r in rows]    # detail 의 to·category·why·blocked 를 행에 편다
@@ -298,7 +295,7 @@ def report(con, since: str) -> tuple[str, str]:
         " WHERE j.run=? AND j.created>=? ORDER BY m.internal_ms DESC", (LIVE, since)).fetchall()
     try:
         acts = {}
-        for mid, kind, st in con.execute("SELECT message_id, kind, status FROM actions"):
+        for mid, kind, st in con.execute("SELECT key, kind, status FROM actions"):
             acts.setdefault(mid, []).append(f"{kind}:{st}")
     except sqlite3.OperationalError:                             # 판단 흐름이 아직 한 번도 안 돌았다
         acts = {}
@@ -464,7 +461,7 @@ def main(a) -> int:
             f = flow.Flow(con, str(db_path()), flow.RealIO(), now=_now, llm=llm)
             f.decide(a.id, a.decision, by="manual")
             print(f"✅ {a.id} = {a.decision} → " + ", ".join(f"{r[0]}:{r[1]}" for r in con.execute(
-                "SELECT kind, status FROM actions WHERE message_id=?", (a.id,))))
+                "SELECT kind, status FROM actions WHERE key=?", (a.id,))))
             f.close()
             return 0
         if a.op == "backup":

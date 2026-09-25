@@ -77,7 +77,7 @@ class FlowCase(unittest.TestCase):
         return f
 
     def acts(self):
-        return {(r[0], r[1]): r[2] for r in self.con.execute("SELECT message_id, kind, status FROM actions")}
+        return {(r[0], r[1]): r[2] for r in self.con.execute("SELECT key, kind, status FROM actions")}
 
     def test_gate_closed_touches_nothing(self):
         """🔴 기본값(off)에서는 어떤 손도 안 불린다. 무엇을 했을지만 남는다."""
@@ -102,7 +102,7 @@ class FlowCase(unittest.TestCase):
             f.decide("ev", "no", by="manual")
         self.assertTrue(all(c[0] in ("post", "thread") for c in h.calls), h.calls)
         self.assertEqual((self.acts()[("tr", "draft")], self.acts()[("ev", "archive")]), ("dry", "dry"))
-        text = self.con.execute("SELECT detail FROM actions WHERE message_id='ev' AND kind='post'").fetchone()[0]
+        text = self.con.execute("SELECT detail FROM actions WHERE key='ev' AND kind='post'").fetchone()[0]
         self.assertIn("한 문장 요약", text)                                          # 게시했을 글이 그대로 남는다
         self.assertNotIn("자동 거절", text)                                          # 🔴 여기선 무응답을 거절로 안 바꾼다
 
@@ -190,9 +190,9 @@ class FlowCase(unittest.TestCase):
         """🔴 문은 허용 목록이다. 앞으로 생길 종류(예: label)를 깜빡해도 'slack' 단계에서는 안 나간다."""
         f, did = self.flow(Hands()), []
         with gate("slack"):
-            self.assertEqual(f._out("ev", "label", {}, lambda: did.append(1)), "dry")
+            self.assertEqual(f.out("ev", "label", {}, lambda: did.append(1)), "dry")
         with gate("on"):
-            self.assertEqual(f._out("ev", "label", {}, lambda: did.append(1)), "done")
+            self.assertEqual(f.out("ev", "label", {}, lambda: did.append(1)), "done")
         self.assertEqual(did, [1])
 
     def test_handoff_stays_open_until_someone_claims_it(self):
@@ -280,7 +280,7 @@ class SendCase(unittest.TestCase):
         return f
 
     def sends(self):
-        return {r[0]: (r[1], json.loads(r[2])) for r in self.con.execute("SELECT message_id, status, detail FROM actions WHERE kind='send'")}
+        return {r[0]: (r[1], json.loads(r[2])) for r in self.con.execute("SELECT key, status, detail FROM actions WHERE kind='send'")}
 
     def test_eligibility_is_decided_from_the_db(self):
         h = Hands()
@@ -416,7 +416,7 @@ class ActCase(unittest.TestCase):
         return f
 
     def acts(self):
-        return {(r[0], r[1]): r[2] for r in self.con.execute("SELECT message_id, kind, status FROM actions")}
+        return {(r[0], r[1]): r[2] for r in self.con.execute("SELECT key, kind, status FROM actions")}
 
     def test_closed_gate_records_only(self):
         h = Hands()

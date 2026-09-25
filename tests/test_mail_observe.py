@@ -170,7 +170,7 @@ class Report(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             observe.run_once(con, Reader([mail("u", subject="빈 메일", ms=20), mail("k", ms=10)]),
                              lambda p, s: next(outs), days=2, max_judge=50, no_judge=False)
-        con.executescript("CREATE TABLE actions(message_id TEXT, kind TEXT, status TEXT, detail TEXT, created TEXT, PRIMARY KEY(message_id, kind));"
+        con.executescript("CREATE TABLE actions(key TEXT, kind TEXT, status TEXT, detail TEXT, created TEXT, PRIMARY KEY(key, kind));"
                           "INSERT INTO actions VALUES('k','send','dry','{}','2026-09-22T00:00:00Z');"
                           "INSERT INTO actions VALUES('k','draft','dry','{}','2026-09-22T00:00:00Z');"
                           "INSERT INTO actions VALUES('u','forward','dry','{}','2026-09-22T00:00:00Z');")
@@ -189,8 +189,8 @@ class Promotion(unittest.TestCase):
     def setUp(self):
         self.con = observe.connect(":memory:")
         self.addCleanup(self.con.close)
-        self.con.executescript("CREATE TABLE actions(message_id TEXT, kind TEXT, status TEXT, detail TEXT, created TEXT,"
-                               " PRIMARY KEY(message_id, kind));")
+        self.con.executescript("CREATE TABLE actions(key TEXT, kind TEXT, status TEXT, detail TEXT, created TEXT,"
+                               " PRIMARY KEY(key, kind));")
         for i in range(6):
             self.con.execute("INSERT INTO messages(id, subject) VALUES(?, ?)", (f"m{i}", "투자 문의"))
             self.con.execute("INSERT INTO actions VALUES(?, 'send', 'dry', ?, ?)",
