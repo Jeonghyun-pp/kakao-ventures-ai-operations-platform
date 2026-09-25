@@ -1,9 +1,9 @@
-"""route.py · run._dedupe_recipient 의 현재 동작 — 합성 입력."""
+"""route.py 의 현재 동작 — 합성 입력."""
 from __future__ import annotations
 
 import unittest
 
-from skills.mail import route, rules, run
+from skills.mail import route, rules
 
 
 def msg(**kw) -> dict:
@@ -99,46 +99,6 @@ class BodyChunks(unittest.TestCase):
         parts = route.body_chunks(msg(body=("가나다라마바사\n" * 1000)))
         self.assertGreater(len(parts), 1)
         self.assertTrue(all(len(p) <= route._CHUNK + 40 for p in parts))
-
-
-def row(i, action, to, date, **kw) -> dict:
-    return {"id": f"m{i}", "action": action, "to": to, "internal_date": date, "body": "b", **kw}
-
-
-class DedupeRecipient(unittest.TestCase):
-    def test_latest_wins_and_other_is_archived(self):
-        rows = [row(1, "reply", "x@example.com", 10), row(2, "reply", "x@example.com", 20)]
-        self.assertEqual(run._dedupe_recipient(rows), 1)
-        self.assertEqual([r["action"] for r in rows], ["archive", "reply"])
-        self.assertNotIn("to", rows[0])
-
-    def test_direct_mail_beats_webflow_form_even_if_older(self):
-        rows = [row(1, "reply", "x@example.com", 10),
-                row(2, "reply", "x@example.com", 20, draft_subject="폼 제목")]
-        run._dedupe_recipient(rows)
-        self.assertEqual([r["action"] for r in rows], ["reply", "archive"])
-
-    def test_shared_inbox_is_exempt(self):
-        rows = [row(1, "forward", route.SLACK_BPLAN, 10), row(2, "forward", route.SLACK_BPLAN, 20)]
-        self.assertEqual(run._dedupe_recipient(rows), 0)
-        self.assertEqual([r["action"] for r in rows], ["forward", "forward"])
-
-    def test_same_sender_different_request_is_silently_archived_known_tradeoff(self):
-        """🔴 수신자만 보고 용건은 안 본다(2026-09-02 결정의 대가). 다른 용건이어도 한쪽이 치워진다."""
-        rows = [row(1, "reply", "x@example.com", 10, subject="투자 문의"),
-                row(2, "reply", "x@example.com", 20, subject="행사 초청")]
-        run._dedupe_recipient(rows)
-        self.assertEqual(rows[0]["action"], "archive")
-
-
-class DraftJobs(unittest.TestCase):
-    def test_partnership_makes_two_drafts(self):
-        r = {"action": "forward", "to": "s", "body": "b", "also_reply": {"to": "x", "body": "d"}}
-        self.assertEqual([k for k, _, _ in run._draft_jobs(r)], ["forward", "reply"])
-
-    def test_no_judge_plan_marker_is_stable(self):
-        """apply 가 --no-judge 계획을 거부하는 근거 문자열. 바뀌면 거부가 조용히 풀린다."""
-        self.assertEqual(run.NO_JUDGE_WHY, "--no-judge 로 claude 를 건너뛰었다")
 
 
 if __name__ == "__main__":

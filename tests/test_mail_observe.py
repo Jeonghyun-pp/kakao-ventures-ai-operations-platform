@@ -158,13 +158,12 @@ class EndToEnd(unittest.TestCase):
         self.run_once()
         observe._save(self.con, "a", observe.HUMAN, "", "", "", {"ok": 1, "category": "INBOUND_KO"})
         observe.judge(self.con, LLM(out="CATEGORY: AD_NOISE\nREASON: r\nFOLLOWUP: no"), run="r-x", criteria="c", limit=50)
-        with unittest.mock.patch.object(observe, "_legacy", return_value={}):
-            rows = {r["id"]: r for r in observe.diff(self.con, "live", "r-x")}
+        rows = {r["id"]: r for r in observe.diff(self.con, "live", "r-x")}
         self.assertEqual((rows["a"]["a"], rows["a"]["b"], rows["a"]["human"]), ("INBOUND_KO", "AD_NOISE", "INBOUND_KO"))
 
 
 class Report(unittest.TestCase):
-    def test_flags_unknown_and_disagreement_with_the_legacy_plan(self):
+    def test_flags_unknown_and_reply_candidates(self):
         con = observe.connect(":memory:")
         self.addCleanup(con.close)
         outs = iter(["CATEGORY: UNKNOWN\nREASON: 본문이 비어 있다\nFOLLOWUP: no", OK])
@@ -175,18 +174,13 @@ class Report(unittest.TestCase):
                           "INSERT INTO actions VALUES('k','send','dry','{}','2026-09-22T00:00:00Z');"
                           "INSERT INTO actions VALUES('k','draft','dry','{}','2026-09-22T00:00:00Z');"
                           "INSERT INTO actions VALUES('u','forward','dry','{}','2026-09-22T00:00:00Z');")
-        legacy = {"k": {"category": "AD_NOISE", "action": "archive"}, "u": {"category": "UNKNOWN", "action": "forward"}}
-        with unittest.mock.patch.object(observe, "_legacy", return_value=legacy):
-            md, slack = observe.report(con, "2000-01-01T00:00:00Z")
+        md, slack = observe.report(con, "2000-01-01T00:00:00Z")
         flagged = md.split("## 📤")[0]
         self.assertIn("**UNKNOWN**", flagged)
-        self.assertIn("**현행은 AD_NOISE**", flagged)                      # 같은 메일을 현행은 광고로 치웠다
+        self.assertIn("**자동 회신 · send:dry, draft:dry**", flagged)       # 회신이 나갈 건은 사람이 문안·수신자를 본다
+        self.assertNotIn("forward:dry", flagged)                            # 포워드만 있는 건은 일상 — 먼저 볼 것에 안 올린다
         self.assertIn("판정 2통 · 먼저 볼 것 2통", slack)
         self.assertIn("| `k` |", md)                                       # 전체 표에 id 가 있어야 label 을 칠 수 있다
-        cmp = md.split("## ⚖️")[1].split("## 전체")[0]
-        self.assertIn("| AD_NOISE→archive | INBOUND_KO→reply | ", cmp)     # 🔴 옛은 치웠고 새는 폼 안내를 보냈을 것 — 갈렸다
-        self.assertNotIn("`u`", cmp)                                        # 포워드 ↔ 포워드는 일치라 표에 없다
-        self.assertIn("옛과 갈림 1/2", slack)
 
 
 class Promotion(unittest.TestCase):
@@ -290,27 +284,4 @@ class Health(unittest.TestCase):
             self.assertEqual(observe.health(), 0)
         self.assertEqual(len(said), 1)
         self.assertIn("안 돌았습니다", said[0])
-
-
-class Handback(unittest.TestCase):
-    """되돌리기 — 실제로 한 것만, 옛 장부의 이벤트 이름으로, 두 번 돌려도 한 번만."""
-
-    def test_moves_done_actions_once(self):
-        from kvlib import ledger
-        d = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        con = observe.connect(":memory:")
-        self.addCleanup(con.close)
-        con.executescript("CREATE TABLE actions(message_id TEXT, kind TEXT, status TEXT, detail TEXT, created TEXT, PRIMARY KEY(message_id, kind));"
-                          "INSERT INTO messages(id, subject) VALUES('a','광고'),('b','문의'),('c','제휴'),('d','기록만');"
-                          "INSERT INTO actions VALUES('a','archive','done','{\"category\":\"AD_NOISE\"}','t');"
-                          "INSERT INTO actions VALUES('b','send','done','{\"to\":\"f@x\",\"draft_id\":\"D1\"}','t');"
-                          "INSERT INTO actions VALUES('c','forward','done','{}','t');"
-                          "INSERT INTO actions VALUES('d','archive','dry','{}','t');")
-        with unittest.mock.patch.object(ledger.paths, "ledger", lambda task: d / f"{task}.jsonl"):
-            self.assertEqual(observe.handback(con), 3)
-            self.assertEqual(observe.handback(con), 0)                     # 멱등
-            rows = ledger.rows("mail")
-        self.assertEqual([(r["key"], r["ev"], r.get("kind")) for r in rows],
-                         [("a", "archived", None), ("b", "drafted", "reply"), ("c", "drafted", "forward")])
-        self.assertEqual(rows[1]["draft_id"], "D1")
 

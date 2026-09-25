@@ -69,9 +69,9 @@ MUTATIONS = [
      "def wipe(msg_id: str):   # 변이\n    return _req(\"POST\", f\"/messages/{msg_id}/trash\")\n\n\n"
      "def send_draft(draft_id: str) -> Fetched:"),
     ("A8", "발송 — smtplib 우회",
-     "skills/mail/judge.py",
-     "from pathlib import Path",
-     "import smtplib  # 변이: 지메일 API 를 통째로 우회한다\nfrom pathlib import Path"),
+     "skills/mail/rules.py",
+     "import re",
+     "import re\nimport smtplib  # 변이: 지메일 API 를 통째로 우회한다"),
 ]
 
 
