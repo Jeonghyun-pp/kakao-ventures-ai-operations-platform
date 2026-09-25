@@ -1,352 +1,162 @@
 ---
 name: mail
-description: 공용 메일함(hello@)을 매일 훑어 규칙과 claude 로 분류하고, 아카이브·초안까지 실행한다. 발송은 사람이 한다.
+description: 공용 메일함(hello@)을 매일 읽어 한 통에 한 번 분류하고, 문이 열려 있으면 아카이브·초안·슬랙 질문·(허용된 갈래만) 발송까지 한다. 켜는 건 사람이다.
 schedule:
   - { cmd: observe,  when: "매일 10:00", why: "관찰 → 판정 → (문이 열려 있으면) 실행 → 보고서. 문이 닫힌 동안은 하루 한 번이면 된다. 링크드인 카드(11:00) 앞. 문을 열면 N분마다로 줄인다(슬랙 반응을 며칠 뒤가 아니라 몇 분 뒤에 읽어야 한다)" }
   - { cmd: health,   when: "매일 12:00", why: "observe 는 자기가 안 돌았다고 말할 수 없다. 두 시간 뒤 다른 작업이 오늘 보고서 파일이 있는지 보고, 없으면 슬랙에 한 줄. 하위명령을 따로 둔 이유: 라벨은 cmd 첫 낱말이라 'observe --op health' 는 observe 잡을 덮어쓴다" }
 ---
 
-# 메일 트리아지
+# 메일
 
-## 🔴 경계: 아카이브·초안까지. 발송은 **한 문**(닫혀 있다)
+옛 실행부(plan/apply/followup · judge.py · brief.py, 2025-07~2026-09)는 2026-09-25 에 지웠다. 되돌리려면 `git checkout baseline-2026-09-21 -- skills/mail`.
+그 전의 `mail-harness`(kv-automation)도 같은 날 지웠다. **메일을 처리하는 코드는 이 폴더 하나다.**
 
-```
-할 수 있다   읽기 · 인박스 라벨 떼기(아카이브) · 초안 만들기
-발송        kv_transport/gmail_send.py 한 파일 · 부르는 곳은 flow.py 뿐(A8) · 문(outbound)과 허용 목록(send_branches)이 둘 다 열려야 나간다
-없다        messages/send · smtplib · 삭제 — 어디서도
-```
-
-아카이브는 되돌릴 수 있고 초안은 나가지 않는다. **회사 이름으로 바깥에 나가는 순간만 사람이
-누른다.** 스코프로는 못 막는다 — `gmail.modify` 에 send 가 포함되고, 라벨을 떼려면 그게
-필요하다. **막는 자리는 코드뿐이고, 그래서 A8 이 있다.**
-
-`POST /drafts` 는 생성이고 `POST /drafts/{id}/send` 가 발송이다. 접미사 하나 차이라
-A8 은 `/send` 를 잡되 `/drafts` 는 통과시킨다.
-
-## 🔴 무인으로 도는 것과 밖으로 나가는 것
+## 🔴 밖으로 나가는 문은 하나이고, 지금 닫혀 있다
 
 ```
-매일 09:10  plan              인박스를 읽고 계획만 만든다 (메일함을 안 건드린다)
-매일 09:30  apply --no-slack  아카이브 · 초안        🚫 슬랙은 막혀 있다
-10분마다    followup          올려둔 건의 반응을 걷는다
-사람        발송              Gmail 에서 초안을 확인하고 누른다
+constraints.yaml  mail_observe.outbound
+  off     아무것도 안 한다. 무엇을 했을지만 actions 에 dry 로 적는다                     ← 지금
+  slack   슬랙 글만 실제로 올린다(질문·리마인드·인계·포워드 → forward_channel/POST_CH). 초안·아카이브·발송은 dry
+  on      메일함에도 쓴다(초안·아카이브). 발송은 그 위에 send_branches 허용 목록을 또 지난다 — 목록 밖 갈래는 초안까지
+
+열려 있는 것   mail_observe.report_slack: on  → 아침 요약 + health 알림이 report_channel(test) 로. 이것뿐이다
 ```
+**켜는 순서(사람이 한다)**: `outbound: slack` → `forward_channel: bplan`(실채널) → `outbound: on` → `send_branches: [INBOUND_EN]`(보고서가 "켜도 된다"를 낸 갈래 하나씩).
+되돌리기는 같은 줄을 되돌리는 것. 각 단계에서 새로 나가는 것은 정확히 하나씩이다.
 
-**밖으로 나가는 경로는 슬랙 하나뿐이고, 지금 그게 막혀 있다.**
-아카이브는 인박스 라벨만 떼는 것이고, 초안은 우리 계정 안에 있다.
-둘 다 아무에게도 알림을 보내지 않는다.
+발송 코드는 `kv_transport/gmail_send.py` 한 파일이고 부르는 곳은 `flow.py` 뿐이다(`check_intent` A8 · 변이 테스트 10/10).
+`messages/send` · `smtplib` · 삭제는 어디에도 없다. 스코프로는 못 막는다(`gmail.modify` 에 send 가 든다) — **막는 자리는 코드고 그래서 A8 이 있다.**
 
-`--no-slack` 이면 슬랙 대상 메일은 **인박스에 그대로 남는다.** 아무것도 안 한 것으로
-따로 세고, 성공에 섞지 않는다.
-
-### 언제 슬랙을 여는가
-
-[사용자 결정 2026-09-02] **매일 아침 정현님이 결과를 확인하고, 일주일 맞으면 연다.**
-여는 방법은 스케줄 선언에서 `--no-slack` 을 빼는 것 하나다.
-
-🔴 그 전에는 `followup` 도 실질적으로 놀고 있다 — 올린 게 없으면 걷을 반응도 없다.
-비플랜방에 사람이 직접 지시해 올린 건(BIXPO 2026)만 추적한다.
-
-## 관찰 (observe) — 새 흐름. 지금은 **읽고 기록만** 한다
-
-현행 plan/apply 옆에서 돈다. 메일함에도 슬랙에도 쓰지 않는다(테스트가 쓰기 함수 이름의 부재를 확인한다).
-한 통은 **한 번만** 판정하고, 모델이 본 글을 그대로 저장한다 — 그래서 기준을 고치고 다시 재 볼 수 있다.
-
-```bash
-./.venv/bin/python -m skills.mail.run observe                      # 새 메일 수집 → 분류 → 하루 한 번 백업
-./.venv/bin/python -m skills.mail.run observe --days 14            # 밀린 날을 거슬러 수집
-./.venv/bin/python -m skills.mail.run observe --op status
-./.venv/bin/python -m skills.mail.run observe --op diff                       # live ↔ 현행 plan 의 카테고리
-./.venv/bin/python -m skills.mail.run observe --op replay --limit 30          # 고친 기준을 저장된 메일에 다시 적용
-./.venv/bin/python -m skills.mail.run observe --op diff --a live --b r-<sha>  # 무엇이 달라졌나
-./.venv/bin/python -m skills.mail.run observe --op label --id <메일id> --category INBOUND_KO --why "…"
-./.venv/bin/python -m skills.mail.run observe --op restore-test
-```
+## 하루
 
 ```
-기준을 깎는 자리   skills/mail/classify_criteria.md   ← 이것만 고친다
-🔴 고치면 안 되는 것  skills/mail/criteria.md            ← 현행 plan 이 매일 읽는다. 고치면 내일 아침 아카이브·초안이 바뀐다
-DB               ~/kv-data/mail/db/mail.sqlite (권한 600 · 메일 본문이 들어 있다)
-백업             ~/kv-data/mail/db/backup/mail-<날짜>.sqlite (SQLite 온라인 백업 · 7세대)
+10:00 observe   수집(7일 되훑기, 본 id 는 건너뜀) → 규칙 → 모델(한 통 한 번, 도구 0) → SQLite
+                → 행동 결정(route.decide) → 문 뒤에서 실행 또는 기록 → 슬랙 질문의 반응·답글 읽기 → 리마인드
+                → 하루 보고서(파일 + 슬랙 요약) → 온라인 백업(7세대)
+12:00 health    오늘 보고서 파일이 있나. 없으면 슬랙 한 줄 (9/24 실전: 맥이 잠들어 안 돌았다고 정확히 알렸다)
 ```
-
-### 매일 결과 보기
-
-```
-매일 10:00 실행이 끝나면   ~/kv-data/mail/reports/<날짜>.md  (전체 표)  +  슬랙 review_test 에 요약과 '먼저 볼 것'
-아무 때나                 ./.venv/bin/python -m skills.mail.run observe --op report [--days N]   → reports/latest.md
-```
-먼저 볼 것 = UNKNOWN · 현행 plan 과 갈린 것 · 형식 실패 · 슬랙에 물었을 것. 보고서 맨 아래에 고치는 명령이 있다.
-슬랙 요약은 `mail_observe.report_slack` 으로 끈다 (판단 질문의 문 `outbound` 와 별개다).
-
-### 판단 흐름 (flow.py · LangGraph) — 🔴 밖으로 나가는 문은 닫혀 있다
-
-행사·섭외와 신뢰 경로로 분류된 메일은 슬랙에 묻고 **기다린다**: `post → wait → act`.
-상태는 같은 DB 의 체크포인트에 있어서, 며칠 뒤의 다른 실행이 이어 받는다. 정책은 현행 `route.decide()` 그대로이고
-다른 건 하나 — 무응답을 거절로 바꾸지 않는다.
-
-```
-constraints.yaml  mail_observe.outbound: "off"    ← 지금. 게시·초안·아카이브를 안 하고 actions 에 dry 로만 적는다
-                                          "on"     ← 사람이 바꾼다. 게시 채널은 route.POST_CH(test), 메일은 초안까지
-```
-
-```bash
-sqlite3 ~/kv-data/mail/db/mail.sqlite "SELECT message_id, kind, status FROM actions"          # 무엇을 했을지 / 했는지
-./.venv/bin/python -m skills.mail.run observe --op decide --id <메일id> --decision yes|no     # 슬랙 없이 결정을 넣어 본다
-```
-
-### 기다림 없는 행동 (flow.act_all) — 옛 apply 가 하던 일을 새 시스템도 한다 [4단계 · 2026-09-22]
-
-`route.decide()` 의 행동 여섯 중 기다림이 없는 셋을 한 루프에서 한다. 정책은 그대로고 실행만 옮겼다. 전부 `_out` 문 뒤다.
-
-| 행동 | 옛 apply | 새 흐름 | 문이 off 일 때 |
-|---|---|---|---|
-| `reply` (콜드 문의) | 폼 안내 **초안** | `send_branches` 에 있으면 발송, 없으면(기본) **초안** — 옛과 같다 | `send:dry` + `draft:dry` |
-| `archive` (광고·영업·출자·채용·폼 오류·사칭·시스템 안내) | 아카이브 | 아카이브. 멱등이라(이미 없으면 성공) "인박스에 있나"는 안 본다 | `archive:dry` |
-| `forward` (제휴 · UNKNOWN) | 슬랙 이메일 주소로 가는 **초안** | `mail_observe.forward_channel`(기본 test) 에 **바로 게시** + 스레드에 전문. 제휴 거절 회신은 초안까지(영원히 수동) | `forward:dry` (+`draft:dry`) |
-| `slack` (행사 · 신뢰 경로) | 보류(`--no-slack`) | 그래프(질문 → 대기 → 결정) — 위 절 | `post:dry` |
-| `protect` · `escalate` | 안 함 | 안 함. escalate 는 새 흐름에 도달하지 않는다 — 모델 어휘에 WEBFLOW 가 없어 주소 없는 폼도 내용으로 분류되고, 회신이면 no-reply 수신자 검사에서 `skipped` 로 남는다 | — |
-
-옛과 다른 점 하나: 옛 apply 는 슬랙 게시 앞에서도 `thread_after` 를 봤다. 새 흐름은 초안·발송 앞에서만 본다 — 되돌릴 수 없는 행동 앞에서만 현실을 본다.
-
-**옛 ↔ 새 비교**: 매일 보고서 "⚖️ 옛 시스템과 견줌" 절이 옛 plan 의 결정과 새 흐름의 기록을 메일별로 맞대고 **갈린 것만** 표로 낸다.
-🔴 이 표가 비는 것이 전환 조건이다. 갈린 건은 `--op label` 로 정답을 붙이고 `classify_criteria.md` 를 고친다.
-
-**전환일 절차 (5단계 · 사람이 한다)**: ① 옛 launchd 작업 셋(plan·apply·followup)을 내린다 → ② `outbound: "on"` → ③ `forward_channel: "bplan"`.
-같은 날, 이 순서로. 되돌리기는 거꾸로 — `observe --op handback`(새 흐름이 실제로 한 아카이브·초안·발송·포워드를 옛 장부에 옮겨 적는다. 옛 apply 는 자기 장부에 없는 메일을 다시 처리하므로 **이걸 먼저**) → 문을 닫고 → 옛 작업을 다시 올린다.
-발송은 그 뒤에 `send_branches` 에 갈래를 하나씩 넣어 켠다.
-
-**꺼짐 알림**: `health`(12:00 · `observe --op health` 와 같다) 가 오늘 보고서 파일이 없으면 슬랙(`report_channel`)에 한 줄. 질문이 리마인드 상한이 끝나도 답이 없으면 아침 요약 첫 줄에 ⚠️.
-스케줄 행은 위에 있다 — **설치(`schedule.py install --apply`)는 launchd 전체를 다시 올리므로 사람이 한다.**
-
-### 폼 안내 자동 회신 (flow._reply) — 🔴 세 겹으로 닫혀 있다
-
-콜드 투자 문의(`INBOUND_KO`·`INBOUND_EN`)에 승인된 템플릿(`inbound_form_ko/en`)을 보낸다. 정책은 현행 `route.decide()` 그대로다.
-신뢰 경로·제휴 거절·채용·사칭은 `gmail.never_auto_send` 라 여기 오지 않는다.
-
-```
-실제로 나가려면 셋이 다 열려야 한다                                     지금
-  mail_observe.outbound: "on"                                        "off"
-  mail_observe.send_branches 에 그 카테고리                            []
-  check_intent A8 — 발송 코드는 kv_transport/gmail_send.py 한 줄,        통과
-                    그 모듈을 import 하는 곳은 flow.py 뿐
-```
-제외되는 것(다시 안 본다): 후속·재문의 · 보낼 수 없는 수신자 · 같은 수신자에게 이미 · 대화가 이미 진행.
-문이 열려도 막히는 것(다음 실행에 다시 본다): 현행 장부에 그 메일이 있다 · **지금 실제** 스레드가 움직였다 · 하루 상한(`send_per_day`).
-초안을 만들고 **그 초안을** 보낸다 — 보낸 초안은 사라지므로 같은 메일이 두 번 못 나가고, 실패하면 초안이 남아 사람이 보낼 수 있다.
-
-🔴 **켜기 전에**: 현행 plan/apply 가 같은 메일에 매일 09:30 폼 안내 **초안**을 만든다. 새 흐름이 발송까지 하면 사람이 그 초안도 눌러
-같은 안내가 두 번 갈 수 있다 → 갈래를 켜는 날 현행의 그 갈래를 끈다. 매일 보고의 "보냈을 메일" 절에 갈래별로
-"사람 정답 n/5 · 일치 m% → 아직/켜도 된다"가 나온다 — `gmail.promote` 의 기준 그대로다. 정답은 `--op label` 로 단다.
-
-replay 는 기준 파일의 해시로 run 이름(`r-<sha>`)을 만든다. 같은 기준으로 다시 부르면 이어서 하고,
-기준을 고치면 새 run 이 된다. 운영 판정(`live`)은 어떤 경우에도 안 바뀐다.
-
-## 계획이 오래되면 크게 말한다
-
-`apply` 는 계획이 12시간(`gmail.plan_stale_hours`)보다 오래됐으면 **종료코드 2**로 끝난다.
-
-실행이 위험해서가 아니다 — 항목마다 인박스를 다시 보므로 이미 처리된 건은 건너뛴다.
-문제는 **오늘 plan 이 안 돌았다**는 사실이 조용히 묻히는 것이다. 그러면 오늘 온 메일이
-손도 안 닿은 채 "apply 성공"으로 기록된다.
-
-## 하루 (켜지면)
-
-```
-09~10시  plan     인박스 14일치 → 규칙 → claude → 계획 파일
-(사람)             계획을 훑는다. 틀린 게 있으면 규칙이나 criteria.md 를 고치고 다시 plan
-         apply    실행 직전에 하나씩 다시 보고 → 아카이브 · 초안
-(사람)             Gmail 에서 초안을 확인하고 보낸다
-```
-
-## 🔴 사람이 그 사이에 메일함을 만지는 건 오류가 아니라 입력이다
-
-`plan` 과 `apply` 사이에 사람이 메일을 먼저 처리할 수 있다. 그걸 **전제로** 짠다.
-
-```
-① 존재 확인   지금도 인박스에 있나        요청 한 번 (번호만 받는다. 63건에 63번이 아니다)
-② 스레드 확인  그 뒤로 대화가 진행됐나      초안 만들 것만. 🔴 우리 초안은 안 센다
-③ 장부       한 번 한 일은 다시 안 한다   멱등 키 = 메일번호 + 종류
-```
-
-바뀐 **그 항목만** 건너뛰고, 건너뛴 걸 말한다. 전체를 멈추지 않는다 —
-메일 하나 때문에 62통이 멈추면 사람이 그 검사를 끄게 된다.
-
-**총 개수 대조는 하지 않는다.** 메일함엔 다른 행위자가 있어서(사람·발신자) 총수로는
-"우리가 안 건드렸다"를 증명할 수 없다. 한 통 오고 한 통 나가면 총수는 그대로다.
-그 증명은 A8 이 정적으로 한다.
-
-## 명령
 
 ```bash
 cd ~/kv
-./.venv/bin/python -m skills.mail.run plan  [--days N] [--limit N] [--no-judge]
-./.venv/bin/python -m skills.mail.run apply [--dry-run] [--plan <시각>] [--only archive|reply|forward]
-./.venv/bin/python -m skills.mail.run status
+./.venv/bin/python -m skills.mail.run observe                      # 오늘 몫 (밀린 날도 이걸로 — 7일을 되훑는다)
+./.venv/bin/python -m skills.mail.run observe --op status
+./.venv/bin/python -m skills.mail.run observe --op report [--days N]          # 아무 때나 보고서 → reports/latest.md
+./.venv/bin/python -m skills.mail.run observe --op label --id <id> --category INBOUND_KO --why "…"   # 이 메일의 정답
+./.venv/bin/python -m skills.mail.run observe --op replay [--limit N] [--criteria 파일]              # 고친 기준을 저장된 메일에
+./.venv/bin/python -m skills.mail.run observe --op diff --a live --b r-<sha>                          # 무엇이 달라졌나
+./.venv/bin/python -m skills.mail.run observe --op decide --id <id> --decision yes|no                 # 슬랙 없이 결정을 넣는다
+./.venv/bin/python -m skills.mail.run observe --op backup | restore-test
+./.venv/bin/python -m skills.mail.run health
 ```
 
-`apply` 는 기본으로 **가장 최근 계획**을 쓴다. 옛 계획은 `--plan` 으로 명시해야 한다 —
-시간 만료 규칙 대신 이걸 골랐다. 계획이 오래됐으면 어차피 위 ①②에서 대부분 건너뛰고,
-그게 정상 동작이다.
+## 사람이 매일 하는 것 — 기준 깎기
 
-`--no-judge` 는 claude 를 안 부른다 — 규칙만 확인할 때 쓴다(쿼터 0).
+보고서 `~/kv-data/mail/reports/<날짜>.md` (요약은 슬랙 review_test). **먼저 볼 것** = UNKNOWN · 형식 실패 · 슬랙에 물었을 것 · 회신이 나갈 것.
+
+```
+기준          skills/mail/criteria.md      ← 정현님이 고치는 파일. 이것 하나다
+정답          --op label                    ← 갈래를 켤 근거(gmail.promote: 21일 · 정답 5건 이상 · 일치 95%)
+확인          --op replay → --op diff       ← 기준을 고친 뒤. 운영 판정(live)은 어떤 경우에도 안 바뀐다(한 통은 한 번)
+```
+replay 는 기준 파일의 해시로 run 이름(`r-<sha>`)을 만든다. 같은 기준이면 이어서 하고, 고치면 새 run 이다.
+API 500 같은 일시 오류로 멈추면 다시 부르면 이어진다(9/22: 두 번 멈추고 이어서 205통).
+
+## 행동 여섯 (route.decide — 정책은 여기 하나)
+
+| 행동 | 갈래 | 새 흐름이 하는 것 | 문 off |
+|---|---|---|---|
+| `reply` | INBOUND_KO·EN(콜드 투자 문의) | `send_branches` 에 있으면 발송, 없으면 **초안** (flow._reply) | `send:dry`+`draft:dry` |
+| `archive` | 광고·영업·출자·채용·폼 오류·사칭·시스템 안내 | 아카이브(멱등 — 이미 없으면 성공) | `archive:dry` |
+| `forward` | 제휴 · UNKNOWN | `forward_channel` 에 게시 + 스레드에 전문. 제휴 거절 회신은 초안까지(영원히 수동) | `forward:dry` |
+| `slack` | 행사·섭외 · 신뢰 경로 | 그래프: 질문 → **대기** → ⭕/❌/답글 → 초안·아카이브·인계(🙋) → 리마인드 | `post:dry` |
+| `protect` | 접수 알림 · 사내 발신 | 안 함 | — |
+| `escalate` | 주소 없는 웹플로우 | 도달하지 않는다 — 모델 어휘에 WEBFLOW 가 없어 내용으로 분류되고, 회신이면 no-reply 검사에서 `skipped` | — |
+
+### 판단 흐름 (flow.py · LangGraph)
+`post → wait → act → [ack]`. 멈춘 동안 상태는 같은 SQLite 의 체크포인트에 있어 며칠 뒤의 다른 실행이 잇는다.
+부작용은 **멈추는 노드 앞**에 둔다(재개 때 멈춘 노드를 다시 돈다) + `actions` 기본키(메일, 종류)로 한 번 더 막는다.
+무응답을 거절로 바꾸지 않는다 — `remind_days` 마다 `remind_max` 번 리마인드하고, 그 뒤엔 아침 요약 첫 줄에 ⚠️.
+지명(`people.yaml`)은 **호칭이 붙어야** 핑한다 — `Cl«reviewer-three»ct`·`ch«reviewer-three»l` 오탐(2026-08-16). 부분일치로 되돌리지 마라.
+
+### 자동 회신 (flow._reply) — 🔴 세 겹
+```
+나가려면              outbound: on  +  send_branches 에 그 카테고리  +  A8 통과
+제외(다시 안 본다)     후속·재문의 · 보낼 수 없는 수신자(no-reply·우리 주소) · 같은 수신자에게 이미 · 대화가 이미 진행
+문이 열려도 막힘       옛 장부(_ledger/mail.jsonl)에 그 메일이 있다 · 지금 실제 스레드가 움직였다 · 하루 상한 send_per_day
+```
+초안을 만들고 **그 초안을** 보낸다 — 보낸 초안은 사라지므로 같은 id 로 두 번 못 나가고, 실패하면 초안이 남아 사람이 보낼 수 있다.
+`gmail.never_auto_send` 갈래(신뢰 경로·제휴 거절·채용·사칭)는 숫자와 무관하게 영원히 수동이다.
 
 ## 구성
 
 ```
-run.py        진입점 · 계획 파일 생성 · 보고
-rules.py      규칙 판정 — 확실한 것만. 못 잡으면 None
-route.py      카테고리 → 행동 다섯 (protect·archive·reply·forward·escalate)
-judge.py      claude 통로로 나머지를 분류 (TSV 배치 50)
-criteria.md   claude 가 읽는 분류 기준
-templates/    회신·포워드 본문 9개 — 옛 시스템에서 **바이트 그대로** 가져왔다
+run.py         진입점 (observe · health)
+observe.py     수집 · 판정(한 통 한 번) · 보고서 · 백업 · replay/diff/label
+flow.py        문(_out) · 기다림 없는 행동(act_all) · 판단 그래프 · 슬랙 해석 · RealIO
+clean.py       본문 정리 · 인용 분리 · 웹플로우 전문
+route.py       카테고리 → 행동 (정책의 진실원) · 슬랙 글 서식
+rules.py       구조 규칙(접수 알림 · 사내 · 시스템 안내 · 웹플로우 · 광고 헤더) · 모델 어휘
+criteria.md    모델이 읽는 기준 — 사람이 깎는다
+people.yaml    심사역 명부(이름 → 슬랙 ID)
+templates/     승인된 문안 — 코드가 안 부르는 것(webflow_*, fwd_intro)도 남긴다(결정은 아래에)
 ```
-
-## 쓰는 데이터
-
-**지메일에서 읽는 것** — 헤더 8개, 그리고 전부 실제로 쓰인다.
-
-| 헤더 | 어디에 쓰나 |
-|---|---|
-| `From` | 발신 토큰 매칭 · 답장 수신자 · 포워드 인용 |
-| `To` `Cc` `Bcc` | 합쳐서 수신자 수 → 대량 발송 판정(20명) |
-| `Subject` | 비플랜 접수 판정 · 제목 토큰 · 심사역 지명 · 초안 제목 |
-| `Date` | 포워드 인용 블록 |
-| `List-Unsubscribe` | 있는지만 본다 → 광고 판정 |
-| `Message-ID` | 답장 초안의 `In-Reply-To`/`References` |
-
-메시지 필드는 `id`(멱등 키) · `threadId`(초안 스레드·스레드 확인) · `payload`(본문),
-그리고 `labelIds` 를 쓴다.
-
-`labelIds` 는 **두 자리에서만** 본다. 신호가 생겨서 쓰기 시작한 것이지 미리 담아둔 게 아니다.
 ```
-INBOX  아카이브 되읽기 — 정말 인박스에서 빠졌나
-DRAFT  스레드 확인 — 🔴 우리가 만든 초안을 "대화가 진행됐다"로 세지 않기 위해
+DB      ~/kv-data/mail/db/mail.sqlite (600 · 본문 포함)   백업 ~/kv-data/mail/db/backup/mail-<날짜>.sqlite
+보고서   ~/kv-data/mail/reports/<날짜>.md · latest.md
+옛 장부  ~/kv-data/_ledger/mail.jsonl — 읽기만(legacy_acted). 옛 실행부가 손댄 메일에는 새 흐름이 쓰지 않는다
+옛 계획  ~/kv-data/mail/plans/ — 데이터로 남김. 읽는 코드 없음
 ```
-
-**안 읽는 것**
-```
-Reply-To   웹플로우 회신 주소는 **본문에서** 파싱한다 (헤더는 no-reply 라 답장하면 반송된다)
-첨부        아예 안 받는다. 덱·PDF 는 트리아지에 안 보인다
-snippet    안 쓴다 (본문을 직접 읽는다)
-```
-
-**질의**: `in:inbox newer_than:14d`, 상한 100통. 스레드가 아니라 **메시지** 단위다.
-
-🔴 목록은 **페이지네이션한다.** `nextPageToken` 을 무시하면 100통에서 조용히 잘리고,
-"100통이 전부"와 "100통까지만 봤다"가 구별이 안 된다. 상한에 닿으면 `partial` 로 표시하고,
-`apply` 는 그 상태면 **대조가 불완전하므로 중단한다.**
-
-**라벨**: `3. Evan` 하나만 존재를 확인한다. 지금은 라벨을 만들거나 붙이지 않는다.
-
-**노션·시트**: 트리아지 경로에서 **0건.** 비플랜만 쓴다. 그래서 두 스킬을 나눌 수 있었다.
-
-**우리가 쓰는 파일**
-```
-~/kv-config/google/token.json     .env 의 GMAIL_TOKEN_FILE 로 가리킨다. 사본을 안 만든다
-~/kv-data/mail/plans/<ts>.json    계획 (기계용)
-~/kv-data/mail/plans/<ts>.md      계획 (사람용)
-~/kv-data/mail/dlq/judge_dlq.jsonl  claude 출력 중 검증 실패한 줄
-~/kv-data/_ledger/mail.jsonl        한 일의 기록
-```
-
-**장부 이벤트**
-```
-archived   key=메일번호
-drafted    key=메일번호 · kind=reply|forward · draft_id
-skipped    key=메일번호 · why=not_in_inbox|thread_moved
-```
-
-🔴 `protect` 는 기록하지 않는다. "아무것도 안 했다"를 하루 13번씩 남기면 장부만 부푼다.
-🔴 계획은 장부에 안 쓴다 — **장부는 "한 일"의 기록**이고 계획은 한 일이 아니다.
+`constraints.yaml mail_observe.*` 가 설정 전부다(문 · 허용 목록 · 상한 · 채널 · 리마인드). `check_intent` A6 이 숫자를 코드에 박지 않았는지 본다.
 
 ## 지키는 규율
 
 ```
 인증부터 본다            인박스를 부르기 전에. 나중에 401 로 알면 "0통"과 구별이 안 된다
-미상은 0통이 아니다       망이 죽으면 미상이고 종료코드가 0이 아니다
-규칙은 확실할 때만        애매하면 None → claude → 그래도 애매하면 UNKNOWN → 사람
-판정 못 받은 건 안 버린다  세고, 찍고, 종료코드에 반영한다
-값으로 찾는다            claude 출력의 열 위치를 믿지 않는다
-보고는 만든 파일에서       머릿속 숫자가 아니라 계획 파일을 다시 읽어 센다
+미상은 0통이 아니다       망이 죽으면 미상이고 종료코드가 0이 아니다. 목록이 상한에서 잘리면 partial 로 말한다
+한 통은 한 번             (메일, run) 이 기본키. 재판정은 replay 로 다른 run 에
+모델은 데이터만 본다       본문은 난수 울타리 안. 도구 0(--tools ""). 출력은 세 줄, 값으로 읽는다
+쓴 것은 되읽는다          아카이브는 INBOX 라벨을, 발송은 SENT 라벨을 확인한다. 200 은 저장이 아니다
+막았다고 성공으로 안 센다  dry 는 dry 다
+사람이 사이에 만진 건 입력  이미 없어진 메일은 성공, 스레드가 움직였으면 건너뛰고 말한다
 ```
 
-## 알아둘 것
+## 결정 기록 (코드에서 지웠지만 살아 있어야 하는 것)
 
-**웹플로우에 답장하면 반송된다.** 발신이 `no-reply-forms@webflow.com` 이라 답장이 거기로 간다.
-2026-07-10 에 550 으로 반송됐고 문의자는 답을 못 받았다. 그래서 이 갈래는 **전부 포워드**고,
-본문에서 문의자 주소를 못 찾으면 **초안을 안 만든다.** 주소를 추측하면 같은 사고가 난다.
+**웹플로우에 답장하면 반송된다.** 발신이 `no-reply-forms@webflow.com` 이라 2026-07-10 에 550 반송, 문의자는 답을 못 받았다.
+문의자 주소는 **본문에서** 파싱하고(`clean.webflow`), 못 찾으면 회신하지 않는다. 주소를 추측하지 않는다.
 
-**웹플로우 문의 유형별 결정** — 옛 `route._webflow()` 의 분기에 주석으로만 있던 것. 코드는 걷어냈고(도달 불가, 2026-09-21)
-결정과 **승인된 문안은 남긴다.** 새 흐름이 이 유형들을 다루게 될 때 여기서 가져간다.
+**웹플로우 문의 유형별 결정** (옛 `route._webflow()` 분기의 주석. 코드는 도달 불가라 걷어냈다 2026-09-21)
 ```
 투자 문의   문의자에게 구글폼 안내. 문안 templates/webflow_invest_ko.txt · _en.txt (본문 언어로 고른다)
 TIPS 문의   문의자에게 TIPS 안내.    문안 templates/webflow_tips.txt
-멘토링 문의  회신하지 않고 아카이빙 [결정 2026-08-18] — 오피스아워가 '22년 하반기부터 중단돼 안내할 내용이 없다.
-            대가: 물어본 사람은 아무 답도 못 받는다. 재개되면 되살릴 자리다
-섭외 문의   #Squad-비플랜 으로
-그 밖       사람에게. 🔴 어떤 경우에도 no-reply 발신 주소로는 답장하지 않는다 (2026-07-10 550 반송)
+멘토링 문의  회신하지 않고 아카이빙 [결정 2026-08-18] — 오피스아워가 '22년 하반기부터 중단돼 안내할 내용이 없다. 재개되면 되살릴 자리
+섭외 문의   비플랜 채널로
+그 밖       사람에게
 ```
-지금은 폼의 `문의 유형` 칸을 안 쓴다 — 문의자가 드롭다운에서 고르는 값이라 우리 갈래와 맞지 않았다
-(실측 09-02: '섭외 문의'로 온 것이 사칭 확인이었다). 내용을 읽어 가른다.
+폼의 `문의 유형` 칸은 안 쓴다 — 문의자가 드롭다운에서 고르는 값이라 우리 갈래와 맞지 않았다(실측 09-02: '섭외 문의'로 온 것이 사칭 확인). 내용을 읽어 가른다.
 
-**심사역 이름을 부분일치로 찾지 마라.** 회사명 `Cl`**`reviewer-three`**`ct` 가 `reviewer-three` 지명으로 걸렸다
-(2026-08-16). `ch`**`reviewer-three`**`l`·**`제로`**`넥스`·`j`**`ade`**`d` 도 같이 걸렸다.
-그래서 **호칭이 붙어야** 지명으로 본다. 놓치는 쪽은 사람이 어차피 보지만,
-오탐은 동료 메일함에 무관한 메일이 반복 도달해 신뢰를 잃는다.
+**채용과 사칭은 회신을 안 만들고 아카이빙한다** [2026-08-18]. 채용 템플릿이 전부 "안 뽑음"인데 채용 상태는 시점마다 바뀐다 —
+틀린 답이 회사 이름으로 나가는 것보다 무응답이 낫다. 그 결정으로 오탐 비용이 커져(조용히 사라진다) 사칭 힌트에서 넓은 둘을 뺐다.
+**행동을 바꾸면 그 행동을 부르는 규칙의 정밀도 기준도 같이 바뀐다.**
 
-**채용과 사칭은 회신을 안 만들고 아카이빙한다** [결정 2026-08-18]. 채용은 템플릿이 전부
-"안 뽑음"인데 채용 상태가 시점마다 바뀐다 — 틀린 답이 회사 이름으로 나가는 것보다 무응답이 낫다.
+**출자·수탁(LP_CUSTODY)은 아카이빙** [2026-09-02]. 비플랜 방으로 보내도 아무도 안 움직인다. 대가: 진짜 LP 제안이 섞이면 조용히 사라진다.
 
-🔴 그 결정 때문에 **오탐 비용이 커졌다.** 전엔 오탐이 나도 인박스에 남아 눈에 띄었는데
-이제는 조용히 사라진다. 그래서 사칭 힌트에서 근거 없는 넓은 둘(`interview invitation`,
-`verification of`)을 뺐다. **행동을 바꾸면 그 행동을 부르는 규칙의 정밀도 기준도 같이 바뀐다.**
+**폼 오류(FORM_ERROR)는 아카이빙** [2026-08-18]. 전엔 INBOUND_KO 로 잡혀 폼이 안 된다고 말한 사람에게 "폼으로 접수하세요"가 다시 나갔다.
 
-**사내 발신은 `protect` 다.** 광고 규칙에서 빼기만 하고 claude 로 넘기면 UNKNOWN →
-#Squad-비플랜 포워드가 된다 — 읽으시라고 뺀 메일을 남의 채널로 보내는 셈이다(08-18 실측).
-빼는 것과 목적지를 정하는 것은 별개다.
+**사내 발신은 protect.** 광고 규칙에서 빼기만 하고 모델로 넘기면 UNKNOWN → 비플랜 포워드가 된다 — 읽으시라고 뺀 메일을 남의 채널로 보내는 셈(08-18). 빼는 것과 목적지는 별개다.
 
-**지금 escalate 는 한 곳뿐이다** — 웹플로우 문의자 주소를 못 찾은 경우. 거기서만 초안을 안 만든다.
+**비플랜 접수 메일은 절대 아카이빙하지 마라.** 비플랜 스킬이 그 메일을 제목으로 찾아 쓴다. 두 스킬 사이의 유일한 결합이고 `rules.classify` 의 규칙으로 지킨다.
+창업자가 접수 알림에 보낸 답장("Re: …접수된 사업계획서")은 규칙이 접수 알림으로 잡지만, `observe.collect` 가 direction 으로 가른다(우리가 보낸 것만 self).
 
-**비플랜 접수 메일은 절대 아카이빙하지 마라.** 비플랜이 그 메일을 **제목으로 찾아 쓴다.**
-빼면 그쪽이 "메일 못 찾음"으로 멈춘다. 이게 두 스킬 사이의 유일한 결합이고,
-비플랜을 부르는 게 아니라 **트리아지 안의 규칙**으로 지킨다.
+**헤더 하나로 아카이브하지 않는다.** 옛 실행부는 `List-Unsubscribe` 만으로 광고를 확정했고 사람이 메일 도구로 보낸 제휴 제안을 치웠다(09-09).
+새 흐름은 규칙 결과를 기록만 하고 모델에게 "헤더 있음"을 사실로 준다. 기계 알림은 `SYSTEM_NOTICE`(criteria.md 의 절) 로 간다.
 
-**애매하면 UNKNOWN 이다.** 오분류는 조용히 틀리고, UNKNOWN 은 슬랙 메시지 하나 값이다.
+**애매하면 UNKNOWN.** 오분류는 조용히 틀리고 UNKNOWN 은 슬랙 메시지 하나 값이다.
 
-## 발송
+**옛 실행부의 실측** (조사 2026-09-21): 3주간 초안 76개 중 55개가 안 나갔다 · 같은 메일 재판정 30% 변동 · 20일 중 13일만 완전 성공 ·
+웹플로우 본문 886~3,904자 중 6~37자만 봄. 이 넷이 새 흐름의 설계(한 통 한 번 · 입력 저장 · 전문 · 사람 없이 나가는 발송)를 정했다.
 
-**코드에 발송 경로가 없다.** 회신·포워드는 전부 초안이고 보내기는 사람이 누른다.
+## 이관 (리눅스)
 
-승격 장치는 **무수정률** 하나다 — 사람이 초안을 안 고치고 보낸 비율.
-`21일 · 95% · 표본 5건 이상`이면 그 갈래를 자동 발송 후보로 본다.
-
-> 🔴 `표본 5건 이상`은 옛 시스템에서 **문서에만 있고 코드에 없었다.** 표본 1건이 100% 면
-> 승격을 통과해버린다. `constraints.yaml` 의 `gmail.promote.min_samples` 로 옮겼다.
-
-넷은 숫자와 무관하게 **영원히 수동**이다: `신뢰 경로 · 제휴 거절 · 채용 · 사칭`.
-
-## 다음 단계 — 슬랙 통로가 있어야 되는 것
-
-지금은 슬랙에 **메일로** 보낸다(`x-aaaa…@kakao-ventures-corp.slack.com`). 노션 지침 그대로다.
-그래서 두 가지를 못 한다:
-
-```
-핑을 못 찍는다      "리뷰어일님"이 글자로만 나가고 알림이 안 간다.
-                  실제로 부르려면 <@U01ABC…> 형태의 사용자 ID 가 필요하다
-반응을 못 읽는다     slack.py 에 send_text 만 있다. 이모지 반응을 볼 경로가 없다
-```
-
-`.env` 의 `SLACK_BOT_TOKEN` 으로 슬랙 API 를 쓰면 둘 다 된다. 심사역 4명의 슬랙 사용자 ID 가 필요하다.
-
-**그때 바뀔 갈래 (사용자 결정 2026-08-18)**
-```
-신뢰 경로     답장 초안이 아니라 → #Squad-비플랜 게시
-             ❌ 반응 → 아카이브
-             🔴 아무 반응도 없으면 → **1주일 뒤 거절 메일 + 아카이브**
-행사·섭외     심사역이 지목돼 있으면 핑을 찍어 게시, 아니면 그냥 게시
-심사역 지명    그 사람 메일함으로 보내지 않는다. **슬랙방에 핑**으로 바꾼다
-```
-
-🔴 "1주일 뒤 거절"은 **시간이 지나야 발동하는 행동**이라, 장부에 게시 시각을 남기고
-매 실행마다 만기를 확인해야 한다. 지금 구조에 없는 유일한 종류다.
+`schedule.py` 가 맥이 아니면 crontab 블록을 만든다. 맥 전용 코드는 그 파일에만 있다(A13). `claude` 는 서버에서 hello@ 로 `claude login` 한 번.
+Gmail·Slack 은 토큰. DB 는 백업 파일에서 복원(`--op restore-test` 가 그 시험). 백업 스크립트(`~/kv-automation/scripts/backup-kv-data.sh`)는 옛 스케줄러(`com.kv.scheduler`)가 부른다 — 옮길 때 같이.

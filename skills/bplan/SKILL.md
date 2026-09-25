@@ -125,7 +125,7 @@ schedule:
 
 ## 알아둘 것
 
-**옛 시스템의 비플랜 코드는 `~/kv-automation/skills/mail-harness/project/jobs/bplan_*.py` 에 남아 있다.**
+**옛 시스템의 비플랜 코드(mail-harness `jobs/bplan_*.py`)는 2026-09-25 에 지웠다 — kv-automation 리포의 커밋 `18bdaad` 직전(HEAD~1)에 있다.**
 sync 는 이 스킬이 대체했다. drop 과 score 는 아직 대체물이 없다 — score 는 판정 기준을 새로 쓰기로 해서
 2026-09-02 에 배선을 끊었고, Phase 2 판단 에이전트가 그 자리를 새로 채운다.
 

@@ -24,9 +24,9 @@ class Cron(unittest.TestCase):
         self.assertTrue(schedule.cron_line(job("10분마다")).startswith("*/10 * * * * cd "))
 
     def test_label_is_the_trailing_comment_and_flags_are_split(self):
-        ln = schedule.cron_line(job("매일 09:30", ("apply", "--no-slack")))
-        self.assertTrue(ln.endswith("# com.kv.mail.apply"))
-        self.assertIn("skills.mail.run apply --no-slack >>", ln)
+        ln = schedule.cron_line(job("매일 09:30", ("observe", "--days", "3")))
+        self.assertTrue(ln.endswith("# com.kv.mail.observe"))
+        self.assertIn("skills.mail.run observe --days 3 >>", ln)
 
     def test_interval_must_divide_the_hour(self):
         with self.assertRaises(ValueError):
