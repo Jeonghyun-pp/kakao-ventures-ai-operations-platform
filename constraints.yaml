@@ -165,6 +165,20 @@ sheets:
   ragged_rows: true
 
 linkedin:
+  # 🔴 밖으로 나가는 문(kvlib.gate). 살아 있는 시스템이라 **on 에서 시작**한다 — off/slack 은 시험·중단용.
+  #    off: 구매·착지·카드·초안·승격을 안 하고 actions 에 dry 로만 적는다 · slack: 카드·초안(슬랙 글)만 실제로 · on: 전부
+  outbound: "on"
+  # 🔴 극초기 승격 — 노션 자동화(`DB로 업데이트` 체크박스)와 **둘 다 켜져 있으면 이중 생성**이다.
+  #    08-18 실제로 중복 10행이 생겨 5행을 아카이브했다. 08-19 21:5x 실측으로 자동화가 꺼진 걸 확인하고 열었다
+  #    (첫 시도에선 Pick 만 꺼지고 극초기가 1,304 로 늘어 되돌렸다 — 자동화가 두 갈래였다).
+  promote: true
+  card_channel: "net"         # #그물망 [사용자 결정 2026-08-19] 1티어를 하루 5명씩 심사역 채널로. 실패·요약은 report_channel
+  report_channel: "test"      # 실패 알림·하루 요약·health 는 review_test 로 — 심사역 채널에 우리 실패 로그가 쌓이면 카드를 안 보게 된다
+  report_slack: "on"
+  # [사용자 결정 2026-08-19] 1티어는 전수 훑기가 목적이라 Wait·Cut 도 보낸다. 정렬은 Catch → Trend → Wait → Cut.
+  card_tiers: [Catch, Trend, Wait, Cut]
+  # 🔴 재고 규칙 — 아직 슬랙에 안 나간 사람이 이만큼 남아 있으면 더 사지 않는다. 첫 실행에 590명(117일치)이 쌓인 뒤 정했다.
+  backlog_cap: 100
   # 🔴 링크드인 연결 요청에 붙이는 메모의 글자 상한. 플랫폼이 정하고 우리가 못 넘긴다.
   #    이미 연결된 사이면 일반 메시지라 상한이 사실상 없어, 두 벌을 다 만든다.
   connect_note_chars: 300

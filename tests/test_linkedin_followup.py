@@ -17,7 +17,7 @@ def posted(key="in/a", *, day="2026-09-23", page="p1"):
 
 def case(replies, **more):
     return Case(notion=Notion({run.DB: [row("p1")]}), slack=Slack(replies),
-                **{"REVIEWERS": {"U1": "Reviewer A"}, "_promote": lambda k, r: "created",
+                **{"_promote": lambda k, r: "created",
                    "outreach.write": lambda cards, who: Fetched.measured([{"key": c["key"], "short": "짧", "long": "길"} for c in cards]),
                    **more})
 

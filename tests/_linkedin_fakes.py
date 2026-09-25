@@ -79,8 +79,8 @@ class Notion:
 class Case:
     """with Case(...) as c: 안에서 run.* 이 전부 가짜를 본다."""
 
-    def __init__(self, *, notion=None, slack=None, today=THU, **more):
-        self.notion, self.slack, self.today, self.more = notion or Notion({}), slack or Slack(), today, more
+    def __init__(self, *, notion=None, slack=None, today=THU, cfg=None, **more):
+        self.notion, self.slack, self.today, self.more, self.cfg = notion or Notion({}), slack or Slack(), today, more, cfg or {}
         self.out = io.StringIO()
 
     def __enter__(self):
@@ -91,6 +91,9 @@ class Case:
         self._stack.enter_context(mock.patch.object(run, "notion", self.notion))
         self._stack.enter_context(mock.patch.object(run, "slack", self.slack))
         self._stack.enter_context(mock.patch.object(run, "date", FakeDate))
+        real = run.constraints.get                                # cfg={"linkedin.promote": False} 처럼 설정값을 바꿔 끼운다
+        self._stack.enter_context(mock.patch.object(run.constraints, "get", lambda k: self.cfg[k] if k in self.cfg else real(k)))
+        self._stack.enter_context(mock.patch.object(run, "_reviewers", lambda: {"U1": "Reviewer A"}))
         for k, v in self.more.items():                            # "brief.write" → run.brief.write · "PROMOTE_ENABLED" → run.PROMOTE_ENABLED
             owner, _, attr = k.rpartition(".")
             self._stack.enter_context(mock.patch.object(getattr(run, owner) if owner else run, attr, v))

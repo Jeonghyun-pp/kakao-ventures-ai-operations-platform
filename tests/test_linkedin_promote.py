@@ -42,7 +42,7 @@ class Promote(unittest.TestCase):
         self.assertEqual(c.notion.created[0][1]["링크"], ROW["url"])                   # 가짜 홈페이지 대신 프로필 URL
 
     def test_gate_off_does_nothing(self):
-        with case([], PROMOTE_ENABLED=False) as c:
+        with case([], cfg={"linkedin.promote": False}) as c:
             self.assertEqual(run._promote("in/a", ROW), "gated")
         self.assertEqual((c.notion.created, c.rows()), ([], []))
 

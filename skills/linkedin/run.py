@@ -20,7 +20,9 @@ import sys
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from kvlib import Fetched, constraints, ledger, lock
+import yaml
+
+from kvlib import Fetched, constraints, ledger, lock, paths
 from kv_transport import apify, notion, slack
 
 from . import axes, brief, judge, outreach, profile
@@ -43,66 +45,25 @@ PROMOTED = "promoted"      # 극초기 DB 로 승격
 EARLY = "극초기"
 notion.register_writable(EARLY, "00000000-0000-0000-0000-72b2b8579963")
 
-# 🔴 승격 게이트 — **노션 자동화를 끄기 전까지 False.**
-#
-#    지금 링크드인 DB 의 `DB로 업데이트` 체크박스가 극초기에 행을 만든다(08-18 실측).
-#    그게 켜진 채로 코드까지 쓰면 **이중 생성**이다 — 오늘 실제로 중복 10행이 생겨
-#    5행을 아카이브했다. 자동화를 끈 걸 확인한 뒤 True 로 바꾼다.
-#
-#    끄지 않고 True 로 바꾸지 마라. 조용히 안 도는 게 아니라 조용히 두 배로 돈다.
-#
-#    ✅ 2026-08-19 21:5x 실측으로 확인하고 열었다. 체크박스를 켜도 극초기 1,303 그대로,
-#       Pick 27 그대로였다. (첫 시도에선 Pick 만 꺼지고 극초기가 1,304 로 늘어
-#       되돌렸다 — 자동화가 두 갈래였다. 시험 안 했으면 이중 생성이 났다.)
-PROMOTE_ENABLED = True
-
-# 🔴 그물망을 보는 심사역. ✅ 를 누른 분 성함으로 콜드 메시지를 쓴다.
-#    명단 밖(예: 정현님)이 누르면 발신자를 비워두고 사람이 채운다 —
-#    심사역 개인 이름으로 나가는 글이라 우리가 임의로 정하지 않는다.
-REVIEWERS = {
-    "U000DC72E7D": "Reviewer A",
-    "U0005DE1BFA": "박도윤",
-    "U0000C0E6D2": "Reviewer B",
-    "U000A3D1A9E": "이서준",
-}
-
 # 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.**
 notion.register_writable(DB, "00000000-0000-0000-0000-8702f7cc7f34")
 slack.register("test", "C000E8E4F75")       # review_test
 slack.register("net",  "C000AB261A0")       # 그물망 — 봇 초대 필요
-# 🔴 [사용자 결정 2026-08-19] 1티어 35명을 하루 5명씩 **그물망 채널**로 보낸다.
-#    (08-18 결정이던 review-test 한정은 여기서 끝난다 — 대상이 1티어로 좁혀졌기 때문)
-CH = "net"
 
+# 스위치·채널·상한은 constraints.yaml `linkedin.*` 에 있다 [2026-09-25]. 승격 게이트·카드 티어·재고 규칙의 근거도 그쪽 주석에.
 TIERS = ("Catch", "Trend", "Wait", "Cut")
+PEOPLE = paths.repo_root() / "people.yaml"                      # 심사역 명부 — 메일과 같은 파일
 
-# 🔴 재고 규칙 — 아직 슬랙에 안 나간 사람이 이만큼 남아 있으면 **더 사지 않는다.**
-#    고정 페이지로 정하면 재고가 쌓이는 걸 못 본다. 실제로 첫 실행에 590명을 넣어
-#    117일치가 쌓였고, 그 상태에서 또 사는 건 의미가 없었다.
-#    페이지 숫자를 감으로 정하는 대신 **재고가 스스로 조절하게** 한다.
-BACKLOG_CAP = 100
 
-# 🔴 [사용자 결정 2026-08-19] 카드는 **1티어만** 쏜다. 전체로 되돌리려면 None
-#    (`--all` 로 한 번만 우회 가능). 재고가 605명이라 티어를 안 정해두면 1티어 사람이
-#    언제 나갈지 알 수 없다.
-#
-# 🔴 **Axis 로 거르지 않는다.** Axis 는 "어느 쿼리가 이 사람을 물어왔나"(발굴 이력)이고,
-#    1티어는 "조건을 만족하나"(분류)다. 둘은 다르다 — 엄격 기준으로 강등된 9명은
-#    elite 축이 실제로 착지시킨 사람이라 Axis 에 그대로 남아 있다. Axis 로 거르면
-#    그 9명이 다시 섞인다. 분류의 정본은 `Match Reason` 의 표식이다.
-# 🔴 [사용자 결정 2026-09-01] 표식 필터는 껐다. 1티어 35명이 08-26 에 소진됐고,
-#    그 뒤 닷새간 카드가 0건인데 아무도 몰랐다. 학력 기준 자체도 같이 은퇴했다.
-#    이제 거르는 자리는 `axes.card_reject()` 하나다 — 수집 축과 같은 기준을 쓴다.
-CARD_MARK = None
+def _cfg(k: str):
+    return constraints.get(f"linkedin.{k}")
 
-# 🔴 [사용자 결정 2026-08-19] 1티어는 **전수 훑기**가 목적이라 Wait·Cut 도 슬랙에 보낸다.
-#    (그 전 기본값은 Catch·Trend 뿐이었다 — 매주 유입되는 사람 중 좋은 것만 흘려보내는 설계)
-#    정렬은 여전히 Catch → Trend → Wait → Cut 이라 좋은 사람이 먼저 나간다.
-CARD_TIERS = TIERS
 
-# 🔴 실패 알림은 **그물망이 아니라 review-test 로** 간다. 심사역이 보는 채널에 우리 실패 로그가
-#    쌓이면 카드 자체를 안 보게 된다. 실패는 만든 사람이 본다.
-ALERT_CH = "test"
+def _reviewers() -> dict[str, str]:
+    """슬랙 ID → 성함. ✅ 를 누른 분 이름으로 콜드 메시지를 쓴다 — 개인 이름으로 나가는 글이라 명단 밖이면 비운다."""
+    return {p["slack_id"]: p["names"][0] for p in yaml.safe_load(PEOPLE.read_text(encoding="utf-8")) or [] if p.get("slack_id")}
+
+
 _ORDER = {t: i for i, t in enumerate(TIERS)}      # 좋은 순
 
 
@@ -142,8 +103,8 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
     print(f"▶ collect run={run_id}")
 
     backlog = _backlog()
-    if not only_axis and backlog >= BACKLOG_CAP:
-        print(f"· 아직 안 나간 사람이 {backlog}명 (임계 {BACKLOG_CAP}) — 더 사지 않는다")
+    if not only_axis and backlog >= _cfg("backlog_cap"):
+        print(f"· 아직 안 나간 사람이 {backlog}명 (임계 {_cfg('backlog_cap')}) — 더 사지 않는다")
         print(f"  하루 5명이면 {backlog // 5}일치다. 재고가 줄면 그때 산다")
         return 0
 
@@ -339,7 +300,7 @@ def _props(item: dict, v: dict, run_id: str) -> dict:
 
 # ---------------------------------------------------------------- card
 
-def card(*, n: int = 5, dry_run: bool = False, mark: str | None = CARD_MARK) -> int:
+def card(*, n: int = 5, dry_run: bool = False) -> int:
     """🔴 노션에서 Tier 를 다시 읽는다 — 사람이 고친 게 여기서 반영된다.
 
     🔴 후보는 **노션 행**에서 뽑는다(장부가 아니라). 장부 landed 1,857행 중 1,234행은
@@ -386,17 +347,14 @@ def card(*, n: int = 5, dry_run: bool = False, mark: str | None = CARD_MARK) -> 
     key_of_page = {r["page_id"]: r["key"] for r in ledger.rows(TASK, ev=ledger.LANDED)
                    if r.get("page_id")}
 
-    pool, skipped_axis = [], 0
+    pool = []
     seen_before: dict[str, int] = {}     # 이미 본 사람 (중복 방지)
     filtered: dict[str, int] = {}        # 기준에 안 맞는 사람 (판정)
     for live in rows:
         pid = live["_page_id"]
         if pid in posted_pages:
             continue
-        if mark and mark not in str(live.get("Match Reason") or ""):
-            skipped_axis += 1
-            continue
-        if live.get("Tier") not in CARD_TIERS:
+        if live.get("Tier") not in _cfg("card_tiers"):
             continue
         # 🔴 [사용자 결정 2026-09-01 · 시니어 기준] 수집 축과 같은 기준을 여기서도 건다.
         #    안 걸면 옛 기준으로 사온 사람이 새 기준인 척 나간다.
@@ -421,8 +379,6 @@ def card(*, n: int = 5, dry_run: bool = False, mark: str | None = CARD_MARK) -> 
     for why, cnt in sorted(seen_before.items(), key=lambda x: -x[1]):
         print(f"· 이미 본 사람이라 뺐다 — {why}: {cnt}명")
     pool.sort()
-    if mark:
-        print(f"· '{mark}' 표식이 있는 행만 — 대상이 아니라 건너뛴 행 {skipped_axis}")
     warn_d = constraints.get("linkedin.stock_warn_days")
     if not pool:
         print("· 올릴 수 있는 사람이 없다")
@@ -431,9 +387,7 @@ def card(*, n: int = 5, dry_run: bool = False, mark: str | None = CARD_MARK) -> 
         #    로그는 "남으면 3일 더 → 2 → 1 → 0" 하고 세어놓고도 그 숫자를 사람에게
         #    보낸 적이 없다. 세는 것과 알리는 것은 다른 일이다.
         if not dry_run:                       # dry-run 은 바깥으로 아무것도 안 낸다
-            _alert("card", "올릴 사람이 0명이다 — 카드가 안 나간다."
-                   + (f" 지금은 '{mark}' 표식이 있는 행만 보고 있다." if mark else ""),
-                   key="card:empty", head="🟡 *linkedin card* 재고 소진")
+            _alert("card", "올릴 사람이 0명이다 — 카드가 안 나간다.", key="card:empty", head="🟡 *linkedin card* 재고 소진")
         # 🔴 4 = 재고 소진. 2(다 못 나갔다)와 갈라둔다 — 뜻이 다르고, 무엇보다
         #    card() 가 이미 정확한 문구로 알렸으니 바깥에서 또 보내면 두 번이 된다.
         return 4
@@ -443,8 +397,7 @@ def card(*, n: int = 5, dry_run: bool = False, mark: str | None = CARD_MARK) -> 
     print(f"▶ card — 올릴 수 있는 것 {len(pool)} · 오늘 {len(pick)} "
           f"(남으면 {left_d}일 더)")
     if left_d <= warn_d and not dry_run:
-        _alert("card", f"남은 사람 {left_n}명 — {left_d}일치다. 바닥나기 전에 기준을 손봐야 한다."
-               + (f" ('{mark}' 표식 기준)" if mark else ""),
+        _alert("card", f"남은 사람 {left_n}명 — {left_d}일치다. 바닥나기 전에 기준을 손봐야 한다.",
                key="card:low", head="🟡 *linkedin card* 재고 부족")
 
     # 🔴 One Liner 를 그대로 안 쓴다. 실측 2~95자에 '--'·'CEO' 같은 것도 있었고,
@@ -487,7 +440,7 @@ def card(*, n: int = 5, dry_run: bool = False, mark: str | None = CARD_MARK) -> 
             print(f"  └ {live.get('서비스명')}  {live.get('Tier')}")
         return 0
 
-    head = slack.post(CH, lines[0])
+    head = slack.post(_cfg("card_channel"), lines[0])
     if not head.is_measured:
         print(f"🔴 헤더를 못 올렸다: {head.reason}")
         return 1
@@ -495,14 +448,14 @@ def card(*, n: int = 5, dry_run: bool = False, mark: str | None = CARD_MARK) -> 
 
     posted = 0
     for (_, k, live), body in zip(pick, lines[1:]):
-        r = slack.post(CH, body.strip() + "\n\n_✅ 를 누르면 콜드 메시지 초안을 만들어 올립니다_",
+        r = slack.post(_cfg("card_channel"), body.strip() + "\n\n_✅ 를 누르면 콜드 메시지 초안을 만들어 올립니다_",
                        thread_ts=parent)
         if not r.is_measured:
             print(f"  🔴 {live.get('서비스명')} 답글 실패: {r.reason}")
             continue
         # 착지 먼저, 장부 나중. ts 를 못 남기면 반응을 영영 못 찾는다.
         ledger.append(TASK, k, CARDED)
-        ledger.append(TASK, k, POSTED, ch=CH, ts=r.require(), parent=parent,
+        ledger.append(TASK, k, POSTED, ch=_cfg("card_channel"), ts=r.require(), parent=parent,
                       day=ledger.today(), page_id=live["_page_id"],
                       name=live.get("서비스명"),
                       # 🔴 claude 가 찾은 회사명. 극초기 승격의 title 이 된다 —
@@ -592,7 +545,8 @@ def followup(*, dry_run: bool = False) -> int:
     def _sender(users: list) -> str:
         # 한 메시지에 여러 명이 눌렀으면 **먼저 누른 분**(슬랙이 반응 순서로 준다).
         # 명단 밖이면 비워두고 사람이 채운다.
-        return next((REVIEWERS[u] for u in users if u in REVIEWERS), "")
+        who = _reviewers()
+        return next((who[u] for u in users if u in who), "")
 
     groups: dict[str, list] = {}
     for k, r, us in picked:
@@ -707,9 +661,9 @@ def _promote(key: str, row: dict) -> str:
        이름 하나로만 대조하면 `SampleProduct`(회사)와 `Example Person B`(사람)이 두 행으로 갈린다.
        실제로 08-18 에 그렇게 갈렸다.
     """
-    if not PROMOTE_ENABLED:
+    if not _cfg("promote"):
         # 막혔다는 걸 말한다. 조용히 건너뛰면 "왜 극초기에 안 들어갔지"를 못 답한다.
-        print(f"  · 극초기 승격은 꺼져 있다 (PROMOTE_ENABLED=False) — {row.get('name')}")
+        print(f"  · 극초기 승격은 꺼져 있다 (linkedin.promote: false) — {row.get('name')}")
         return "gated"
     if ledger.has(TASK, key, PROMOTED):
         return "already"
@@ -808,7 +762,7 @@ def _backlog() -> int:
             continue
         if live.get("타깃") or live.get("DB로 업데이트"):
             continue
-        if live.get("Tier") not in CARD_TIERS:
+        if live.get("Tier") not in _cfg("card_tiers"):
             continue
         if axes.card_reject(live):
             continue
@@ -858,7 +812,7 @@ def _alert(cmd: str, msg: str, *, key: str | None = None, head: str | None = Non
         return
     text = (f"{head or f'🔴 *linkedin {cmd}* 실패'} — {msg}\n"
             f"로그: `tail -30 ~/kv-data/_logs/com.kv.linkedin.{cmd}.log`")
-    r = slack.post(ALERT_CH, text)
+    r = slack.post(_cfg("report_channel"), text)
     # 알림이 못 나가도 잡의 결과를 바꾸지 않는다. 다만 조용히 넘어가진 않는다.
     if r.is_measured:
         ledger.append(TASK, key, "alerted", day=today, msg=msg[:200])
@@ -874,8 +828,6 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--dry-run", action="store_true")
     d = sub.add_parser("card"); d.add_argument("-n", type=int, default=5)
     d.add_argument("--dry-run", action="store_true")
-    d.add_argument("--axis", default=None, help=f"Match Reason 에 이 표식이 있는 행만 (기본 {CARD_MARK!r})")
-    d.add_argument("--all", action="store_true", help="표식 제한 없이 전체에서 뽑는다")
     fu = sub.add_parser("followup", help="✅ 를 걷어 콜드 메시지 초안을 스레드에 올린다")
     fu.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
@@ -885,8 +837,7 @@ def main(argv: list[str] | None = None) -> int:
             with lock.hold("linkedin-collect"):
                 return collect(only_axis=a.axis, pages=a.pages, dry_run=a.dry_run)
         if a.cmd == "card":
-            rc = card(n=a.n, dry_run=a.dry_run,
-                      mark=(None if a.all else (a.axis or CARD_MARK)))
+            rc = card(n=a.n, dry_run=a.dry_run)
             # rc 4(재고 소진)는 card() 가 이미 제 문구로 알렸다. 여기서 또 보내지 않는다.
             if rc and rc != 4 and not a.dry_run:
                 _alert("card", f"종료코드 {rc} — 카드가 다 못 나갔다")
@@ -899,7 +850,7 @@ def main(argv: list[str] | None = None) -> int:
             return rc
         if a.cmd == "status":
             print(ledger.summary(TASK))
-            print(f"  재고(아직 안 나간 사람) {_backlog()}명 / 임계 {BACKLOG_CAP}")
+            print(f"  재고(아직 안 나간 사람) {_backlog()}명 / 임계 {_cfg('backlog_cap')}")
             for ax in axes.AXES:
                 st = _axis_state(ax)
                 line = f"  {ax:22} 마지막 {st.get('ran_on', '-'):10} · 다음 p{_next_page(ax)}"
