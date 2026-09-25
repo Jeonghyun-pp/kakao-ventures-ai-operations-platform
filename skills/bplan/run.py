@@ -55,7 +55,7 @@ from datetime import datetime, timedelta, timezone
 
 from kvlib import Fetched, constraints, judgments, ledger, lock, paths, secrets, store
 from kvlib.gate import Gate
-from kv_transport import claude, drive, gmail, notion, sheets
+from kv_transport import claude, drive, gmail, notion, sheets, slack
 
 from . import judge
 
@@ -544,6 +544,104 @@ def label(con, rows: list[dict]) -> int:
     return judgments.label(con, rows, TODO_PROP, _TODO_LABEL.get, same=lambda live, human: bucket(live) == human)
 
 
+# ---------------------------------------------------------------- 행동 (문 뒤) — score · card · draft
+
+slack.register("test",  "C000E8E4F75")     # review_test
+slack.register("bplan", "C0000AEB349")     # #Squad-비플랜 — 봇 초대 필요
+_HANGUL = re.compile(r"[가-힣]")
+_KO_DOMAINS = (".kr", "naver.com", "daum.net", "hanmail.net", "kakao.com", "nate.com")
+
+
+def drop_lang(row: dict) -> str:
+    """드랍 문안 언어. 🔴 한글 이름·기업명·한국 도메인이면 ko — 한국 창업자가 영문 거절을 받는 쪽으로만 틀리지 않게(옛 실측 2/561)."""
+    text = " ".join(str(row.get(k) or "") for k in ("기업명", "대표명", *judge.FIELDS))
+    ko = len(_HANGUL.findall(text)); la = len(re.findall(r"[A-Za-z]", text))
+    if _HANGUL.search(str(row.get("대표명") or "") + str(row.get("기업명") or "")):
+        return "ko"
+    if any(str(row.get("이메일") or "").lower().endswith(d) for d in _KO_DOMAINS):
+        return "ko"
+    return "ko" if (ko + la) < 20 or ko / (ko + la) >= 0.15 else "en"
+
+
+def drop_body(row: dict) -> str:
+    tpl = (paths.repo_root() / "skills" / "bplan" / "templates" / f"drop_{drop_lang(row)}.txt").read_text(encoding="utf-8")
+    return tpl.format(ceo_name=(row.get("대표명") or "").strip() or ("대표" if drop_lang(row) == "ko" else "there"))
+
+
+def _intake_mail(company: str) -> str | None:
+    """이 회사의 접수 알림 메일 번호 — 장부(labeled)에서, 없으면 라벨 안을 제목으로 찾는다. 드랍 초안은 그 스레드에 답장이다."""
+    want = norm_company(company)
+    for r in ledger.rows(TASK, ev=LABELED):
+        if norm_company(r.get("company", "")) == want:
+            return r["key"]
+    f = gmail.search_ids(f'subject:"{company} 로부터 접수된 사업계획서" label:"{GMAIL_LABEL}"', limit=5)
+    return (f.require() or [None])[0] if f.is_measured else None
+
+
+def _card_text(row: dict, j: dict) -> str:
+    card = json.loads(j["reason"]) if str(j["reason"]).startswith("{") else {"reason": j["reason"]}
+    pid = row["_page_id"].replace("-", "")
+    ask = "애매합니다 — 사람이 봐 주세요" if j["verdict"] == "?" else "볼 만합니다"
+    return (f"*{row.get('기업명')}*  `{j['verdict']}` · {ask}\n{card.get('summary', '')}\n"
+            f"*팀* {card.get('team', '') or '미상'}\n*되는 이유* {card.get('reason', '')}\n*리스크* {card.get('risk', '')}\n"
+            f"<https://www.notion.so/{pid}|노션> · <{row.get('사업계획서') or ''}|덱>\n\n_⭕ 미팅요청 · ❌ 드랍 · 🙋 내가 볼게_")
+
+
+def act_all(g: Gate, rows: list[dict]) -> dict:
+    """판정은 있는데 행동이 없는 접수 — 아직 `Newly Added` 인 것만. 심사역이 이미 움직인 행은 건드리지 않는다.
+    전부 `Gate.out` 뒤: score(노션 점수·포워드 이유) · card(볼만·애매 → 슬랙 스레드) · draft(칼드랍·Red → 드랍 초안)."""
+    by_page = {r["_page_id"]: r for r in rows if r.get(TODO_PROP) == NEW_TODO}
+    live = g.con.execute("SELECT key, verdict, reason, page_id FROM judgments WHERE run=? AND ok=1 AND page_id IS NOT NULL", (judgments.LIVE,)).fetchall()
+    n = Counter()
+    ch, parent = _cfg("card_channel"), {}
+
+    def head_ts() -> str:
+        if "ts" not in parent:
+            parent["ts"] = slack.post(ch, f"*오늘의 비플랜* — 볼 만한 접수와 애마한 접수입니다. 스레드에서 ⭕ ❌ 🙋 로 알려 주세요").require()
+        return parent["ts"]
+
+    for key, verdict, reason, pid in live:
+        row = by_page.get(pid)
+        if not row:
+            continue
+        j = {"verdict": verdict, "reason": reason}
+        card = json.loads(reason) if str(reason).startswith("{") else {"reason": reason}
+        if (g.row(key, "score") or {}).get("status") != "done":
+            n["score"] += 1
+            g.out(key, "score", {"verdict": verdict}, lambda pid=pid, v=verdict, c=card: notion.update(
+                pid, DB_KEY, {"점수": v, "포워드 이유": notion.clip16(" / ".join(x for x in (c.get("reason"), c.get("risk")) if x))}).require())
+        if verdict in DROP_SCORES:
+            if (g.row(key, "draft") or {}).get("status") in ("done", "skipped"):
+                continue
+            email = (row.get("이메일") or "").strip().lower()
+            since = (datetime.now(timezone.utc) - timedelta(days=_cfg("drop_after_days"))).strftime("%Y-%m-%dT%H:%M:%SZ")
+            recent = g.con.execute("SELECT 1 FROM actions WHERE kind='draft' AND status='done' AND created>=? AND json_extract(detail,'$.email')=?",
+                                   (since, email)).fetchone()
+            if recent:
+                g.put(key, "draft", "skipped", {"email": email, "why": f"같은 사람에게 {_cfg('drop_after_days')}일 안에 이미 초안"})
+                n["skipped"] += 1
+                continue
+            n["draft"] += 1
+
+            def do_draft(row=row, email=email):
+                mid = _intake_mail(row.get("기업명", ""))
+                if not mid:
+                    raise RuntimeError("접수 알림 메일을 못 찾았다 — 초안을 붙일 스레드가 없다")
+                return gmail.draft_reply(gmail.message(mid).require(), drop_body(row), email).require()
+            g.out(key, "draft", {"email": email, "lang": drop_lang(row), "company": row.get("기업명")}, do_draft)
+        else:
+            if (g.row(key, "card") or {}).get("status") == "done":
+                continue
+            n["card"] += 1
+            g.out(key, "card", {"verdict": verdict, "company": row.get("기업명"), "ch": ch},
+                  lambda row=row, j=j: slack.post(ch, _card_text(row, j), thread_ts=head_ts()).require())
+    return dict(n)
+
+
+def _cfg(k: str):
+    return constraints.get(f"bplan.{k}")
+
+
 def status() -> int:
     s = ledger.summary(TASK)
     print(f"장부 {s['ledger_lines']}줄 · 마지막 {s['last_ts'] or '없음'} · 오늘 {s['counts'] or '0'}")
@@ -611,6 +709,7 @@ def main(argv: list[str] | None = None) -> int:
     j.add_argument("--past", type=int, default=0, help="결정 난 옛 행 N건을 판정 — 기준 보정용")
     j.add_argument("--limit", type=int, default=-1)
     sub.add_parser("label", help="노션 to do(심사역 결정) → human")
+    ac = sub.add_parser("act", help="판정 있는 접수에 행동 — 문(bplan.outbound) 뒤. 기본 off 면 기록만"); ac.add_argument("--dry-run", action="store_true")
     rp = sub.add_parser("replay"); rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
     df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
     a = p.parse_args(argv)
@@ -631,6 +730,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"· 판정 {r['judged']} · 형식 실패 {r['invalid']}" + (f" · 🔴 멈춤: {r['stopped']}" if r["stopped"] else "")
                       + f" · 정답 갈림 {n_lab}")
                 return 2 if r["stopped"] else 0
+        if a.cmd == "act":
+            with lock.hold("bplan-act"):
+                g = _gate(a.dry_run)
+                print(f"· 행동: {act_all(g, _notion_rows())} | 문 {g.level()}")
+                return 0
         if a.cmd == "label":
             con = _gate().con
             print(f"· 심사역 결정이 판정과 갈린 접수 {label(con, _notion_rows())}건 → human")

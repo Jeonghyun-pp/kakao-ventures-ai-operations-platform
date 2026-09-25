@@ -1,0 +1,9 @@
+Hello {ceo_name},
+Thank you for reaching out to Kakao Ventures and sending your deck.
+
+We wanted to let you know that we've finished performing an internal review of your business proposal, but unfortunately, decided not to advance it further. The reasons why we cannot proceed further are subjective, and considering that we are simply one investor among many, there are many times in which we make mistakes. As such, we hope that you continue persevering to see the realization of your business, and if possible, please let us know how it goes. We would love to learn from our mistakes.
+
+We wish you success in all your future endeavors.
+
+Best regards,
+Kakao Ventures
