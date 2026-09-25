@@ -462,7 +462,8 @@ _JUDGE_PROPS = ["기업명", "대표명", "이메일", "접수키", "사업계�
 # 심사역의 `to do` 가 곧 정답. 갈래 둘 — drop / keep. 그 밖(Newly Added·Review Done·Hold)은 미결이라 None.
 _TODO_LABEL = {"To Drop": "drop", "미팅요청": "keep", "Mail Fwd": "keep", "Q&A": "keep"}
 DROP_SCORES = ("칼드랍", "Red")                     # 드랍 초안이 나가는 갈래. Orange·Green 은 카드, ? 는 사람
-SLACK_KINDS = ("card", "remind1", "remind2", "remind3")
+SLACK_KINDS = ("card", "ack", "remind1", "remind2", "remind3")   # 슬랙 글 — slack 단계에서 실제로 나가는 종류(허용 목록)
+ACK = ("raising_hand", "man-raising-hand", "woman-raising-hand", "person_raising_hand", "hand")
 
 
 def bucket(score: str | None) -> str:
@@ -611,31 +612,105 @@ def act_all(g: Gate, rows: list[dict]) -> dict:
             g.out(key, "score", {"verdict": verdict}, lambda pid=pid, v=verdict, c=card: notion.update(
                 pid, DB_KEY, {"점수": v, "포워드 이유": notion.clip16(" / ".join(x for x in (c.get("reason"), c.get("risk")) if x))}).require())
         if verdict in DROP_SCORES:
-            if (g.row(key, "draft") or {}).get("status") in ("done", "skipped"):
-                continue
-            email = (row.get("이메일") or "").strip().lower()
-            since = (datetime.now(timezone.utc) - timedelta(days=_cfg("drop_after_days"))).strftime("%Y-%m-%dT%H:%M:%SZ")
-            recent = g.con.execute("SELECT 1 FROM actions WHERE kind='draft' AND status='done' AND created>=? AND json_extract(detail,'$.email')=?",
-                                   (since, email)).fetchone()
-            if recent:
-                g.put(key, "draft", "skipped", {"email": email, "why": f"같은 사람에게 {_cfg('drop_after_days')}일 안에 이미 초안"})
-                n["skipped"] += 1
-                continue
-            n["draft"] += 1
-
-            def do_draft(row=row, email=email):
-                mid = _intake_mail(row.get("기업명", ""))
-                if not mid:
-                    raise RuntimeError("접수 알림 메일을 못 찾았다 — 초안을 붙일 스레드가 없다")
-                return gmail.draft_reply(gmail.message(mid).require(), drop_body(row), email).require()
-            g.out(key, "draft", {"email": email, "lang": drop_lang(row), "company": row.get("기업명")}, do_draft)
+            _draft(g, key, row, n)
         else:
             if (g.row(key, "card") or {}).get("status") == "done":
                 continue
             n["card"] += 1
-            g.out(key, "card", {"verdict": verdict, "company": row.get("기업명"), "ch": ch},
-                  lambda row=row, j=j: slack.post(ch, _card_text(row, j), thread_ts=head_ts()).require())
+            g.out(key, "card", {"verdict": verdict, "company": row.get("기업명"), "ch": ch, "page_id": pid},
+                  lambda row=row, j=j: {"parent": head_ts(), "ts": slack.post(ch, _card_text(row, j), thread_ts=head_ts()).require()})
     return dict(n)
+
+
+def _draft(g: Gate, key: str, row: dict, n: Counter) -> None:
+    """칼드랍·Red(또는 심사역 ❌) → 접수 알림 스레드에 드랍 초안. 같은 이메일엔 drop_after_days 에 하나."""
+    if (g.row(key, "draft") or {}).get("status") in ("done", "skipped"):
+        return
+    email = (row.get("이메일") or "").strip().lower()
+    since = (datetime.now(timezone.utc) - timedelta(days=_cfg("drop_after_days"))).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if g.con.execute("SELECT 1 FROM actions WHERE kind='draft' AND status='done' AND created>=? AND json_extract(detail,'$.email')=?",
+                     (since, email)).fetchone():
+        g.put(key, "draft", "skipped", {"email": email, "why": f"같은 사람에게 {_cfg('drop_after_days')}일 안에 이미 초안"})
+        n["skipped"] += 1
+        return
+    n["draft"] += 1
+
+    def do():
+        mid = _intake_mail(row.get("기업명", ""))
+        if not mid:
+            raise RuntimeError("접수 알림 메일을 못 찾았다 — 초안을 붙일 스레드가 없다")
+        return gmail.draft_reply(gmail.message(mid).require(), drop_body(row), email).require()
+    g.out(key, "draft", {"email": email, "lang": drop_lang(row), "company": row.get("기업명")}, do)
+
+
+def _thread(g: Gate, key: str, kind: str, text: str) -> str:
+    """올라간 카드의 스레드에 한 줄. 카드가 실제로 안 올라갔으면 이것도 dry 다."""
+    card = g.row(key, "card") or {}
+
+    def do():
+        if card.get("status") != "done":
+            raise RuntimeError("카드가 아직 안 올라갔다")
+        return slack.post(card["ch"], text, thread_ts=card["result"]["parent"]).require()
+    return g.out(key, kind, {"text": text}, do)
+
+
+def followup(g: Gate, rows_fn=None) -> dict:
+    """올라간 카드의 스레드 반응을 읽어 잇는다 — ⭕ 미팅요청 · ❌ To Drop + 드랍 초안 · 🙋 맡음. 조용하면 리마인드. 만기 없음(접수는 답을 받아야 한다)."""
+    yes, no = set(constraints.get("slack.reaction_yes")), set(constraints.get("slack.reaction_no"))
+    n = Counter()
+    cards = [(k, json.loads(d), c) for k, d, c in g.con.execute(
+        "SELECT a.key, a.detail, a.created FROM actions a WHERE a.kind='card' AND a.status='done'"
+        " AND NOT EXISTS(SELECT 1 FROM actions t WHERE t.key=a.key AND t.kind IN ('todo','ack') AND t.status='done')")]
+    if not cards:
+        return dict(n)
+    rows = None
+    by_parent: dict = {}
+    for k, d, created in cards:
+        by_parent.setdefault((d["ch"], d["result"]["parent"]), []).append((k, d, created))
+    for (ch, parent), items in by_parent.items():
+        got = slack.replies(ch, parent)
+        if not got.is_measured:
+            n["unread"] += len(items)
+            continue
+        react = {m.get("ts"): m.get("reactions") or [] for m in got.require()}
+        for k, d, created in items:
+            names = {x.get("name") for x in react.get(d["result"]["ts"], [])}
+            users = [u for x in react.get(d["result"]["ts"], []) for u in (x.get("users") or [])]
+            decision = "no" if names & no else "yes" if names & yes else "ack" if {x.split("::")[0] for x in names if x} & set(ACK) else None
+            if decision in ("yes", "no"):
+                if rows is None:
+                    rows = (rows_fn or _notion_rows)()
+                row = next((r for r in rows if r["_page_id"] == d["page_id"]), None)
+                if not row:
+                    n["missing_row"] += 1
+                    continue
+                todo = "미팅요청" if decision == "yes" else "To Drop"
+                g.out(k, "todo", {"to": todo, "by": users[:1]}, lambda pid=d["page_id"], todo=todo: notion.update(pid, DB_KEY, {TODO_PROP: todo}).require())
+                n[decision] += 1
+                if decision == "no":
+                    _draft(g, k, row, n)
+            elif decision == "ack":
+                who = next((p_["names"][0] for p_ in _people() for u in users if p_.get("slack_id") == u), None)
+                _thread(g, k, "ack", f"🙋 {who or '누군가'} 님이 맡았습니다. 노션 `담당심사역` 칸에 이름을 남겨 주세요.")
+                n["ack"] += 1
+            else:
+                n["reminded"] += _remind(g, k, created)
+    return dict(n)
+
+
+def _people() -> list[dict]:
+    import yaml
+    return yaml.safe_load((paths.repo_root() / "people.yaml").read_text(encoding="utf-8")) or []
+
+
+def _remind(g: Gate, key: str, card_created: str) -> int:
+    done = g.con.execute("SELECT count(*) FROM actions WHERE key=? AND kind LIKE 'remind%' AND status='done'", (key,)).fetchone()[0]
+    if done >= _cfg("remind_max"):
+        return 0
+    last = g.con.execute("SELECT max(created) FROM actions WHERE key=? AND status='done' AND (kind='card' OR kind LIKE 'remind%')", (key,)).fetchone()[0] or card_created
+    if (datetime.now(timezone.utc) - datetime.fromisoformat(last.replace("Z", "+00:00"))).days < _cfg("remind_days"):
+        return 0
+    return int(_thread(g, key, f"remind{done + 1}", "⏰ 아직 답이 없습니다 — ⭕ 미팅요청 · ❌ 드랍 · 🙋 내가 볼게") == "done")
 
 
 def _cfg(k: str):
@@ -710,6 +785,7 @@ def main(argv: list[str] | None = None) -> int:
     j.add_argument("--limit", type=int, default=-1)
     sub.add_parser("label", help="노션 to do(심사역 결정) → human")
     ac = sub.add_parser("act", help="판정 있는 접수에 행동 — 문(bplan.outbound) 뒤. 기본 off 면 기록만"); ac.add_argument("--dry-run", action="store_true")
+    fu = sub.add_parser("followup", help="카드 스레드의 ⭕/❌/🙋 를 읽어 잇는다 · 리마인드"); fu.add_argument("--dry-run", action="store_true")
     rp = sub.add_parser("replay"); rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
     df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
     a = p.parse_args(argv)
@@ -734,6 +810,11 @@ def main(argv: list[str] | None = None) -> int:
             with lock.hold("bplan-act"):
                 g = _gate(a.dry_run)
                 print(f"· 행동: {act_all(g, _notion_rows())} | 문 {g.level()}")
+                return 0
+        if a.cmd == "followup":
+            with lock.hold("bplan-followup"):
+                g = _gate(a.dry_run)
+                print(f"· followup: {followup(g)} | 문 {g.level()}")
                 return 0
         if a.cmd == "label":
             con = _gate().con

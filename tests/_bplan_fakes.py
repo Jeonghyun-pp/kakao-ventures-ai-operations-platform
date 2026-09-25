@@ -67,13 +67,15 @@ class Gmail:
 
 class Slack:
     def __init__(self):
-        self.posts, self.n = [], 0
+        self.posts, self.n, self.replies_by_parent = [], 0, {}
 
     def post(self, ch, text, *, thread_ts=None):
         self.n += 1; self.posts.append((ch, text, thread_ts)); return Fetched.measured(f"ts-{self.n}")
 
     def replies(self, ch, parent):
-        return Fetched.measured([])
+        if parent in self.replies_by_parent:
+            return Fetched.measured(self.replies_by_parent[parent])
+        return Fetched.unknown("slack:망") if self.replies_by_parent.get("_fail") else Fetched.measured([])
 
 
 class Notion:
