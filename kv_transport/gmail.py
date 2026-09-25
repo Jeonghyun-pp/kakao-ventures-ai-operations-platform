@@ -426,16 +426,6 @@ def _to_gmail_html(text: str) -> str:
                    for l in text.split("\n"))
 
 
-def _quote(msg: dict) -> str:
-    """포워드 본문에 붙는 원본 인용. Gmail 수동 포워드와 같은 형식."""
-    return ("\n\n---------- Forwarded message ---------\n"
-            f"From: {msg.get('sender_raw') or msg.get('sender')}\n"
-            f"Date: {msg.get('date')}\n"
-            f"Subject: {msg.get('subject')}\n"
-            f"To: {', '.join(msg.get('to') or [])}\n\n"
-            f"{msg.get('body', '')}")
-
-
 def _draft(msg: dict, body: str, to: str, *, subject: str) -> Fetched:
     """초안 하나를 만들고 되읽어 확인한다. **보내지 않는다.**
 
