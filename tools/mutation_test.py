@@ -55,10 +55,10 @@ MUTATIONS = [
      "def labels() -> Fetched:"),
     ("A8", "발송 — 옛 SDK 패턴 drafts().send",
      "kv_transport/gmail.py",
-     "def inbox_count() -> Fetched:",
+     "def archive(msg_id: str) -> Fetched:",
      "def send_sdk(svc, draft_id: str):   # 변이: SDK 로 발송한다\n"
      "    return svc.users().drafts().send(userId=\"me\", body={\"id\": draft_id})\n\n\n"
-     "def inbox_count() -> Fetched:"),
+     "def archive(msg_id: str) -> Fetched:"),
     ("A8", "발송 — 허용되지 않은 곳에서 발송 통로를 import (A8b)",
      "skills/mail/observe.py",
      "from . import clean, rules",

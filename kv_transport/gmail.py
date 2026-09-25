@@ -279,69 +279,6 @@ def _normalize(m: dict) -> dict:
 
 # ---------------------------------------------------------------- 읽기
 
-def inbox(*, days: int | None = None, limit: int | None = None) -> Fetched:
-    """인박스 최근 N일. **메시지 단위**로 본다.
-
-    🔴 스레드가 아니라 메시지다. 비플랜 접수 메일은 hello@ 가 hello@ 에게 보내는 구조라
-       SENT+INBOX 를 동시에 달고 있는데, 여기서 거르지 않고 규칙이 명시적으로 잡아 보호한다.
-
-    부분 실패는 partial 로 표시한다 — 100통 중 3통을 못 읽은 것과 97통이 전부인 것은 다르다.
-    """
-    days = days if days is not None else constraints.get("gmail.scan.lookback_days")
-    limit = limit if limit is not None else constraints.get("gmail.scan.max_results")
-
-    ids = inbox_ids(days=days, limit=limit)
-    if not ids.is_measured:
-        return ids
-    refs = [{"id": i} for i in ids.require()]
-    out: list[dict] = []
-    failed: list[str] = []
-    for ref in refs:
-        try:
-            out.append(_normalize(_get(f"/messages/{ref['id']}", params={"format": "full"})))
-        except AuthDead as e:
-            # 도중에 인증이 죽으면 남은 건 못 읽는다. 여기까지를 partial 로 돌려준다.
-            return Fetched.measured(out, partial=True, requested=len(refs),
-                                    failed=len(refs) - len(out), why=f"auth_dead:{e}")
-        except GmailError as e:
-            failed.append(f"{ref['id']}:{e}")
-
-    return Fetched.measured(out, partial=bool(failed) or ids.partial, requested=len(refs),
-                            failed=len(failed), why=failed[:5],
-                            truncated=ids.meta.get("truncated"))
-
-
-def inbox_ids(*, days: int | None = None, limit: int | None = None) -> Fetched:
-    """인박스 메시지 번호만. 본문을 안 받으므로 싸다 — 실행 직전 대조에 쓴다.
-
-    🔴 페이지네이션을 한다. 안 하면 100통에서 **조용히 잘린다** —
-       `nextPageToken` 이 오는데 무시하면 "100통이 전부"와 "100통까지만 봤다"가
-       구별이 안 된다. 상한에 닿으면 partial 로 표시하고 넘긴 수를 남긴다.
-    """
-    days = days if days is not None else constraints.get("gmail.scan.lookback_days")
-    limit = limit if limit is not None else constraints.get("gmail.scan.max_results")
-
-    ids: list[str] = []
-    token = None
-    try:
-        while len(ids) < limit:
-            p = {"q": f"in:inbox newer_than:{days}d", "maxResults": min(500, limit - len(ids))}
-            if token:
-                p["pageToken"] = token
-            res = _get("/messages", params=p)
-            ids += [m["id"] for m in res.get("messages") or []]
-            token = res.get("nextPageToken")
-            if not token:
-                break
-    except AuthDead as e:
-        return Fetched.unknown(f"auth_dead:{e}")
-    except GmailError as e:
-        return Fetched.unknown(f"gmail:{e}")
-
-    # 상한에 닿았는데 아직 다음 장이 있다 = 우리가 못 본 메일이 있다
-    truncated = bool(token) and len(ids) >= limit
-    return Fetched.measured(ids[:limit], partial=truncated, truncated=truncated, limit=limit)
-
 
 def message(msg_id: str) -> Fetched:
     """메시지 하나를 정규화해 돌려준다. 초안의 인용문·헤더를 **실행 시점에** 다시 읽는 데 쓴다."""
@@ -396,7 +333,7 @@ def labels() -> Fetched:
 def search_ids(q: str, *, limit: int = 500) -> Fetched:
     """질의에 맞는 메시지 번호. 본문을 안 받으므로 싸다.
 
-    🔴 페이지네이션한다 — `inbox_ids` 와 같은 이유. 상한에 닿았는데 다음 장이 있으면
+    🔴 페이지네이션한다. 상한에 닿았는데 다음 장이 있으면
        partial 로 표시한다. "전부"와 "여기까지"를 구별하지 않으면 뒤쪽이 조용히 빠진다.
     """
     ids: list[str] = []
@@ -431,32 +368,6 @@ def headers_of(msg_id: str, names: list[str]) -> Fetched:
     h = {x["name"].lower(): x["value"] for x in (res.get("payload") or {}).get("headers") or []}
     return Fetched.measured({n: h.get(n.lower(), "") for n in names},
                             labels=res.get("labelIds") or [], thread_id=res.get("threadId"))
-
-
-def inbox_count() -> Fetched:
-    """인박스 개수를 **메일 수와 대화 수 둘 다** 준다 → {"messages": n, "threads": m}.
-
-    ## 🔴 왜 둘이 필요한가
-
-    Gmail 화면은 **대화** 수를 보여준다("1-31 of 31"). 우리는 **메일** 단위로 처리한다.
-    실측 2026-09-02: 인박스가 메일 34 · 대화 31 이었다. 3개 대화가 2통씩 들고 있었다.
-
-        Webflow forms   서로 **다른 사람**의 문의 2건인데 제목이 같아 한 대화로 묶였다
-                        → 대화 단위로 처리하면 한 명은 답을 못 받는다. 조용히
-        신희재Tony       **같은 사람**이 열흘 간격으로 두 번 보냈다
-                        → 둘 다 처리하면 같은 안내가 두 번 간다 (스레드 확인이 막는다)
-
-    처리는 메일이어야 하고, 보고는 대화여야 한다 — 사람이 화면에서 보는 수와 맞아야
-    "숫자가 왜 다르지"를 매번 다시 확인하지 않는다. 그래서 하나만 고르지 않고 둘 다 준다.
-    """
-    try:
-        res = _get("/labels/INBOX")
-    except AuthDead as e:
-        return Fetched.unknown(f"auth_dead:{e}")
-    except GmailError as e:
-        return Fetched.unknown(f"gmail:{e}")
-    return Fetched.measured({"messages": res.get("messagesTotal"),
-                             "threads": res.get("threadsTotal")})
 
 
 # ---------------------------------------------------------------- 쓰기 (발송은 없다)
@@ -567,15 +478,6 @@ def _draft(msg: dict, body: str, to: str, *, subject: str) -> Fetched:
     return Fetched.measured(did)
 
 
-def draft_new(to: str, subject: str, body: str) -> Fetched:
-    """원본 스레드가 없을 때의 새 초안. **보내지 않는다.**
-
-    비플랜 접수 알림이 메일함에 없는 건(2026-08-24 더플러스원 — 알림이 안 왔거나 영구 삭제)에
-    드랍 초안을 만들 때 쓴다. 답장이 아니라 In-Reply-To 도 threadId 도 없다.
-    """
-    return _draft({"thread_id": None, "message_id_header": None}, body, to, subject=subject)
-
-
 def draft_reply(msg: dict, body: str, to: str, subject: str | None = None) -> Fetched:
     """`subject` 를 주면 그걸 쓴다.
 
@@ -586,9 +488,3 @@ def draft_reply(msg: dict, body: str, to: str, subject: str | None = None) -> Fe
     """
     s = subject if subject is not None else (msg.get("subject") or "")
     return _draft(msg, body, to, subject=s if s.startswith("Re: ") else f"Re: {s}")
-
-
-def draft_forward(msg: dict, body: str, to: str) -> Fetched:
-    s = msg.get("subject") or ""
-    return _draft(msg, body + _quote(msg), to,
-                  subject=s if s.startswith("Fwd: ") else f"Fwd: {s}")

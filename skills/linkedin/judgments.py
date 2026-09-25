@@ -7,7 +7,8 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+
+from kvlib import ledger
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS judgments(
@@ -16,10 +17,6 @@ CREATE TABLE IF NOT EXISTS judgments(
   PRIMARY KEY(key, run));
 """
 LIVE, HUMAN = "live", "human"
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def criteria_sha(system: str, criteria: str) -> str:
@@ -35,7 +32,7 @@ def save(con, run: str, sha: str, lines: dict[str, str], verdicts: list[dict]) -
             "INSERT OR REPLACE INTO judgments(key,run,criteria_sha,input_text,raw_output,tier,reason,ok,error,page_id,created)"
             " VALUES(?,?,?,?,?,?,?,?,?,(SELECT page_id FROM judgments WHERE key=? AND run=?),?)",
             (key, run, sha, text, v.get("raw") if v else None, v.get("tier") if v else None, v.get("reason") if v else None,
-             1 if v else 0, None if v else "판정 누락", key, run, _now()))
+             1 if v else 0, None if v else "판정 누락", key, run, ledger.now()))
 
 
 def set_page(con, key: str, page_id: str) -> None:
@@ -54,7 +51,7 @@ def label(con, notion_rows: list[dict]) -> int:
         key, tier = hit
         if row["Tier"] != tier:
             con.execute("INSERT OR REPLACE INTO judgments(key,run,criteria_sha,input_text,raw_output,tier,reason,ok,error,page_id,created)"
-                        " VALUES(?,?,'','','',?,?,1,NULL,?,?)", (key, HUMAN, row["Tier"], "노션 Tier", row["_page_id"], _now()))
+                        " VALUES(?,?,'','','',?,?,1,NULL,?,?)", (key, HUMAN, row["Tier"], "노션 Tier", row["_page_id"], ledger.now()))
             n += 1
         else:
             con.execute("DELETE FROM judgments WHERE key=? AND run=?", (key, HUMAN))

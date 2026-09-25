@@ -64,10 +64,6 @@ CREATE TABLE IF NOT EXISTS judgments(
 """
 
 
-def _now(ago: timedelta = timedelta(0)) -> str:
-    return (datetime.now(timezone.utc) - ago).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def db_path() -> Path:
     return paths.data("mail", "db") / "mail.sqlite"
 
@@ -118,7 +114,7 @@ def collect(con, reader, *, days: int) -> dict:
             direction = "in"                                     # "Re: …접수된 사업계획서" 창업자 답장도 여기다
         con.execute("INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (m["id"], m["thread_id"], m["internal_date"], direction, sender, subject,
-                     cat, hit.get("why"), kind, json.dumps(m, ensure_ascii=False), _now()))
+                     cat, hit.get("why"), kind, json.dumps(m, ensure_ascii=False), ledger.now()))
         got += 1
     return {"listed": len(ids.require()), "stored": got, "failed": failed, "partial": ids.partial}
 
@@ -182,7 +178,7 @@ def _save(con, mid, run, sha, text, raw, p) -> None:
         " criteria_sha=excluded.criteria_sha,input_text=excluded.input_text,raw_output=excluded.raw_output,"
         " category=excluded.category,reason=excluded.reason,followup=excluded.followup,ok=excluded.ok,"
         " error=excluded.error,created=excluded.created",
-        (mid, run, sha, text, raw, p.get("category"), p.get("reason"), p.get("followup"), p["ok"], p.get("error"), _now()))
+        (mid, run, sha, text, raw, p.get("category"), p.get("reason"), p.get("followup"), p["ok"], p.get("error"), ledger.now()))
 
 
 def judge(con, llm, *, run: str, criteria: str, limit: int = -1) -> dict:
@@ -260,7 +256,7 @@ def _send_section(con, since: str) -> list[str]:
         return ["아직 없음"]
     rows = [{**dict(r), **json.loads(r["detail"])} for r in rows]    # detail 의 to·category·why·blocked 를 행에 편다
     out, p = [], constraints.get("gmail.promote")
-    floor = _now(timedelta(days=p["window_days"]))
+    floor = ledger.now(timedelta(days=p["window_days"]))
     cats = sorted({r.get("category") for r in rows if r["status"] != "skipped"})
     for cat in cats:
         ids = [r["message_id"] for r in rows if r["status"] != "skipped" and r["created"] >= floor
@@ -426,7 +422,7 @@ def main(a) -> int:
         print(status(con))
         return 0
     if a.op == "report":
-        md, _ = report(con, _now(timedelta(days=a.days or 1)))
+        md, _ = report(con, ledger.now(timedelta(days=a.days or 1)))
         out = paths.data("mail", "reports") / "latest.md"        # 날짜 파일은 아침 실행의 것이다 — 그게 있으면 슬랙 요약을 건너뛴다
         out.write_text(md, encoding="utf-8")
         print(md.split("## 전체")[0] + f"전체 표: {out}")
@@ -458,7 +454,7 @@ def main(a) -> int:
     with lock.hold("mail-observe"):
         if a.op == "decide":
             from . import flow
-            f = flow.Flow(con, str(db_path()), flow.RealIO(), now=_now, llm=llm)
+            f = flow.Flow(con, str(db_path()), flow.RealIO(), now=ledger.now, llm=llm)
             f.decide(a.id, a.decision, by="manual")
             print(f"✅ {a.id} = {a.decision} → " + ", ".join(f"{r[0]}:{r[1]}" for r in con.execute(
                 "SELECT kind, status FROM actions WHERE key=?", (a.id,))))
@@ -481,7 +477,7 @@ def main(a) -> int:
         rc = run_once(con, gmail, llm, days=a.days or constraints.get("mail_observe.lookback_days"),
                       max_judge=a.limit, no_judge=a.no_judge)
         from . import flow                                       # 판단 흐름. 밖으로 나가는 문은 그쪽에 있고 기본은 닫혀 있다
-        f = flow.Flow(con, str(db_path()), flow.RealIO(), now=_now, llm=llm)
+        f = flow.Flow(con, str(db_path()), flow.RealIO(), now=ledger.now, llm=llm)
         r = f.advance()
         f.close()
         if any(r.values()):
@@ -491,7 +487,7 @@ def main(a) -> int:
                   f" | 밖으로 나가는 문 {constraints.get('mail_observe.outbound')}")
         out = paths.data("mail", "reports") / f"{ledger.today()}.md"
         if not out.exists():                                     # 하루 한 번. 손으로 또 돌려도 슬랙에 다시 안 올린다
-            md, summary = report(con, _now(timedelta(hours=26)))
+            md, summary = report(con, ledger.now(timedelta(hours=26)))
             if r["stale"]:                                           # 🔴 리마인드가 끝났는데 답이 없다 — 기계가 더 할 게 없다. 사람이 봐야 한다
                 summary = f"⚠️ *답 없이 남은 질문 {r['stale']}건* — 리마인드 상한이 끝났습니다. 사람이 봐야 합니다.\n" + summary
             out.write_text(md, encoding="utf-8")

@@ -155,13 +155,6 @@ def fingerprint(item: dict) -> str:
     return f"{FP_VERSION}|{companies}|{titles}"
 
 
-def fp_comparable(old: str, new: str) -> bool:
-    """비교해도 되는 지문 쌍인가. 버전이 다르거나 비면 **비교 불가**(변화 아님)."""
-    if not old or not new:
-        return False
-    return old.split("|", 1)[0] == new.split("|", 1)[0] == FP_VERSION
-
-
 def summarize(item: dict) -> dict:
     """판정에 넣을 최소 정보."""
     ps = positions(item)

@@ -194,7 +194,7 @@ class Promotion(unittest.TestCase):
         for i in range(6):
             self.con.execute("INSERT INTO messages(id, subject) VALUES(?, ?)", (f"m{i}", "투자 문의"))
             self.con.execute("INSERT INTO actions VALUES(?, 'send', 'dry', ?, ?)",
-                             (f"m{i}", '{"to": "f@example.com", "category": "INBOUND_KO"}', observe._now()))
+                             (f"m{i}", '{"to": "f@example.com", "category": "INBOUND_KO"}', observe.ledger.now()))
 
     def line(self):
         return next(x for x in observe._send_section(self.con, "2000-01-01T00:00:00Z") if x.startswith("- `INBOUND_KO`"))

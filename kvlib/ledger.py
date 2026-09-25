@@ -45,8 +45,9 @@ class LedgerCorrupt(RuntimeError):
     """중간 줄이 깨졌다. 사람이 봐야 한다."""
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def now(ago: timedelta = timedelta(0)) -> str:
+    """UTC ISO 초 단위. 리포의 모든 기록 시각은 이 서식 하나다."""
+    return (datetime.now(timezone.utc) - ago).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _repair_torn_tail(p: Path) -> None:
@@ -71,7 +72,7 @@ def append(task: str, key: str, ev: str, **fields) -> None:
     """한 줄 추가. **매 줄 fsync** — 죽어도 적힌 것은 남는다."""
     p = paths.ledger(task)
     _repair_torn_tail(p)
-    row = {"ts": _now(), "key": str(key), "ev": ev, **fields}
+    row = {"ts": now(), "key": str(key), "ev": ev, **fields}
     with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
         f.flush()

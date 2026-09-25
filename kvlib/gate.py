@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import datetime, timezone
 
-from . import constraints
+from . import constraints, ledger
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS actions(
@@ -25,13 +24,9 @@ CREATE TABLE IF NOT EXISTS actions(
 """
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 class Gate:
     def __init__(self, con, task: str, is_slack: Callable[[str], bool] = lambda k: False, *,
-                 now: Callable[[], str] = _now, force: str | None = None):
+                 now: Callable[[], str] = ledger.now, force: str | None = None):
         self.con, self.task, self.is_slack, self.now, self.force = con, task, is_slack, now, force
         con.executescript(SCHEMA)
 
