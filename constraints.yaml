@@ -150,6 +150,13 @@ gmail:
   # 분류와 무관하게 **영원히** 사람이 보낸다. 무수정률이 100% 여도 승격 대상이 아니다.
   never_auto_send: [PARTNERSHIP_DECLINE, TRUSTED_REF, RECRUIT, IMPERSONATION]
 
+drive:
+  # 덱 읽기(kv_transport/drive.py). 시트와 같은 서비스계정, 스코프만 drive.readonly.
+  timeout_sec: 60              # 덱은 수 MB — 시트보다 넉넉히
+  max_bytes: 40000000          # 이보다 크면 안 받는다(40MB). 이미지 덩어리라 글자도 없다
+  min_text_chars: 200          # 이 미만이면 이미지 덱으로 본다 — "덱을 못 읽었다"를 사실로 넘긴다
+  pdftotext_timeout_sec: 60
+
 sheets:
   # 서비스계정 JWT 는 구글이 **최대 1시간**만 받는다. 더 길게 주면 invalid_grant.
   jwt_lifetime_sec: 3600

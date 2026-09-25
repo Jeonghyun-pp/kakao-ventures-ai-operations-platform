@@ -58,7 +58,7 @@ class AuthDead(SheetsError):
 
 # ---------------------------------------------------------------- 인증
 
-_token: dict = {}          # {"value": str, "expires_at": float}
+_token: dict = {}          # {scope: {"value": str, "expires_at": float}} — drive 통로가 다른 스코프로 같은 키를 쓴다
 
 
 def _service_account() -> dict:
@@ -82,7 +82,7 @@ def _b64url(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
 
 
-def _assertion(sa: dict) -> str:
+def _assertion(sa: dict, scope: str = _SCOPE) -> str:
     """RS256 JWT. 구글이 받는 건 이 형식 하나다."""
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
@@ -90,7 +90,7 @@ def _assertion(sa: dict) -> str:
     now = int(time.time())
     header = _b64url(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
     claims = _b64url(json.dumps({
-        "iss": sa["client_email"], "scope": _SCOPE, "aud": sa["token_uri"],
+        "iss": sa["client_email"], "scope": scope, "aud": sa["token_uri"],
         "iat": now, "exp": now + constraints.get("sheets.jwt_lifetime_sec"),
     }).encode())
     signing = f"{header}.{claims}".encode("ascii")
@@ -99,18 +99,19 @@ def _assertion(sa: dict) -> str:
     return f"{header}.{claims}.{_b64url(sig)}"
 
 
-def _access_token() -> str:
+def _access_token(scope: str = _SCOPE) -> str:
     """서비스계정 JWT → access_token. 만료 60초 전에 미리 바꾼다.
 
     🔴 상태코드로 성공을 판정하지 않는다. 필요한 건 access_token 문자열이다.
     """
     lead = constraints.get("sheets.token_refresh_lead_sec")
-    if _token and _token["expires_at"] - lead > time.time():
-        return _token["value"]
+    cur = _token.get(scope)
+    if cur and cur["expires_at"] - lead > time.time():
+        return cur["value"]
 
     sa = _service_account()
     try:
-        r = requests.post(sa["token_uri"], data={"grant_type": _GRANT, "assertion": _assertion(sa)},
+        r = requests.post(sa["token_uri"], data={"grant_type": _GRANT, "assertion": _assertion(sa, scope)},
                           timeout=constraints.get("http.timeout_sec"))
     except _NET_ERRORS as e:
         raise SheetsError(f"토큰 서버에 못 닿았다: {type(e).__name__}") from e
@@ -127,7 +128,7 @@ def _access_token() -> str:
             raise AuthDead(f"서비스계정 키가 거부됐다 ({err or r.status_code}) — "
                            f"키가 폐기됐거나 시계가 어긋났다. 자동으로 못 고친다.")
         raise SheetsError(f"토큰 발급 실패 {r.status_code}: {str(body)[:200]}")
-    _token.update(value=tok, expires_at=time.time() + float(body.get("expires_in") or 0))
+    _token[scope] = {"value": tok, "expires_at": time.time() + float(body.get("expires_in") or 0)}
     return tok
 
 

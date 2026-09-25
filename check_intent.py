@@ -33,6 +33,7 @@ TRANSPORTS = {
     "kv_transport/apify.py",
     "kv_transport/gmail.py",
     "kv_transport/sheets.py",
+    "kv_transport/drive.py",
 }
 # 외부 접촉 모듈
 NET_MODULES = {"requests", "urllib", "urllib3", "http", "socket", "httpx", "aiohttp"}
@@ -49,6 +50,7 @@ FIXTURE_FILES = {
 }
 
 SPAWN_ALLOWED = {
+    "kv_transport/drive.py": "pdftotext(poppler) — PDF 를 글로. 이 통로 밖에서 PDF 를 열지 않는다",
     "kv_transport/claude.py": "claude -p 통로. 이게 claude 를 부르는 유일한 자리다",
     "tools/mutation_test.py": "검사 러너. check_intent 를 자식 프로세스로 돌려야 한다",
     "schedule.py": "launchd 통로. launchctl 을 부르는 유일한 자리다",
