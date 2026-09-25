@@ -475,7 +475,9 @@ def db_path():
 
 
 def _gate(dry_run: bool = False) -> Gate:
-    return Gate(store.connect(db_path(), judgments.SCHEMA), "bplan", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
+    con = store.connect(db_path(), judgments.SCHEMA)
+    judgments.ensure(con)
+    return Gate(con, "bplan", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
 
 
 def _row_key(row: dict) -> str:
@@ -579,11 +581,17 @@ def _intake_mail(company: str) -> str | None:
     return (f.require() or [None])[0] if f.is_measured else None
 
 
-def _card_text(row: dict, j: dict) -> str:
-    card = json.loads(j["reason"]) if str(j["reason"]).startswith("{") else {"reason": j["reason"]}
+def _fields(reason: str, extra: str | None) -> dict:
+    """카드 문안(summary·team·risk)은 extra 열에. 09-26 오전 한때 reason 안에 JSON 으로 넣던 행도 읽는다."""
+    if extra:
+        return {"reason": reason, **json.loads(extra)}
+    return json.loads(reason) if str(reason).startswith("{") else {"reason": reason}
+
+
+def _card_text(row: dict, card: dict, verdict: str) -> str:
     pid = row["_page_id"].replace("-", "")
-    ask = "애매합니다 — 사람이 봐 주세요" if j["verdict"] == "?" else "볼 만합니다"
-    return (f"*{row.get('기업명')}*  `{j['verdict']}` · {ask}\n{card.get('summary', '')}\n"
+    ask = "애매합니다 — 사람이 봐 주세요" if verdict == "?" else "볼 만합니다"
+    return (f"*{row.get('기업명')}*  `{verdict}` · {ask}\n{card.get('summary', '')}\n"
             f"*팀* {card.get('team', '') or '미상'}\n*되는 이유* {card.get('reason', '')}\n*리스크* {card.get('risk', '')}\n"
             f"<https://www.notion.so/{pid}|노션> · <{row.get('사업계획서') or ''}|덱>\n\n_⭕ 미팅요청 · ❌ 드랍 · 🙋 내가 볼게_")
 
@@ -592,7 +600,7 @@ def act_all(g: Gate, rows: list[dict]) -> dict:
     """판정은 있는데 행동이 없는 접수 — 아직 `Newly Added` 인 것만. 심사역이 이미 움직인 행은 건드리지 않는다.
     전부 `Gate.out` 뒤: score(노션 점수·포워드 이유) · card(볼만·애매 → 슬랙 스레드) · draft(칼드랍·Red → 드랍 초안)."""
     by_page = {r["_page_id"]: r for r in rows if r.get(TODO_PROP) == NEW_TODO}
-    live = g.con.execute("SELECT key, verdict, reason, page_id FROM judgments WHERE run=? AND ok=1 AND page_id IS NOT NULL", (judgments.LIVE,)).fetchall()
+    live = g.con.execute("SELECT key, verdict, reason, page_id, extra FROM judgments WHERE run=? AND ok=1 AND page_id IS NOT NULL", (judgments.LIVE,)).fetchall()
     n = Counter()
     ch, parent = _cfg("card_channel"), {}
 
@@ -601,12 +609,11 @@ def act_all(g: Gate, rows: list[dict]) -> dict:
             parent["ts"] = slack.post(ch, f"*오늘의 비플랜* — 볼 만한 접수와 애마한 접수입니다. 스레드에서 ⭕ ❌ 🙋 로 알려 주세요").require()
         return parent["ts"]
 
-    for key, verdict, reason, pid in live:
+    for key, verdict, reason, pid, extra in live:
         row = by_page.get(pid)
         if not row:
             continue
-        j = {"verdict": verdict, "reason": reason}
-        card = json.loads(reason) if str(reason).startswith("{") else {"reason": reason}
+        card = _fields(reason, extra)
         if (g.row(key, "score") or {}).get("status") != "done":
             n["score"] += 1
             g.out(key, "score", {"verdict": verdict}, lambda pid=pid, v=verdict, c=card: notion.update(
@@ -618,7 +625,7 @@ def act_all(g: Gate, rows: list[dict]) -> dict:
                 continue
             n["card"] += 1
             g.out(key, "card", {"verdict": verdict, "company": row.get("기업명"), "ch": ch, "page_id": pid},
-                  lambda row=row, j=j: {"parent": head_ts(), "ts": slack.post(ch, _card_text(row, j), thread_ts=head_ts()).require()})
+                  lambda row=row, card=card, v=verdict: {"parent": head_ts(), "ts": slack.post(ch, _card_text(row, card, v), thread_ts=head_ts()).require()})
     return dict(n)
 
 

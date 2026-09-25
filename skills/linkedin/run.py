@@ -75,6 +75,7 @@ def _gate(dry_run: bool = False) -> Gate:
     con = store.connect(db_path(), judgments.SCHEMA)
     if "tier" in [r[1] for r in con.execute("PRAGMA table_info(judgments)")]:   # 09-25 하루짜리 열 이름 — kvlib 공용(verdict)으로
         con.execute("ALTER TABLE judgments RENAME COLUMN tier TO verdict")
+    judgments.ensure(con)
     return Gate(con, "linkedin", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
 
 

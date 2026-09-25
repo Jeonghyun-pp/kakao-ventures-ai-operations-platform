@@ -16,11 +16,18 @@ from . import ledger
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS judgments(
   key TEXT, run TEXT, criteria_sha TEXT, input_text TEXT, raw_output TEXT,
-  verdict TEXT, reason TEXT, ok INTEGER, error TEXT, page_id TEXT, created TEXT,
+  verdict TEXT, reason TEXT, ok INTEGER, error TEXT, page_id TEXT, created TEXT, extra TEXT,
   PRIMARY KEY(key, run));
 """
 LIVE, HUMAN = "live", "human"
-_COLS = "key,run,criteria_sha,input_text,raw_output,verdict,reason,ok,error,page_id,created"
+_COLS = "key,run,criteria_sha,input_text,raw_output,verdict,reason,ok,error,page_id,created,extra"
+
+
+def ensure(con) -> None:
+    """표를 만들고, 09-26 전에 만든 표엔 extra 열을 붙인다."""
+    con.executescript(SCHEMA)
+    if "extra" not in [r[1] for r in con.execute("PRAGMA table_info(judgments)")]:
+        con.execute("ALTER TABLE judgments ADD COLUMN extra TEXT")
 
 
 def criteria_sha(*parts: str) -> str:
@@ -29,18 +36,16 @@ def criteria_sha(*parts: str) -> str:
 
 def save(con, run: str, sha: str, lines: dict[str, str], verdicts: list[dict], *, extra: dict[str, dict] | None = None) -> None:
     """`lines` = {key: 모델이 본 글}. 판정을 못 받은 key 도 ok=0 으로 남긴다 — 입력은 값이 있다.
-    `verdicts` 항목 = {key, verdict, reason, raw}. `extra[key]` 는 reason 뒤에 붙일 부가 출력(카드 문안 등)을 JSON 으로."""
+    `verdicts` 항목 = {key, verdict, reason, raw}. `extra[key]` 는 점수 밖의 부가 출력(카드 문안 등) — JSON 으로 extra 열에."""
     import json
     got = {v["key"]: v for v in verdicts}
     for key, text in lines.items():
         v = got.get(key)
-        reason = v.get("reason") if v else None
-        if v and extra and extra.get(key):
-            reason = json.dumps({"reason": reason, **extra[key]}, ensure_ascii=False)
         con.execute(
-            f"INSERT OR REPLACE INTO judgments({_COLS}) VALUES(?,?,?,?,?,?,?,?,?,(SELECT page_id FROM judgments WHERE key=? AND run=?),?)",
-            (key, run, sha, text, v.get("raw") if v else None, v.get("verdict") if v else None, reason,
-             1 if v else 0, None if v else "판정 누락", key, run, ledger.now()))
+            f"INSERT OR REPLACE INTO judgments({_COLS}) VALUES(?,?,?,?,?,?,?,?,?,(SELECT page_id FROM judgments WHERE key=? AND run=?),?,?)",
+            (key, run, sha, text, v.get("raw") if v else None, v.get("verdict") if v else None, v.get("reason") if v else None,
+             1 if v else 0, None if v else "판정 누락", key, run, ledger.now(),
+             json.dumps(extra[key], ensure_ascii=False) if v and extra and extra.get(key) else None))
 
 
 def set_page(con, key: str, page_id: str) -> None:
@@ -49,7 +54,7 @@ def set_page(con, key: str, page_id: str) -> None:
 
 def label(con, rows: list[dict], prop: str, to_label: Callable[[str], str | None] = lambda v: v,
           same: Callable[[str, str], bool] = lambda live, human: live == human) -> int:
-    """노션 행의 `prop` 값이 사람의 결정이다. live 와 다르면 human 으로 적고, 같아지면 지운다.
+    """노션 행의 `prop` 값이 사람의 결정이다 — 결정이 있는 행은 **전부** human 으로 적는다(같아도). 일치율의 분모가 그것이다.
     `to_label` 은 칸 값을 정답 어휘로(None 이면 미결 — 건드리지 않는다). `same` 은 live 판정과 정답이 같은가.
     돌려주는 값 = 지금 갈린 건수."""
     live = {pid: (key, verdict) for key, verdict, pid in con.execute(
@@ -63,12 +68,9 @@ def label(con, rows: list[dict], prop: str, to_label: Callable[[str], str | None
         if human is None:
             continue
         key, verdict = hit
-        if not same(verdict, human):
-            con.execute(f"INSERT OR REPLACE INTO judgments({_COLS}) VALUES(?,?,'','','',?,?,1,NULL,?,?)",
-                        (key, HUMAN, human, f"노션 {prop}", row["_page_id"], ledger.now()))
-            n += 1
-        else:
-            con.execute("DELETE FROM judgments WHERE key=? AND run=?", (key, HUMAN))
+        con.execute(f"INSERT OR REPLACE INTO judgments({_COLS}) VALUES(?,?,'','','',?,?,1,NULL,?,?,NULL)",
+                    (key, HUMAN, human, f"노션 {prop}", row["_page_id"], ledger.now()))
+        n += int(not same(verdict, human))
     return n
 
 

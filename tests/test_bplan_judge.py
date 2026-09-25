@@ -51,9 +51,9 @@ class Judge(unittest.TestCase):
         r = run.judge_rows(self.c, [ROW], [ROW], llm=lambda crit, data: seen.append((crit, data)) or GOOD, deck=lambda u: Fetched.measured("", why="텍스트 없음"))
         self.assertEqual((r["judged"], r["invalid"], r["stopped"]), (1, 0, None))
         self.assertTrue(seen[0][0].startswith("# 비플랜 1차 스크리닝 기준"))                   # 기준은 호출 때 앞에
-        row = self.c.execute("SELECT key, verdict, reason, page_id, input_text FROM judgments").fetchone()
-        self.assertEqual((row[0], row[1], row[3]), ("a@x.com|2026-09-20T15:00:00", "Orange", "p1"))
-        self.assertEqual(json.loads(row[2])["summary"], "B2B SaaS")                              # 카드 문안은 reason 에 JSON 으로
+        row = self.c.execute("SELECT key, verdict, reason, page_id, input_text, extra FROM judgments").fetchone()
+        self.assertEqual((row[0], row[1], row[2], row[3]), ("a@x.com|2026-09-20T15:00:00", "Orange", "이 팀은 특허 때문에 볼 만합니다", "p1"))
+        self.assertEqual(json.loads(row[5])["summary"], "B2B SaaS")                              # 카드 문안은 extra 열에
         self.assertIn("덱: 텍스트 없음", row[4])
 
     def test_bad_output_is_saved_as_not_ok_and_llm_failure_stops(self):
@@ -75,7 +75,8 @@ class Judge(unittest.TestCase):
 
     def test_label_uses_partner_todo_and_buckets(self):
         run.judge_rows(self.c, [ROW], [ROW], llm=lambda c, d: GOOD, deck=lambda u: Fetched.measured(""))   # Orange → keep
-        self.assertEqual(run.label(self.c, [{**ROW, "to do": "미팅요청"}]), 0)                     # keep = keep → 갈림 아님
+        self.assertEqual(run.label(self.c, [{**ROW, "to do": "미팅요청"}]), 0)                     # keep = keep → 갈림 아님(정답은 적힌다)
+        self.assertEqual(self.c.execute("SELECT verdict FROM judgments WHERE run='human'").fetchone()[0], "keep")
         self.assertEqual(run.label(self.c, [{**ROW, "to do": "To Drop"}]), 1)                    # 심사역은 드랍 → 갈림
         self.assertEqual(self.c.execute("SELECT verdict FROM judgments WHERE run='human'").fetchone()[0], "drop")
         self.assertEqual(run.label(self.c, [{**ROW, "to do": "Review Done"}]), 0)                # 미결은 건드리지 않는다(human 은 남음)

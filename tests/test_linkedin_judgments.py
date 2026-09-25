@@ -26,8 +26,8 @@ class Judgments(unittest.TestCase):
         judgments.set_page(c, "a", "p1")
         self.assertEqual(judgments.label(c, [{"_page_id": "p1", "Tier": "Cut"}], "Tier"), 1)         # 사람이 Cut 으로 고쳤다
         self.assertEqual(c.execute("SELECT verdict FROM judgments WHERE run='human'").fetchone()[0], "Cut")
-        self.assertEqual(judgments.label(c, [{"_page_id": "p1", "Tier": "Catch"}], "Tier"), 0)       # 되돌리면 정답도 사라진다
-        self.assertEqual(c.execute("SELECT count(*) FROM judgments WHERE run='human'").fetchone()[0], 0)
+        self.assertEqual(judgments.label(c, [{"_page_id": "p1", "Tier": "Catch"}], "Tier"), 0)       # 되돌리면 갈림 0 — 정답(Catch)은 남는다
+        self.assertEqual(c.execute("SELECT verdict FROM judgments WHERE run='human'").fetchone()[0], "Catch")
         self.assertEqual(judgments.label(c, [{"_page_id": "없는", "Tier": "Cut"}], "Tier"), 0)        # 모르는 행은 무시
 
     def test_replay_uses_stored_lines_and_diff_shows_the_gap(self):
