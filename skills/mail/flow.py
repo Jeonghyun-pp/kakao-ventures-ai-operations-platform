@@ -72,7 +72,7 @@ class State(TypedDict, total=False):
 def mention(text: str) -> str:
     """본문에 이름이 불린 사람. 슬랙 ID 가 있으면 핑, 없으면 이름만.
 
-    🔴 호칭이 붙어야 지명이다(`rules._NAME_MARKER` 와 같은 이유 — 'ch«reviewer-three»l' 오탐). 메일 주소는 호칭이 필요 없다.
+    🔴 호칭이 붙어야 지명이다('ch«reviewer-three»l' 오탐 · 2026-08-16 오탐 4건. 부분일치로 되돌리지 마라). 메일 주소는 호칭이 필요 없다.
     """
     out = []
     for p in yaml.safe_load(PEOPLE.read_text(encoding="utf-8")) or []:

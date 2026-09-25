@@ -54,13 +54,13 @@ class Decide(unittest.TestCase):
 
     def test_partnership_forward_plus_decline(self):
         act = decide(rules.PARTNERSHIP)
-        self.assertEqual((act["action"], act["to"]), ("forward", route.SLACK_BPLAN))
+        self.assertEqual(act["action"], "forward")
         self.assertEqual(act["also_reply"]["to"], "a@example.com")
         self.assertEqual(act["also_reply"]["body"], route.tpl("partnership_decline"))
 
     def test_unknown_forwards_to_shared_inbox(self):
         act = decide(rules.UNKNOWN)
-        self.assertEqual((act["action"], act["to"], act["unknown"]), ("forward", route.SLACK_BPLAN, True))
+        self.assertEqual((act["action"], act["unknown"]), ("forward", True))
 
     def test_unlisted_category_falls_through_to_unknown_forward(self):
         self.assertTrue(decide("NOT_A_CATEGORY")["unknown"])
@@ -68,24 +68,6 @@ class Decide(unittest.TestCase):
     def test_webflow_without_address_escalates(self):
         act = decide(rules.WEBFLOW, body="문의 유형 : 기타 문의\n주소 없음\n")
         self.assertEqual(act["action"], "escalate")
-
-
-class NamedOverride(unittest.TestCase):
-    def test_overrides_only_three_categories(self):
-        m = msg(body="리뷰어일님께 전달 부탁드립니다")
-        for cat in (rules.EVENT_SPEAKER, rules.PARTNERSHIP, rules.UNKNOWN):
-            act = route.apply_named_partner(m, cat, route.decide(m, {"category": cat, "why": ""}))
-            self.assertEqual(act["action"], "slack", cat)
-            self.assertIn("ping", act, cat)
-        for cat in (rules.RECRUIT, rules.IMPERSONATION, rules.INBOUND_KO):
-            base = route.decide(m, {"category": cat, "why": ""})
-            self.assertEqual(route.apply_named_partner(m, cat, base), base, cat)
-
-    def test_no_slack_id_pings_by_name(self):
-        m = msg(body="리뷰어일님께")
-        act = route.apply_named_partner(m, rules.UNKNOWN, route.decide(m, {"category": rules.UNKNOWN, "why": ""}))
-        self.assertFalse(act["ping"].startswith("<@"))
-        self.assertIn("슬랙 ID 미등록", act["note"])
 
 
 class BodyChunks(unittest.TestCase):

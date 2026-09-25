@@ -78,9 +78,10 @@ class Recorded(unittest.TestCase):
             if r["deduped"]:
                 continue          # 수신자 중복으로 사후에 바뀐 행 — test_mail_route 가 따로 잰다
             m = {"id": "x", "thread_id": "t", "subject": r["subject"], "sender": r["sender"], "body": ""}
-            act = route.apply_named_partner(
-                m, r["category"], route.decide(m, {"category": r["category"], "why": r["why"]}))
+            act = route.decide(m, {"category": r["category"], "why": r["why"]})
             for k in COMPARE:
+                if act.get("action") == "forward" and k in ("to", "body"):
+                    continue                                       # 포워드는 이제 메일 초안이 아니라 슬랙 게시다 — 수신 주소·본문이 없다
                 self.assertEqual(act.get(k), r["expect"].get(k), f"{k} · {r['category']} · {r['subject'][:30]}")
             n += 1
         self.assertGreater(n, 100)

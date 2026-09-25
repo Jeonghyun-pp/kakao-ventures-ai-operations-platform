@@ -34,9 +34,7 @@ from . import rules
 
 _TPL = Path(__file__).resolve().parent / "templates"
 
-ASSIGNEE = "에반"
 GOOGLE_FORM = "https://forms.gle/EXAMPLE_FORM_6c44ce733004"
-SLACK_BPLAN = "person-43d35afbd5dc@example.com"   # #Squad-비플랜 (메일 포워드용)
 
 # 🔴 슬랙 게시 대상 채널 키. 지금은 test(review-test) 고, 실채널은 사람이 지시할 때만.
 POST_CH = "test"
@@ -44,7 +42,6 @@ slack.register("test",  "C000E8E4F75")     # review_test
 slack.register("bplan", "C0000AEB349")     # #Squad-비플랜 — 봇 초대 필요
 
 # 🔴 분류가 무엇이든, 무수정률이 얼마든 **영원히** 사람이 보낸다.
-NEVER_AUTO_SEND = tuple(constraints.get("gmail.never_auto_send"))
 
 
 def tpl(name: str, **kw) -> str:
@@ -164,14 +161,10 @@ def body_chunks(msg: dict) -> list[str]:
             for i, c in enumerate(out, 1)]
 
 
-def _fwd(note: str) -> str:
-    return tpl("fwd_intro", assignee=ASSIGNEE, note=note)
-
-
 def _webflow(msg: dict) -> dict:
     """웹플로우 폼인데 **문의자 주소를 본문에서 못 찾은** 경우. 여기 오는 건 그것뿐이다.
 
-    주소를 찾은 폼은 `run.plan()` 이 문의자가 보낸 메일로 바꿔 claude 에게 넘긴다(2026-09-02) — 유형별 분기는
+    주소를 찾은 폼은 `observe.collect()` 가 문의자가 보낸 메일로 바꿔 모델에게 넘긴다(2026-09-02) — 유형별 분기는
     그날부터 도달하지 않아 걷어냈다(2026-09-21). 그 분기들에 있던 결정은 SKILL.md '웹플로우 문의 유형별 결정'에 옮겼다.
     🔴 no-reply 주소로는 **절대 답장하지 않는다**(550 반송). 주소를 추측하지도 않는다 — 사람에게 올린다.
     """
@@ -250,8 +243,7 @@ def decide(msg: dict, hit: dict) -> dict:
 
     if cat == rules.PARTNERSHIP:
         # 슬랙 공유가 먼저, 거절 회신은 사람이 확인한 뒤에. 순서를 사람이 지킨다.
-        return {"action": "forward", "to": SLACK_BPLAN,
-                "body": _fwd("제휴/협력 제안이 와서 포워드 드립니다."),
+        return {"action": "forward",
                 "note": "제휴 제안 → #Squad-비플랜 (거절 초안 동봉)  🔴 영원히 수동",
                 "also_reply": {"to": msg["sender"], "body": tpl("partnership_decline"),
                                "note": "제휴 거절 회신 초안"}}
@@ -282,39 +274,7 @@ def decide(msg: dict, hit: dict) -> dict:
         #    오탐이 이제 조용히 사라지므로 rules.py 에서 넓은 힌트 둘을 뺐다.
         return {"action": "archive", "note": "사칭 확인 문의 — 회신 없이 아카이빙"}
 
-    return {"action": "forward", "to": SLACK_BPLAN,
-            "body": _fwd("분류가 애매한 메일이 있어 포워드 드립니다."),
+    return {"action": "forward",
             "note": "분류 애매 → #Squad-비플랜", "unknown": True}
 
 
-# 지명이 덮어쓸 수 있는 카테고리. 채용·사칭은 지명이 있어도 아카이빙으로 남는다.
-_OVERRIDABLE = (rules.EVENT_SPEAKER, rules.PARTNERSHIP, rules.UNKNOWN)
-
-
-def apply_named_partner(msg: dict, cat: str, act: dict) -> dict:
-    """심사역이 지명됐으면 **슬랙방에 핑을 찍어** 올린다.
-
-    🔴 [사용자 결정 2026-08-18] 그 사람 메일함으로 보내지 않는다. 슬랙방에 올리고
-       핑만 찍는다 — 남의 메일함에 넣는 것보다 되돌리기 쉽고, 다른 심사역도 본다.
-    🔴 채용·사칭은 못 덮는다. 이름이 적혀 있어도 회신 없이 아카이빙한다.
-    """
-    if cat not in _OVERRIDABLE:
-        return act
-    addr = rules.find_named_partner(msg)
-    if not addr:
-        return act
-    uid = rules.PARTNER_SLACK.get(addr) or ""
-    # 🔴 ID 를 모르면 핑 없이 이름만 적는다. 조용히 넘어가지 않고 note 에 남긴다.
-    ping = f"<@{uid}>" if uid else f"*{addr}*"
-    lead = f"{addr} 심사역님 앞으로 온 메일입니다."
-    return {**act, "action": "slack", "ch": POST_CH,
-            "kind": act.get("kind") or "named",
-            "lead": lead, "ping": ping,
-            "text": _post_text(msg, lead, act.get("ask", ""), ping=ping),
-            "note": f"심사역 지명 → #Squad-비플랜" + ("" if uid else "  ⚠️ 슬랙 ID 미등록 — 핑 없이 이름만")}
-
-
-def rebuild_post(msg: dict, act: dict, summary: str) -> str:
-    """요약을 받아 맨 위 글을 다시 만든다. 재료(`lead`·`ask`·`ping`)는 `decide` 가 남겨둔다."""
-    return _post_text(msg, act.get("lead", ""), act.get("ask", ""),
-                      act.get("ping", ""), summary=summary)

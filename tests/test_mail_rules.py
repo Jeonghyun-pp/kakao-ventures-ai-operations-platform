@@ -90,31 +90,6 @@ class RuleOrder(unittest.TestCase):
         self.assertEqual(hit["category"], rules.AD_NOISE)
 
 
-class NamedPartner(unittest.TestCase):
-    """호칭이 붙어야 지명이다. 부분일치로 되돌리지 마라(2026-08-16 오탐 4건)."""
-
-    def test_address_in_body(self):
-        self.assertEqual(rules.find_named_partner(msg(body="cc reviewer-one@example.vc")),
-                         "reviewer-one@example.vc")
-
-    def test_korean_name_with_honorific(self):
-        self.assertEqual(rules.find_named_partner(msg(body="리뷰어일님께 전달 부탁드립니다")),
-                         "reviewer-one@example.vc")
-
-    def test_at_mention(self):
-        self.assertEqual(rules.find_named_partner(msg(subject="@reviewer-three 확인 부탁")),
-                         "reviewer-three@example.vc")
-
-    def test_substring_inside_word_does_not_match(self):
-        for text in ("Clannect 서비스 소개", "channel partner program", "제로넥스 제안", "jaded investors"):
-            self.assertEqual(rules.find_named_partner(msg(subject=text)), "", text)
-
-    def test_real_name_is_not_in_roster_known_defect(self):
-        """🔴 알려진 결함: 명단이 닉네임 4명뿐이라 실명·직함 지목은 전부 놓친다.
-        2026-08-17~09-21 전 기간 발동 0회."""
-        self.assertEqual(rules.find_named_partner(msg(subject="홍길동 심사역님 연사 참여 요청")), "")
-
-
 WEBFLOW_BODY = (
     "문의 유형 : 투자 문의\n"
     "이메일 : founder@example.com\n"
@@ -140,17 +115,6 @@ class Webflow(unittest.TestCase):
     def test_fallback_skips_webflow_and_kakao_addresses(self):
         body = "문의 유형 : 기타 문의\nno-reply-forms@webflow.com\ndeals@example.vc\nreal@example.org\n"
         self.assertEqual(rules.parse_webflow(body)["reply_to"], "real@example.org")
-
-    def test_as_message_rewrites_sender_to_inquirer(self):
-        alt = rules.webflow_as_message(msg(sender="no-reply-forms@webflow.com", body=WEBFLOW_BODY,
-                                           list_unsubscribe=True, recipient_count=3))
-        self.assertEqual(alt["sender"], "founder@example.com")
-        self.assertEqual(alt["subject"], "투자 검토 요청")
-        self.assertEqual((alt["recipient_count"], alt["list_unsubscribe"]), (1, False))
-        self.assertEqual(alt["webflow_kind"], "투자 문의")
-
-    def test_as_message_none_when_no_address(self):
-        self.assertIsNone(rules.webflow_as_message(msg(body="문의 유형 : 기타 문의\n주소 없음\n")))
 
 
 if __name__ == "__main__":
