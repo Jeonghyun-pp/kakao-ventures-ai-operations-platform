@@ -33,7 +33,7 @@ class GateLevels(unittest.TestCase):
         self.assertEqual(c.acts()[("in/aaa", "card")], "done")
         ap = Apify([{"id": "a"}])
         with Case(notion=Notion({run.DB: []}), cfg={"linkedin.outbound": "slack"}, apify=ap, _backlog=lambda: 0, _summary=summary,
-                  **{**AX, "judge.judge_people": lambda cards: Fetched.measured([])}) as c2:
+                  **{**AX, "judge.judge_people": lambda cards, **kw: Fetched.measured([])}) as c2:
             run.collect()
         self.assertEqual((ap.calls, c2.notion.created), (0, []))                             # 🔴 돈은 안 나간다
         self.assertEqual(c2.acts()[(f"ax/p1/{ledger.today()}", "buy")], "dry")
@@ -41,10 +41,12 @@ class GateLevels(unittest.TestCase):
     def test_on_buys_lands_and_records_done(self):
         ap = Apify([{"id": "a"}])
         with Case(notion=Notion({run.DB: []}), apify=ap, _backlog=lambda: 0, _summary=summary,
-                  **{**AX, "judge.judge_people": lambda cards: Fetched.measured([{"key": "a", "tier": "Wait", "reason": "r"}])}) as c:
+                  **{**AX, "judge.judge_people": lambda cards, **kw: Fetched.measured([{"key": "a", "tier": "Wait", "reason": "r"}])}) as c:
             run.collect()
         self.assertEqual(c.acts(), {(f"ax/p1/{ledger.today()}", "buy"): "done", ("a", "land"): "done"})
         self.assertEqual(len(c.notion.created), 1)
+        j = c.db.execute("SELECT run, tier, ok, page_id, input_text!='' FROM judgments WHERE key='a'").fetchone()
+        self.assertEqual(j, ("live", "Wait", 1, "pg-1", 1))                                   # 판정이 입력 줄·노션 행과 함께 저장됐다
 
     def test_promote_is_dry_below_on(self):
         with Case(notion=Notion({run.DB: [row("p1")], run.EARLY: []}), slack=Slack({"par": [{"ts": "m1", "reactions": [YES]}]}),

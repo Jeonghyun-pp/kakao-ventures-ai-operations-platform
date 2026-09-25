@@ -30,19 +30,34 @@ def _line(p: dict) -> str:
     ))
 
 
-def judge_people(people: list[dict]) -> Fetched:
-    """반환 [{key, tier, reason}]. 한 줄씩 되읽어 검증하고 어긋난 줄만 DLQ 로."""
-    criteria = (Path(__file__).parent / "criteria.md").read_text(encoding="utf-8")
-    valid = {p["key"] for p in people}
+CRITERIA = Path(__file__).parent / "criteria.md"
+
+
+def criteria_text() -> str:
+    return CRITERIA.read_text(encoding="utf-8")
+
+
+def sha(criteria: str) -> str:
+    from . import judgments
+    return judgments.criteria_sha(_SYSTEM, criteria)
+
+
+def judge_people(people: list[dict], *, criteria: str | None = None) -> Fetched:
+    """반환 [{key, tier, reason, raw}]. 한 줄씩 되읽어 검증하고 어긋난 줄만 DLQ 로."""
+    return judge_lines([_line(p) for p in people], {p["key"] for p in people}, criteria or criteria_text())
+
+
+def judge_lines(lines: list[str], valid: set[str], criteria: str) -> Fetched:
+    """모델이 보는 것은 **줄**이다 — collect 가 만든 줄이든 judgments 에 저장된 줄이든 같다(replay 가 그걸 쓴다)."""
     good, bad, drift = [], [], []
 
-    for i in range(0, len(people), BATCH):
-        chunk = people[i:i + BATCH]
+    for i in range(0, len(lines), BATCH):
+        chunk = lines[i:i + BATCH]
         prompt = (
             f"{criteria}\n\n"
             f"# 판정 대상 {len(chunk)}명\n"
             "형식: key⇥축⇥이름⇥회사⇥직함⇥재직개월⇥창업개월⇥공백개월⇥학부시작연도⇥헤드라인⇥소개\n"
-            + "\n".join(_line(p) for p in chunk)
+            + "\n".join(chunk)
             + f"\n\n# 출력\n정확히 {len(chunk)}줄. `key<TAB>Tier<TAB>이유 한 문장`.\n"
         )
         try:
@@ -76,7 +91,7 @@ def judge_people(people: list[dict]) -> Fetched:
                 if ti != 1:
                     drift.append(ti)          # 예상 위치가 아니었다 — 조용히 넘기지 않는다
                 good.append({"key": key, "tier": parts[ti],
-                             "reason": " ".join(parts[ti + 1:]).strip()})
+                             "reason": " ".join(parts[ti + 1:]).strip(), "raw": line})
 
     if drift:
         print(f"  ⚠️  Tier 가 예상 위치(2번째)가 아닌 줄 {len(drift)}개 — 값으로 찾아 흡수했다. "

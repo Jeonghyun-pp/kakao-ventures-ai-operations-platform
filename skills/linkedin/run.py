@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import sys
 import uuid
+from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
 import yaml
@@ -26,7 +27,7 @@ from kvlib import Fetched, constraints, ledger, lock, paths, store
 from kvlib.gate import Gate
 from kv_transport import apify, notion, slack
 
-from . import axes, brief, judge, outreach, profile
+from . import axes, brief, judge, judgments, outreach, profile
 
 TASK = "linkedin"
 DB = "ch_링크드인"
@@ -71,7 +72,7 @@ def db_path():
 
 def _gate(dry_run: bool = False) -> Gate:
     """--dry-run 은 이 실행만 문을 내리는 것이다(force="off"). 장부(ledger)는 문 밖 — 한 일의 기록이라 dry 면 쓰지 않는다."""
-    return Gate(store.connect(db_path(), ""), "linkedin", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
+    return Gate(store.connect(db_path(), judgments.SCHEMA), "linkedin", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
 
 
 def _reviewers() -> dict[str, str]:
@@ -226,7 +227,11 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
 
     # ---- 판정 (배치 1회)
     cards = [_summary(v) for v in fresh.values()]
-    verdicts = judge.judge_people(cards)
+    crit = judge.criteria_text()
+    verdicts = judge.judge_people(cards, criteria=crit)
+    # 🔴 사람별로 저장한다 — 모델이 본 줄과 낸 줄. 기준을 고치면 replay 로 다시 잰다 (판정 못 받은 사람도 ok=0 으로 남는다)
+    judgments.save(g.con, judgments.LIVE, judge.sha(crit), {c["key"]: judge._line(c) for c in cards},
+                   verdicts.require() if verdicts.is_measured else [])
     if not verdicts.is_measured:
         print(f"🔴 판정 실패: {verdicts.reason} — 산 사람은 아카이브에 있으니 다시 판정할 수 있다")
         return 1
@@ -254,6 +259,7 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
                 print(f"  ✗ {k} 착지 실패: {g.row(k, 'land')['error']}")
             continue
         page_id = g.row(k, "land")["result"]
+        judgments.set_page(g.con, k, page_id)                        # 노션 Tier(사람 정답)와 이어 준다
         ledger.append(TASK, k, ledger.LANDED, page_id=page_id, run=run_id,
                       keys=item.get("_keys") or [k],      # 별칭 전부 — 다음에 어느 쪽으로 와도 잡힌다
                       axis=item["_axis"], tier=v["tier"], name=_summary(item)["name"])
@@ -353,6 +359,9 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
         print(f"🔴 노션을 못 읽었다: {f.reason}")
         return 1
     rows = f.require()
+    n_human = judgments.label(g.con, rows)                           # 노션에서 고쳐진 Tier 가 곧 정답 — 매일 여기서 동기화
+    if n_human:
+        print(f"· 사람이 노션에서 고친 Tier {n_human}명 — judgments(human) 에 반영")
 
     # 🔴 **이미 본 사람은 안 쏜다.** 카드는 "새로 볼 사람"을 올리는 자리다.
     #    ① 극초기 DB 에 이미 있는 사람 — `링크` 칸이 링크드인 프로필 URL 이다(803/1,303행)
@@ -874,6 +883,10 @@ def main(argv: list[str] | None = None) -> int:
     fu = sub.add_parser("followup", help="✅ 를 걷어 콜드 메시지 초안을 스레드에 올린다")
     fu.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
+    rp = sub.add_parser("replay", help="고친 기준으로 저장된 사람을 다시 판정 (돈 0 · 노션 0)")
+    rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
+    df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
+    sub.add_parser("label", help="노션 Tier 를 읽어 live 와 다른 사람을 human 으로")
     a = p.parse_args(argv)
     try:
         if a.cmd == "collect":
@@ -891,6 +904,28 @@ def main(argv: list[str] | None = None) -> int:
             if rc and not a.dry_run:
                 _alert("followup", f"종료코드 {rc} — ✅ 를 걷거나 초안을 올리지 못했다")
             return rc
+        if a.cmd == "replay":
+            crit = Path(a.criteria).read_text(encoding="utf-8") if a.criteria else judge.criteria_text()
+            r = judgments.replay(_gate().con, judge.judge_lines, crit, judge.sha(crit), limit=a.limit)
+            print(f"replay {r['run']}: 판정 {r['judged']} · 누락 {r['missing']}" + (f" · 🔴 {r['error']}" if r.get("error") else "")
+                  + f"\n  다음: linkedin diff --b {r['run']}")
+            return 0
+        if a.cmd == "diff":
+            rows = judgments.diff(_gate().con, a.a, a.b)
+            for r in rows:
+                if r["a"] != r["b"]:
+                    print(f"  {r['a']:6} → {r['b']:6} 정답={r['human'] or '-':6} {r['key']}")
+            lab = [r for r in rows if r["human"]]
+            print(f"{a.a} ↔ {a.b}: 비교 {len(rows)}명 · 갈림 {sum(r['a'] != r['b'] for r in rows)}명"
+                  + (f" | 정답 {len(lab)}명 중 일치 {a.a}={sum(r['a'] == r['human'] for r in lab)} · {a.b}={sum(r['b'] == r['human'] for r in lab)}" if lab else ""))
+            return 0
+        if a.cmd == "label":
+            f = notion.query(notion.writable_id(DB), ["Tier"])
+            if not f.is_measured:
+                print(f"🔴 노션을 못 읽었다: {f.reason}")
+                return 1
+            print(f"· 노션 Tier 가 live 와 다른 사람 {judgments.label(_gate().con, f.require())}명 → human")
+            return 0
         if a.cmd == "status":
             print(ledger.summary(TASK))
             print(f"  재고(아직 안 나간 사람) {_backlog()}명 / 임계 {_cfg('backlog_cap')}")

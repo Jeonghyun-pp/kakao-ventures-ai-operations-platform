@@ -13,7 +13,7 @@ import sqlite3
 from kvlib import Fetched, ledger
 from kvlib.gate import Gate
 from kv_transport import notion as _notion
-from skills.linkedin import run
+from skills.linkedin import judgments, run
 
 THU = date(2026, 9, 24)      # 목요일
 SAT = date(2026, 9, 26)
@@ -98,6 +98,7 @@ class Case:
         self._stack.enter_context(mock.patch.object(run.constraints, "get", lambda k: self.cfg[k] if k in self.cfg else real(k)))
         self._stack.enter_context(mock.patch.object(run, "_reviewers", lambda: {"U1": "Reviewer A"}))
         self.db = sqlite3.connect(":memory:")
+        self.db.executescript(judgments.SCHEMA)
         self._stack.enter_context(mock.patch.object(run, "_gate", lambda dry_run=False: Gate(
             self.db, "linkedin", lambda k: k in run.SLACK_KINDS, force="off" if dry_run else None)))
         for k, v in self.more.items():                            # "brief.write" → run.brief.write · "PROMOTE_ENABLED" → run.PROMOTE_ENABLED

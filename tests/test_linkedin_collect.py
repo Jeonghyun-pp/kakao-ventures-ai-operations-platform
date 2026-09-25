@@ -32,7 +32,7 @@ def case(items, judged, **more):
                "axes.AXES": {"ax": {"every_days": 7, "pages": 1, "rewind": False, "payload": {}}},
                "axes.payload": lambda a, p: {}, "axes.reject": lambda a, it: it.get("_bad", ""),
                "profile.match_keys": lambda it: [it["id"]],
-               "judge.judge_people": lambda cards: Fetched.measured([{"key": c["key"], "tier": judged[c["key"]], "reason": "r"}
+               "judge.judge_people": lambda cards, **kw: Fetched.measured([{"key": c["key"], "tier": judged[c["key"]], "reason": "r"}
                                                                      for c in cards if c["key"] in judged])}
     patches.update(more)
     return Case(notion=Notion({run.DB: []}), **patches), ap
