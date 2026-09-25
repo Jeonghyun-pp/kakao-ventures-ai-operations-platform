@@ -53,7 +53,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from kvlib import Fetched, constraints, judgments, ledger, lock, paths, secrets, store
+from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, secrets, store
 from kvlib.gate import Gate
 from kv_transport import claude, drive, gmail, notion, sheets, slack
 
@@ -717,6 +717,76 @@ def _cfg(k: str):
     return constraints.get(f"bplan.{k}")
 
 
+def _send(ch: str, text: str) -> str:
+    return slack.post(ch, text).require()
+
+
+# ---------------------------------------------------------------- 하루 보고 · 진입점
+
+def daily_report(g: Gate, acted: dict) -> None:
+    """하루 한 번. 첫 줄 = **드랍이라 했는데 심사역이 살린 건** — 이 필터에서 가장 아픈 실수라 맨 위에 둔다."""
+    out = paths.data("bplan", "reports") / f"{ledger.today()}.md"
+    if out.exists():
+        return
+    today = ledger.today()
+    gap = g.con.execute("SELECT l.key, l.verdict, h.verdict FROM judgments h JOIN judgments l ON l.key=h.key AND l.run=? WHERE h.run=?",
+                        (judgments.LIVE, judgments.HUMAN)).fetchall()
+    saved = [k for k, live, human in gap if bucket(live) == "drop" and human == "keep"]
+    killed = [k for k, live, human in gap if bucket(live) == "keep" and human == "drop"]
+    dist = dict(g.con.execute("SELECT verdict, count(*) FROM judgments WHERE run=? AND ok=1 AND created>=? GROUP BY verdict", (judgments.LIVE, today)))
+    acts = dict(g.con.execute("SELECT kind||':'||status, count(*) FROM actions WHERE created>=? GROUP BY 1", (today,)))
+    waiting = g.con.execute("SELECT count(*) FROM actions a WHERE kind='card' AND status='done'"
+                            " AND NOT EXISTS(SELECT 1 FROM actions t WHERE t.key=a.key AND t.kind IN ('todo','ack') AND t.status='done')").fetchone()[0]
+    # 승격 — gmail.promote 원칙 그대로: 창 안에 정답 붙은 드랍 판정이 min_samples 이상이고, 그중 심사역이 살린 게 없어야(rate) 켜도 된다
+    pr = constraints.get("gmail.promote")
+    floor = ledger.now(timedelta(days=pr["window_days"]))
+    drops = g.con.execute("SELECT l.key, h.verdict FROM judgments l JOIN judgments h ON h.key=l.key AND h.run=? WHERE l.run=? AND l.ok=1 AND l.created>=?"
+                          " AND l.verdict IN (?,?)", (judgments.HUMAN, judgments.LIVE, floor, *DROP_SCORES)).fetchall()
+    # 정답이 붙은 드랍 판정: human 행이 있으면 갈린 것(=살림). 갈리지 않은 드랍은 to do=To Drop 인데 human 행이 없다 — 그건 노션에서 센다
+    n_lab, agree = len(drops), sum(1 for _, h in drops if h == "drop")
+    head = (f"🔴 드랍이라 했는데 심사역이 살린 건 {len(saved)} · 볼만이라 넘겼는데 드랍 {len(killed)} · 카드 답 대기 {waiting}"
+            f" | 오늘 판정 {sum(dist.values())}" + (" (" + " · ".join(f"{k} {v}" for k, v in sorted(dist.items(), key=lambda x: -x[1])) + ")" if dist else ""))
+    md = [f"# 비플랜 하루 보고 — {today}", "", head, "",
+          "## 🚩 드랍이라 했는데 심사역이 살린 접수 (기준이 넓다 — 가장 먼저 볼 것)", ""]
+    md += [f"- `{k}`" for k in saved] or ["없음"]
+    md += ["", "## 볼만이라 넘겼는데 심사역이 드랍한 접수 (기준이 좁다)", ""] + ([f"- `{k}`" for k in killed] or ["없음"])
+    md += ["", "## 오늘 행동 (문 = " + str(g.level()) + ")", "", " · ".join(f"{k} {v}" for k, v in sorted(acts.items())) or "없음",
+           "", f"이번 실행: {acted or '없음'}", "",
+           "## 발송 승격 (gmail.promote 원칙)", "",
+           f"- 드랍 판정 중 심사역 결정이 붙은 표본 {n_lab}/{pr['min_samples']} · 살린 건 {n_lab - agree} → **"
+           + ("켜져 있다" if _cfg("send_branches") else "켜도 된다" if n_lab >= pr["min_samples"] and agree / n_lab >= pr["rate"] else "아직") + "**",
+           "", "## 고치는 법", "", "```bash", "cd ~/kv",
+           "# 정답은 노션 to do 를 움직이면 된다 — 다음 run 이 human 으로 가져간다",
+           "# 기준: skills/bplan/criteria.md → 저장된 접수로 다시 판정 → 무엇이 달라졌나",
+           "./.venv/bin/python -m skills.bplan.run replay [--limit 50]",
+           "./.venv/bin/python -m skills.bplan.run diff --b r-<sha>", "```", ""]
+    out.write_text("\n".join(md), encoding="utf-8")
+    summary = f"*비플랜 하루* — {head}\n전체: `{out}`"
+    print(f"· 보고서 {out} | 슬랙 {report.post('bplan', summary, _send)}")
+
+
+def run_all(*, dry_run: bool = False) -> int:
+    """매일 09:20 — sync → 판정 → 행동(문 뒤) → 보고서 → 백업. sync 가 온전하지 않아도 판정은 간다(서로 독립)."""
+    rc = 0
+    try:
+        rc = sync(dry_run=dry_run, limit=0, since=None)
+    except Degraded as e:
+        print(f"🔴 sync 온전하지 않다: {e} — 판정은 계속한다")
+        rc = 2
+    g = _gate(dry_run)
+    rows = _notion_rows()
+    n_lab = label(g.con, rows)
+    j = judge_new(g.con, rows)
+    print(f"· 판정 {j['judged']} · 형식 실패 {j['invalid']}" + (f" · 🔴 멈춤: {j['stopped']}" if j["stopped"] else "") + f" · 정답 갈림 {n_lab}")
+    acted = act_all(g, rows)
+    print(f"· 행동: {acted or '없음'} | 문 {g.level()}")
+    daily_report(g, acted)
+    bdir = paths.data("bplan", "db", "backup")
+    if not (bdir / f"bplan-{datetime.now(timezone.utc):%Y-%m-%d}.sqlite").exists():
+        store.backup(g.con, bdir, "bplan", _cfg("backup_keep"))
+    return 2 if j["stopped"] else rc
+
+
 def status() -> int:
     s = ledger.summary(TASK)
     print(f"장부 {s['ledger_lines']}줄 · 마지막 {s['last_ts'] or '없음'} · 오늘 {s['counts'] or '0'}")
@@ -774,6 +844,8 @@ def selftest() -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="bplan")
     sub = p.add_subparsers(dest="cmd", required=True)
+    r_ = sub.add_parser("run", help="매일: sync → 판정 → 행동(문 뒤) → 보고서 → 백업"); r_.add_argument("--dry-run", action="store_true")
+    sub.add_parser("health", help="오늘 보고서가 있나 — 없으면 슬랙 한 줄")
     s = sub.add_parser("sync", help="시트 → 노션 행 → 접수 메일 라벨")
     s.add_argument("--dry-run", action="store_true", help="계획만. 노션·지메일 쓰기 0")
     s.add_argument("--limit", type=int, default=0, help="이번 실행 최대 생성 건수 (0=전부)")
@@ -790,6 +862,11 @@ def main(argv: list[str] | None = None) -> int:
     df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
     a = p.parse_args(argv)
     try:
+        if a.cmd == "run":
+            with lock.hold("bplan-run"):
+                return run_all(dry_run=a.dry_run)
+        if a.cmd == "health":
+            return report.health("bplan", paths.data("bplan", "reports"), _send, label="비플랜 run")
         if a.cmd == "sync":
             with lock.hold("bplan-sync"):
                 return sync(dry_run=a.dry_run, limit=a.limit, since=a.since)

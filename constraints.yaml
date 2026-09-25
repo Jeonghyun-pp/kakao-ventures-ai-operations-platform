@@ -161,6 +161,7 @@ bplan:
   deck_chars: 15000            # 덱 텍스트 상한 — 앞 2/3 · 뒤 1/3. 폼 텍스트는 그대로(칸당 최대 2,000자)
   remind_days: 3
   remind_max: 3
+  backup_keep: 7
   drop_after_days: 7           # 같은 이메일에게 드랍 초안은 1주일에 하나 [옛 결정 — 영구로 막으면 3개월 뒤 재접수에 답이 안 간다]
 
 drive:
