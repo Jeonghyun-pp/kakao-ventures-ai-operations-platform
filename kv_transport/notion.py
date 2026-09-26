@@ -247,7 +247,7 @@ def query(db_id: str, props: list[str], *, page_size: int = 100, max_pages: int 
             data = _req("POST", f"/databases/{db_id}/query", json_body=body,
                         params=[("filter_properties", i) for i in ids])
             for pg in data.get("results", []):
-                out.append({"_page_id": pg["id"], **{k: _plain(v) for k, v in pg.get("properties", {}).items()}})
+                out.append({"_page_id": pg["id"], "_edited": pg.get("last_edited_time"), **{k: _plain(v) for k, v in pg.get("properties", {}).items()}})
             pages += 1
             cursor = data.get("next_cursor")
             if not data.get("has_more"):
@@ -516,3 +516,63 @@ def page_text(page_id: str, *, max_blocks: int = 3000, depth: int = 6) -> Fetche
     except NotionError as e:
         return Fetched.unknown(f"notion:{e}")
     return Fetched.measured("\n".join(lines), blocks=n, page_id=page_id)
+
+
+# ---------------------------------------------------------------- 2026-09-26 펀드제안서 레인 — 페이지 본문을 **구조 그대로**
+
+def _md(rich: list[dict]) -> str:
+    """rich_text → 글자. 볼드만 `**…**` 로 남긴다 — 제안서 이관 규칙 '볼드는 노션과 동일하게'. 다른 꾸밈은 서식이 아니라 버린다."""
+    return "".join(f"**{x['plain_text']}**" if x.get("annotations", {}).get("bold") and x["plain_text"].strip() else x["plain_text"] for x in rich)
+
+
+def page_blocks(page_id: str, *, max_blocks: int = 4000, depth: int = 8) -> Fetched:
+    """페이지 본문 블록을 평평한 목록으로 — `{type, level, text}` + 표(`cells`·`has_header`) + 그림(`url`·`caption`).
+    `page_text()` 는 미팅록용 md 라 볼드·표 경계·중첩 깊이를 버린다. 제안서는 그 셋이 곧 문서 구조라 따로 둔다.
+    토글도 재귀한다 — 무엇을 옮기지 않을지는 부르는 쪽(skills/fund/convert)이 정한다. 모르는 타입은 `type` 그대로 남겨 조용히 사라지지 않게."""
+    out: list[dict] = []
+
+    def walk(bid: str, level: int) -> None:
+        cursor = None
+        while True:
+            data = _req("GET", f"/blocks/{bid}/children", params={"page_size": 100, **({"start_cursor": cursor} if cursor else {})})
+            for b in data.get("results", []):
+                if len(out) >= max_blocks:
+                    out.append({"type": "truncated", "level": 0, "text": f"블록 {max_blocks}개 초과"}); return
+                t, body = b.get("type", ""), b.get(b.get("type", "")) or {}
+                row = {"type": t, "level": level, "text": _md(body.get("rich_text") or [])}
+                if t == "table":
+                    row.update(has_header=bool(body.get("has_column_header")), cols=body.get("table_width"))
+                elif t == "table_row":
+                    row["cells"] = [_md(c) for c in body.get("cells", [])]
+                elif t == "image":
+                    row.update(url=(body.get(body.get("type", "")) or {}).get("url", ""), caption=_md(body.get("caption") or []))
+                elif t == "to_do":
+                    row["checked"] = bool(body.get("checked"))
+                elif t in ("child_page", "child_database"):
+                    row["text"] = body.get("title", "")
+                out.append(row)
+                if b.get("has_children") and level < depth:
+                    walk(b["id"], level + (0 if t == "table" else 1))
+            cursor = data.get("next_cursor")
+            if not data.get("has_more"):
+                return
+
+    try:
+        walk(page_id, 0)
+    except NotionError as e:
+        return Fetched.unknown(f"notion:{e}")
+    return Fetched.measured(out, blocks=len(out), page_id=page_id)
+
+
+def download(url: str, dest) -> Fetched:
+    """노션 그림 블록의 파일(서명된 S3 URL, 한 시간 유효). 노션이 준 주소만 받는다 — 이 통로 밖 주소를 받는 데 쓰지 않는다."""
+    from pathlib import Path
+    dest = Path(dest)
+    try:
+        r = requests.get(url, timeout=constraints.get("http.timeout_sec"))
+        r.raise_for_status()
+    except requests.RequestException as e:
+        return Fetched.unknown(f"notion-file:{e}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(r.content)
+    return Fetched.measured(dest, bytes=len(r.content))

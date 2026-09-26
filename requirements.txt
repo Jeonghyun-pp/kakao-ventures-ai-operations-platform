@@ -45,3 +45,4 @@ websockets==16.1.1
 xxhash==4.0.1
 zstandard==0.25.0
 python-docx==1.2.0  # 2026-09-26 투심 레인: 초안 vs 완성본 문단 대조(memo._metrics). docx 를 읽는 유일한 자리
+olefile==0.47  # 2026-09-26 펀드제안서 레인: 엔진의 audit_structure.py(HWP 레코드 정합성)가 읽는다. 다른 데서 hwp 를 열지 않는다

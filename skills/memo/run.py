@@ -62,8 +62,7 @@ def _now() -> datetime:
 
 
 def _requesters() -> set[str]:
-    """요청을 받아 주는 슬랙 멤버 — people.yaml 의 slack_id + memo.extra_requesters. 비어 있으면 아무 요청도 안 받는다(기본 거부)."""
-    return {p.get("slack_id") for p in people.load() if p.get("slack_id")} | set(_cfg("extra_requesters") or [])
+    return people.requesters(_cfg("extra_requesters"))
 
 
 def _nfc(s: str) -> str:

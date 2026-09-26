@@ -14,7 +14,8 @@
 | `appstore` | 매일 25장르×4차트 → 6개월 내 신규 → 국적 판정 → 한국 앱만 노션 착지 | **on** | 노션 판정·DB로 업데이트 |
 | `bplan` | 구글폼 접수 → 노션 행 → 덱 포함 판정 → 점수·볼만 카드·드랍 초안 → ⭕❌🙋 잇기 | off · 미설치 | 노션 to do |
 | `memo` | 슬랙 스레드 "○○ 투심" + 자료 → 무인 초안 docx → 피드백 vN → ✅ | off · 미설치 | ✅ 시점 docx |
-| `ops` | kv-data 스냅샷 백업 · 보존 · 여섯 스킬 health 하나 · 하루 요약 한 통 · 현황판 | — | — |
+| `fund` | 슬랙 스레드 "○○ 제안서" + 노션 DB 링크 + 공고 서식 hwp → 원문 그대로 옮긴 hwp(모델 없음) → 노션 바뀌면 vN → ✅ | off · 미설치 | ✅ 시점 제출본 hwp |
+| `ops` | kv-data 스냅샷 백업 · 보존 · 일곱 스킬 health 하나 · 하루 요약 한 통 · 현황판 | — | — |
 
 **문은 사람이 연다.** `constraints.yaml` 의 `<스킬>.outbound` 한 줄(off → slack → on). 코드는 문을 못 연다. 문이 닫혀 있어도 무엇을 했을지는 `actions` 표에 dry 로 남는다.
 **기준은 사람이 깎는다.** `skills/<이름>/criteria.md`(투심은 `headless.md` + `skills/memo/engine/prompts/`). 저녁 요약·보고서의 🚩 절이 재료다.
@@ -22,7 +23,7 @@
 ## 한 입구
 
 ```bash
-./kv status                 # 여섯 스킬 현황 한 화면 (문·오늘 건수·정답 누적·보고서·스케줄·마지막 실행)
+./kv status                 # 일곱 스킬 현황 한 화면 (문·오늘 건수·정답 누적·보고서·스케줄·마지막 실행)
 ./kv health                 # 막힌 것만 한 줄. 매일 12:55 자동
 ./kv digest                 # 하루 한 통 + 현황판 ~/kv-data/_reports/dashboard.html. 매일 18:30 자동
 ./kv install [--apply]      # SKILL.md frontmatter 의 스케줄 ↔ 실제 설치(launchd, 리눅스면 cron)

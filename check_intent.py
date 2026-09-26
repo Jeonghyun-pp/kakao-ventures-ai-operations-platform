@@ -34,6 +34,7 @@ TRANSPORTS = {
     "kv_transport/gmail.py",
     "kv_transport/sheets.py",
     "kv_transport/drive.py",
+    "kv_transport/hwp.py",
 }
 # 🔴 통로 밖에서 써도 되는 서드파티 — **허용 목록**. 금지 목록(requests·httpx…)은 새 SDK(googleapiclient·slack_sdk·boto3)가 들어오면 조용히 뚫린다.
 #    stdlib 는 닫힌 집합이라 통과시키되, 그 안의 망 모듈만 따로 막는다.
@@ -56,6 +57,7 @@ FIXTURE_FILES = {
 SPAWN_ALLOWED = {
     "kv_transport/drive.py": "pdftotext(poppler) — PDF 를 글로. 이 통로 밖에서 PDF 를 열지 않는다",
     "kv_transport/claude.py": "claude -p 통로. 이게 claude 를 부르는 유일한 자리다",
+    "kv_transport/hwp.py": "한글 통로 — skills/fund/engine 의 node·파이썬 스크립트(rhwp·바이트 패치·검사기)를 띄우는 유일한 자리다",
     "tools/mutation_test.py": "검사 러너. check_intent 를 자식 프로세스로 돌려야 한다",
     "schedule.py": "launchd 통로. launchctl 을 부르는 유일한 자리다",
 }
@@ -89,12 +91,12 @@ def a0_parseable() -> None:
     return not bad
 
 
-ENGINE = ROOT / "skills" / "memo" / "engine"   # 투심 엔진 — 별개 프로그램(자기 venv, claude -p 가 서브프로세스로 띄움). 망은 안 부른다(MCP stdio 뿐)
+ENGINES = [p for p in (ROOT / "skills").glob("*/engine")]   # 스킬의 엔진 폴더 — 별개 프로그램(투심: 자기 venv + MCP, 펀드제안서: 들여온 hwp 스크립트). 통로가 서브프로세스로 띄운다. 망은 안 부른다
 
 
 def py_files() -> list[Path]:
     return [p for p in ROOT.rglob("*.py")
-            if ".venv" not in p.parts and p.name != "check_intent.py" and not p.is_relative_to(ENGINE)]
+            if ".venv" not in p.parts and p.name != "check_intent.py" and not any(p.is_relative_to(e) for e in ENGINES)]
 
 
 def rel(p: Path) -> str:

@@ -1,4 +1,4 @@
-"""현황판 — 여섯 스킬의 문·스케줄·오늘 건수·마지막 실행·백업을 한 자리에. **읽기만 한다.**
+"""현황판 — 일곱 스킬의 문·스케줄·오늘 건수·마지막 실행·백업을 한 자리에. **읽기만 한다.**
 
     status   터미널 한 화면 · digest   하루 한 통(review_test) + ~/kv-data/_reports/dashboard.html · health   막힌 것(gaps)만 한 줄
 스킬별 실패 경보(linkedin _alert 등)는 그대로 각자 낸다 — 묶는 건 **하루 요약**뿐이다.
@@ -13,8 +13,16 @@ from kvlib import constraints, ledger, paths
 
 # (스킬, 문 키, 주말엔 보고서가 없는 게 정상인가). 새 스킬은 여기 한 줄 — 문 키가 스킬명과 다르고(mail→mail_observe) 주말 규칙이 스킬마다라 다른 자리가 없다
 SKILLS = (("mail", "mail_observe", False), ("linkedin", "linkedin", True), ("appstore", "appstore", False),
-          ("bplan", "bplan", False), ("memo", "memo", False))
+          ("bplan", "bplan", False), ("memo", "memo", False), ("fund", "fund", False))
 HEAD = ("스킬", "문", "오늘 판정", "오늘 행동", "정답 누적", "오늘 보고서", "스케줄", "마지막")
+
+
+def _request_lane(task: str) -> bool:
+    """요청 레인(투심·펀드제안서…)은 요청이 없는 날 보고서가 없는 게 정상이고, 대신 '접수 없는 요청'을 본다. 판별은 request_pattern 설정의 유무 — 이름 나열이 아니다."""
+    try:
+        constraints.get(f"{task}.request_pattern"); return True
+    except KeyError:
+        return False
 
 
 def _db(skill: str):
@@ -43,16 +51,16 @@ def gather(today: str | None = None) -> dict:
                 "SELECT (SELECT count(*) FROM judgments WHERE run='live' AND created>=?), (SELECT count(*) FROM judgments WHERE run='human'),"
                 " max(coalesce((SELECT max(created) FROM actions), ''), coalesce((SELECT max(created) FROM judgments), ''))", (today,)).fetchone()
             s["last"] = last or None
-            if skill == "memo":
+            if _request_lane(task):
                 stuck = con.execute("SELECT count(*) FROM actions a WHERE a.kind='request' AND a.created>=? AND NOT EXISTS"
                                     "(SELECT 1 FROM actions b WHERE b.key=a.key AND b.kind='ack')", (today,)).fetchone()[0]
                 if stuck:
-                    out["gaps"].append(f"memo: 접수 답글 없는 요청 {stuck}건 — followup 이 안 돌았거나 채널을 못 읽는다")
+                    out["gaps"].append(f"{skill}: 접수 답글 없는 요청 {stuck}건 — followup 이 안 돌았거나 채널을 못 읽는다")
             con.close()
         for r in rows:
             if not r["installed"]:
                 out["gaps"].append(f"{skill}: 스케줄 미설치 — {r['cmd']} {r['when']}")
-        if any(r["installed"] for r in rows) and skill != "memo" and not s["report_today"] and not (weekend_quiet and weekend):
+        if any(r["installed"] for r in rows) and not _request_lane(task) and not s["report_today"] and not (weekend_quiet and weekend):
             out["gaps"].append(f"{skill}: 오늘 보고서 없음")
         out["skills"].append(s)
     age = ops.backup_age_days()
