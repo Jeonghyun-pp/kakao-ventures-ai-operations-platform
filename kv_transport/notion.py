@@ -434,3 +434,86 @@ def _verify(db_id: str, page_id: str, props: dict) -> str:
             if str(got or "") != str(want):
                 bad.append(name)
     return ",".join(bad)
+
+
+# ---------------------------------------------------------------- 페이지 본문 (2026-09-26, 투심 레인)
+
+def find_page(query: str, *, page_size: int = 5) -> Fetched:
+    """search API. `[{id, title, parent}]` — parent 는 database id 또는 page id. 제목만 보고 고르는 건 호출부 몫이다."""
+    try:
+        data = _req("POST", "/search", json_body={"query": query, "page_size": page_size,
+                                                  "filter": {"value": "page", "property": "object"}})
+    except NotionError as e:
+        return Fetched.unknown(f"notion:{e}")
+    out = []
+    for pg in data.get("results", []):
+        title = next((_plain(v) for v in pg.get("properties", {}).values() if v.get("type") == "title"), "")
+        par = pg.get("parent") or {}
+        out.append({"id": pg["id"], "title": title or "", "parent": par.get(par.get("type", ""), "")})
+    return Fetched.measured(out)
+
+
+_TEXT_BLOCKS = ("paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item", "numbered_list_item",
+                "to_do", "toggle", "quote", "callout")
+
+
+def page_text(page_id: str, *, max_blocks: int = 3000, depth: int = 6) -> Fetched:
+    """페이지 **본문**을 md 로. 속성(값 있는 것만) → 블록(토글·헤딩·불릿·표·자식 페이지 제목)을 자식까지 재귀로.
+
+    🔴 `query()` 는 DB 행의 칸만 준다. 미팅록은 페이지 본문의 토글 안에 있어 이 경로가 아니면 안 읽힌다.
+       모르는 블록 타입은 `[타입]` 으로 남긴다 — 조용히 빈 줄로 만들지 않는다."""
+    lines: list[str] = []
+    n = [0]
+
+    def rich(b: dict) -> str:
+        t = b.get("type", "")
+        return "".join(x.get("plain_text", "") for x in (b.get(t) or {}).get("rich_text", []))
+
+    def walk(bid: str, level: int) -> None:
+        cursor = None
+        while True:
+            data = _req("GET", f"/blocks/{bid}/children", params={"page_size": 100, **({"start_cursor": cursor} if cursor else {})})
+            for b in data.get("results", []):
+                n[0] += 1
+                if n[0] > max_blocks:
+                    lines.append(f"[잘림 — 블록 {max_blocks}개 초과]")
+                    return
+                t, ind = b.get("type", ""), "  " * level
+                if t in ("heading_1", "heading_2", "heading_3"):
+                    lines.append(f"{'#' * int(t[-1])} {rich(b)}")
+                elif t == "toggle":
+                    lines.append(f"{ind}▸ {rich(b)}")
+                elif t == "to_do":
+                    lines.append(f"{ind}- [{'x' if b['to_do'].get('checked') else ' '}] {rich(b)}")
+                elif t in ("bulleted_list_item", "numbered_list_item", "quote", "callout"):
+                    lines.append(f"{ind}- {rich(b)}")
+                elif t == "paragraph":
+                    if rich(b).strip():
+                        lines.append(f"{ind}{rich(b)}")
+                elif t == "table_row":
+                    lines.append(ind + " | ".join("".join(x.get("plain_text", "") for x in cell) for cell in b["table_row"].get("cells", [])))
+                elif t in ("child_page", "child_database"):
+                    lines.append(f"{ind}[{t}] {(b.get(t) or {}).get('title', '')}")
+                elif t in ("divider", "table_of_contents", "column_list", "column", "table"):
+                    pass
+                else:
+                    lines.append(f"{ind}[{t}]")
+                if b.get("has_children") and level < depth:
+                    walk(b["id"], level + (0 if t in ("table", "column_list", "column") else 1))
+            cursor = data.get("next_cursor")
+            if not data.get("has_more"):
+                return
+
+    try:
+        page = _req("GET", f"/pages/{page_id}")
+        props = {k: _plain(v) for k, v in page.get("properties", {}).items()}
+        title = next((v for k, v in props.items() if page["properties"][k].get("type") == "title"), "")
+        lines.append(f"# {title}")
+        for k, v in props.items():
+            if v not in (None, "", [], False) and page["properties"][k].get("type") != "title":
+                lines.append(f"- {k}: {v}")
+        lines.append("")
+        walk(page_id, 0)
+    except NotionError as e:
+        return Fetched.unknown(f"notion:{e}")
+    return Fetched.measured("\n".join(lines), blocks=n[0], page_id=page_id)

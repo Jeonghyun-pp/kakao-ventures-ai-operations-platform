@@ -199,3 +199,76 @@ def send_text(key: str, text: str, *, dry_run: bool = False) -> bool:
         print(_indent(text))
         return True
     return post(key, text).is_measured
+
+
+# ---------------------------------------------------------------- 이력·파일 (2026-09-26, 투심 레인)
+
+def history(key: str, *, oldest: str | None = None, limit: int = 200) -> Fetched:
+    """채널 **최상위** 메시지(새것부터). `files`·`thread_ts`·`reply_count`·`user`·`reactions` 가 딸려 온다."""
+    ch = channel_id(key)
+    params = {"channel": ch, "limit": limit}
+    if oldest:
+        params["oldest"] = oldest
+    try:
+        res = _call("GET", "/conversations.history", params=params)
+    except SlackError as e:
+        return Fetched.unknown(f"slack:{e}", channel=key)
+    return Fetched.measured(res.get("messages") or [], channel=key)
+
+
+def thread_files(key: str, parent_ts: str) -> Fetched:
+    """부모 + 답글에 붙은 파일 메타 `[{id, name, url, ts, user, mimetype}]`. 봇이 올린 것은 뺀다."""
+    ch = channel_id(key)
+    try:
+        res = _call("GET", "/conversations.replies", params={"channel": ch, "ts": parent_ts, "limit": 200})
+    except SlackError as e:
+        return Fetched.unknown(f"slack:{e}", channel=key)
+    out = []
+    for m in res.get("messages") or []:
+        if m.get("bot_id") or m.get("subtype") == "bot_message":
+            continue
+        for f in m.get("files") or []:
+            if f.get("url_private"):
+                out.append({"id": f.get("id"), "name": f.get("name") or f.get("title") or f.get("id"), "url": f["url_private"],
+                            "ts": m.get("ts"), "user": m.get("user"), "mimetype": f.get("mimetype", "")})
+    return Fetched.measured(out, parent=parent_ts)
+
+
+def download(url: str, dest) -> Fetched:
+    """`url_private` 를 받아 dest 에 쓴다. 🔴 스코프(files:read)가 없으면 200 으로 **로그인 HTML** 이 온다 — 크기가 아니라 종류로 판정한다."""
+    token = secrets.get("SLACK_BOT_TOKEN")
+    try:
+        r = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=constraints.get("http.timeout_sec"))
+    except Exception as e:  # noqa: BLE001
+        return Fetched.unknown(f"망: {type(e).__name__}")
+    ctype = r.headers.get("content-type", "")
+    if r.status_code != 200 or ctype.startswith("text/html"):
+        return Fetched.unknown(f"다운로드 실패 HTTP {r.status_code} {ctype[:30]} — files:read 스코프를 의심하라")
+    dest.write_bytes(r.content)
+    return Fetched.measured(dest, bytes=len(r.content))
+
+
+def upload(key: str, path, *, thread_ts: str | None = None, title: str | None = None, comment: str = "") -> Fetched:
+    """파일을 채널(스레드)에 올린다 — files.getUploadURLExternal → PUT → completeUploadExternal. 반환은 file id.
+    files:write 스코프가 필요하다. 억제·실패는 미상으로."""
+    ch = channel_id(key)
+    if secrets.no_send():
+        print(f"  🚫 KV_NO_SEND — 억제됨 (파일 안 올림): {path}")
+        return Fetched.unknown("suppressed:KV_NO_SEND", channel=key)
+    data = path.read_bytes()
+    try:
+        step1 = _call("POST", "/files.getUploadURLExternal", data={"filename": path.name, "length": len(data)})
+        put = requests.post(step1["upload_url"], data=data, timeout=constraints.get("http.timeout_sec") * 4)
+        if put.status_code != 200:
+            return Fetched.unknown(f"업로드 PUT HTTP {put.status_code}", channel=key)
+        body = {"files": [{"id": step1["file_id"], "title": title or path.name}], "channel_id": ch}
+        if thread_ts:
+            body["thread_ts"] = thread_ts
+        if comment:
+            body["initial_comment"] = comment
+        _call("POST", "/files.completeUploadExternal", json=body)
+    except SlackError as e:
+        return Fetched.unknown(f"slack:{e}", channel=key)
+    except Exception as e:  # noqa: BLE001
+        return Fetched.unknown(f"망: {type(e).__name__}", channel=key)
+    return Fetched.measured(step1["file_id"], channel=key, channel_id=ch)

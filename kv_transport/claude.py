@@ -116,6 +116,36 @@ def run_session(prompt: str, *, system: str | None = None, tools: str | None = N
 
 
 
+def run_skill(prompt: str, *, mcp_config, system_file, allowed_tools: list[str], timeout_sec: int, cwd=None) -> Fetched:
+    """긴 세션 한 번 — 스킬(MCP 서버 + 도구)을 붙여 끝까지 돌린다 (2026-09-26, 투심 레인).
+
+    `run_session` 과 다른 점: MCP 를 붙이고(`--mcp-config`, 전역 상속은 여전히 차단), 허용 도구를 **명시 목록**으로 주고
+    (`--permission-mode dontAsk` — 목록 밖 도구는 묻지 않고 거부), 상한이 분 단위다.
+    🔴 성공 판정은 호출부가 **산출물 존재**로 한다. 0단계 실측: docx 는 9분에 다 나왔는데 마지막 메시지의 API 호출이
+       망 오류로 죽어 rc=1 이었다. 그래서 여기서는 unknown 을 돌려주되 stdout·rc 를 실어 준다 — 호출부가 파일을 본다."""
+    n = _calls_today()
+    if n >= constraints.get("claude.daily_calls_block"):
+        return Fetched.unknown(f"오늘 claude 호출 {n}회 — 차단선 도달")
+    cmd = [_bin(), "-p", "--mcp-config", str(mcp_config), "--strict-mcp-config",
+           "--append-system-prompt-file", str(system_file),
+           "--permission-mode", "dontAsk",
+           "--allowedTools", ",".join(allowed_tools),
+           "--disallowedTools", "Edit,Write,NotebookEdit,Bash(rm *),Bash(git *)",
+           "--output-format", "text"]
+    try:
+        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout_sec, cwd=str(cwd) if cwd else None)
+    except FileNotFoundError:
+        return Fetched.unknown("claude CLI 가 없다")
+    except subprocess.TimeoutExpired:
+        _record(False, "timeout")
+        return Fetched.unknown(f"timeout {timeout_sec}s")
+    out = (r.stdout or "").strip()
+    if r.returncode != 0 or not out:
+        _record(False, f"rc{r.returncode}")
+        return Fetched.unknown(f"rc={r.returncode}: {(r.stderr or out)[:200]}", stdout=out[-2000:], rc=r.returncode)
+    _record(True)
+    return Fetched.measured(out, rc=0)
+
 
 def dlq(skill: str, name: str, rows: list[dict]) -> None:
     """검증에 실패한 줄을 격리한다. **버리지 않는다 — 나중에 왜 깨졌는지 봐야 한다.**"""
