@@ -89,9 +89,12 @@ def a0_parseable() -> None:
     return not bad
 
 
+ENGINE = ROOT / "skills" / "memo" / "engine"   # 투심 엔진 — 별개 프로그램(자기 venv, claude -p 가 서브프로세스로 띄움). 망은 안 부른다(MCP stdio 뿐)
+
+
 def py_files() -> list[Path]:
     return [p for p in ROOT.rglob("*.py")
-            if ".venv" not in p.parts and p.name != "check_intent.py"]
+            if ".venv" not in p.parts and p.name != "check_intent.py" and not p.is_relative_to(ENGINE)]
 
 
 def rel(p: Path) -> str:

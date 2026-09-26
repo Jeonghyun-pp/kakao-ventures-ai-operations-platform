@@ -17,7 +17,7 @@
 | `ops` | kv-data 스냅샷 백업 · 보존 · 여섯 스킬 health 하나 · 하루 요약 한 통 · 현황판 | — | — |
 
 **문은 사람이 연다.** `constraints.yaml` 의 `<스킬>.outbound` 한 줄(off → slack → on). 코드는 문을 못 연다. 문이 닫혀 있어도 무엇을 했을지는 `actions` 표에 dry 로 남는다.
-**기준은 사람이 깎는다.** `skills/<이름>/criteria.md`(투심은 `headless.md` + kv-automation 의 프롬프트). 저녁 요약·보고서의 🚩 절이 재료다.
+**기준은 사람이 깎는다.** `skills/<이름>/criteria.md`(투심은 `headless.md` + `skills/memo/engine/prompts/`). 저녁 요약·보고서의 🚩 절이 재료다.
 
 ## 한 입구
 
@@ -45,4 +45,4 @@ schedule.py    스케줄 정본은 SKILL.md · check_intent.py  의도를 기계
 
 ## 지금 사람 몫 (2026-09-26)
 슬랙 봇 `files:read`·`files:write`(투심 레인) · 비플랜·투심 스케줄 설치 · 구글폼 폴더 서비스계정 공유 · `people.yaml` 실명 매핑 · 채널 전환(test → 실채널) · 서버 이관(`claude setup-token`) · 오프사이트 백업.
-옛 시스템(kv-automation)은 투심 엔진만 남기고 걷어냈다(태그 `legacy-final-2026-09-26`). 옛 데이터는 `~/kv-data/_archive/`.
+옛 시스템(kv-automation)은 걷어냈다(태그 `legacy-final-2026-09-26`). 투심 엔진은 `skills/memo/engine/` 으로 들여왔고(전용 venv), 옛 데이터는 `~/kv-data/_archive/`.

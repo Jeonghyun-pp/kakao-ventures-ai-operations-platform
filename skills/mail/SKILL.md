@@ -157,4 +157,4 @@ TIPS 문의   문의자에게 TIPS 안내.    문안 templates/webflow_tips.txt
 ## 이관 (리눅스)
 
 `schedule.py` 가 맥이 아니면 crontab 블록을 만든다. 맥 전용 코드는 그 파일에만 있다(A13). `claude` 는 서버에서 hello@ 로 `claude login` 한 번.
-Gmail·Slack 은 토큰. DB 는 백업 파일에서 복원(`--op restore-test` 가 그 시험). 백업 스크립트(`~/kv-automation/scripts/backup-kv-data.sh`)는 옛 스케줄러(`com.kv.scheduler`)가 부른다 — 옮길 때 같이.
+Gmail·Slack 은 토큰. DB 는 백업 파일에서 복원(`--op restore-test` 가 그 시험). 백업은 `skills/ops`(매일 12:45 스냅샷)가 한다.

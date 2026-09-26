@@ -233,8 +233,6 @@ memo:
   report_channel: "test"
   report_slack: "on"
   backup_keep: 7
-  skill_dir: "~/kv-automation/skills/investment-memo"     # MCP 서버·프롬프트가 있는 곳. 서버로 옮기면 여기만 바꾼다
-  skill_python: "~/kv-automation/.venv/bin/python"       # MCP 서버를 띄울 파이썬(mcp<2 · pdfplumber · python-docx 가 든 venv)
   # 세션에 허용하는 도구 — 허용 목록이다. 편집·삭제·git 은 run_skill 이 상시 금지한다
   allowed_tools: ["mcp__investment-memo", "Read", "WebSearch", "WebFetch", "Bash(cd *)", "Bash(*python*)"]
 

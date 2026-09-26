@@ -1,6 +1,6 @@
 ---
 name: memo
-description: 심사역이 슬랙 스레드에 "○○ 투심" + 자료를 올리면 투심보고서 초안 docx 를 같은 스레드에 올리고, 피드백을 받아 다음 버전을 내고, ✅ 시점의 문서를 정답으로 남긴다. 메일·비플랜과 같은 뼈대. 엔진은 kv-automation 의 investment-memo 스킬(무인 모드).
+description: 심사역이 슬랙 스레드에 "○○ 투심" + 자료를 올리면 투심보고서 초안 docx 를 같은 스레드에 올리고, 피드백을 받아 다음 버전을 내고, ✅ 시점의 문서를 정답으로 남긴다. 메일·비플랜과 같은 뼈대. 엔진은 skills/memo/engine(옛 investment-memo 스킬, 무인 모드).
 ---
 
 # 투심보고서 요청 레인
@@ -40,7 +40,7 @@ request_channel: test   요청을 읽는 채널도 처음엔 review_test. 실채
 ```
 정답      스레드에 ✅. 수정한 docx 를 스레드에 올렸으면 그것이 완성본이다
 보고서    첫 절 "심사역이 지운 초안 문단 표본" — 8/6 에 손으로 했던 일(지운 패턴 → 프롬프트)을 매 요청마다 재료로 준다
-기준      무인 규칙 skills/memo/headless.md(분량 상한·미확인·M&A 기본값) · 문체·섹션 기준은 kv-automation/skills/investment-memo/prompts/*.md
+기준      무인 규칙 skills/memo/headless.md(분량 상한·미확인·M&A 기본값) · 문체·섹션 기준은 skills/memo/engine/prompts/*.md
 코퍼스    ~/Downloads/투심보고서/<회사>/ 13쌍(인풋+완성본) — `run --company X --folder …` 로 초안을 내고 완성본과 비교하면 첫날 표본이 된다
 ```
 
@@ -51,13 +51,13 @@ cd ~/kv
 ./.venv/bin/python -m skills.memo.run followup [--dry-run]                  # 요청 채널 한 바퀴
 ./.venv/bin/python -m skills.memo.run run --company Corpus02 --folder ~/Downloads/투심보고서/Corpus02 [--dry-run]   # 슬랙 없이 한 건(--dry-run 은 무인 규칙 본문만)
 ./.venv/bin/python -m skills.memo.run status | report
-cd ~/kv-automation/skills/investment-memo && ../../.venv/bin/python scripts/backtest.py compare <초안.docx> <완성본.docx>   # 스킬의 자
+cd skills/memo/engine && .venv/bin/python scripts/backtest.py compare <초안.docx> <완성본.docx>   # 엔진의 자. venv 는 engine/README.md 의 설치 한 줄
 ```
 
 ## 구성
 
 `run.py` 한 파일(흐름은 위 "하루"와 같다 · `grep ^def`) + `headless.md`(무인 규칙 — 실행마다 회사명·폴더·노션 줄·피드백을 채워 `--append-system-prompt-file` 로. 스킬 프롬프트는 손대지 않는다).
-통로는 `kv_transport/{notion,slack,claude}.py` 끝의 2026-09-26 절. `constraints.yaml memo.*`: outbound · request_channel · request_pattern · extra_requesters · collect_wait_min · session_timeout_min · max_versions · report_* · backup_keep · skill_dir · skill_python · allowed_tools. **근거는 그 주석에**.
+통로는 `kv_transport/{notion,slack,claude}.py` 끝의 2026-09-26 절. `constraints.yaml memo.*`: outbound · request_channel · request_pattern · extra_requesters · collect_wait_min · session_timeout_min · max_versions · report_* · backup_keep · allowed_tools. **근거는 그 주석에**.
 
 ## 알아둘 것
 

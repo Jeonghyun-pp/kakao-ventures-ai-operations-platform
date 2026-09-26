@@ -149,12 +149,18 @@ def _collect(g: Gate, key: str, company: str, folder: Path, msgs: list[dict]) ->
     return line
 
 
+ENGINE = Path(__file__).parent / "engine"          # 투심 엔진(MCP 서버·프롬프트). 2026-09-26 kv-automation 에서 들여옴 — 코드 폴더는 ~/kv 하나
+ENGINE_PY = ENGINE / ".venv" / "bin" / "python"     # 엔진 전용 venv(mcp<2 · pdfplumber · python-docx). `engine/README.md` 의 설치 한 줄
+
+
 def _skill_dir() -> Path:
-    return Path(_cfg("skill_dir")).expanduser()
+    return ENGINE
 
 
 def _skill_python() -> Path:
-    return Path(_cfg("skill_python")).expanduser()
+    if not ENGINE_PY.exists():
+        raise SystemExit(f"엔진 venv 없음: {ENGINE_PY} — cd {ENGINE} && python3 -m venv .venv && .venv/bin/pip install -r mcp/requirements.txt")
+    return ENGINE_PY
 
 
 def _render(company: str, folder: Path, notion_line: str, feedback: list[str]) -> str:
