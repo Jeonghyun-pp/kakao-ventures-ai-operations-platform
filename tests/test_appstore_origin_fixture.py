@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import json
 import unittest
-from pathlib import Path
 
 from skills.appstore import kr_origin
-
-FIXTURE = Path(__file__).resolve().parent.parent / "skills/appstore/fixtures/kr_origin_w34.json"
 
 
 class OriginFixture(unittest.TestCase):
     def test_no_korean_app_is_lost_and_most_foreign_are_removed(self):
-        rows = json.loads(FIXTURE.read_text(encoding="utf-8"))["rows"]
+        rows = json.loads(kr_origin.FIXTURE.read_text(encoding="utf-8"))["rows"]
         verdicts = {r["app_id"]: kr_origin.classify(r["seller_name"], r["seller_url"], r["app_name"], r["description"])[0] for r in rows}
         lost = [r["app_name"] for r in rows if r["label"] == "kr" and verdicts[r["app_id"]] == "foreign"]
         removed = sum(1 for r in rows if r["label"] == "foreign" and verdicts[r["app_id"]] == "foreign")

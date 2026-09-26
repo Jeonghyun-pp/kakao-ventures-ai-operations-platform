@@ -11,6 +11,7 @@ LLM 이 실패하면 착지를 막지 않는다 — 사람이 거르는 게 유�
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import re
 
@@ -38,7 +39,6 @@ _PLATFORM_HOSTS = (
     "gitbook.io", "readme.io", "glitch.me", "replit.app", "onrender.com",
 )
 
-_KR_TLD = (".kr",)
 
 _FOREIGN_TLD = (
     ".jp", ".cn", ".vn", ".tw", ".hk", ".sg", ".tr", ".th", ".ru", ".br", ".in",
@@ -84,32 +84,12 @@ sunwoo namgung hwangbo seok suk yeo yuh ban pan mo myung myong
 
 
 def _host(url: str) -> str:
-    """URL에서 호스트를 꺼낸다. urllib 을 쓰지 않는다 (check_intent A1)."""
-    if not url:
-        return ""
-    try:
-        s = url
-        p = s.find("://")
-        if p >= 0:
-            s = s[p + 3:]
-        s = s.split("/", 1)[0]
-        s = s.split("?", 1)[0]
-        s = s.split("#", 1)[0]
-        s = s.rsplit("@", 1)[-1]
-        s = s.rsplit(":", 1)[0]
-        return s.lower()
-    except Exception:  # noqa: BLE001
-        return ""
+    return (urlsplit(url).hostname or "").lower() if url else ""
 
 
 def _looks_korean_name(seller_name: str) -> bool:
     toks = [t.strip(".,()'\"").lower() for t in re.split(r"[\s,]+", seller_name or "") if t]
     return any(t in _KR_SURNAMES for t in toks)
-
-
-def _hangul_ratio(text: str) -> float:
-    text = text or ""
-    return len(_HANGUL.findall(text)) / len(text) if text else 0.0
 
 
 # ---------------------------------------------------------------- 규칙 분류기
@@ -129,7 +109,7 @@ def classify(seller_name: str = "", seller_url: str = "", app_name: str = "",
 
     # L2. seller_url ccTLD
     if host and not is_platform:
-        if host.endswith(_KR_TLD):
+        if host.endswith(".kr"):
             return "kr", f"seller_url .kr ({host})"
         for tld in _FOREIGN_TLD:
             if host.endswith(tld):
@@ -171,7 +151,7 @@ def classify(seller_name: str = "", seller_url: str = "", app_name: str = "",
     max_ratio = constraints.get("appstore.kr_origin.hangul_foreign_max_ratio")
     desc = description or ""
     if len(desc) >= min_len:
-        ratio = _hangul_ratio(desc)
+        ratio = len(_HANGUL.findall(desc)) / len(desc)
         if ratio < max_ratio:
             if _looks_korean_name(sn):
                 return "unknown", f"한글 {ratio:.0%}지만 한국식 성씨 — veto"
@@ -191,13 +171,14 @@ _ORIGIN_SYSTEM = (
 
 
 CRITERIA = Path(__file__).parent / "criteria.md"
+FIXTURE = Path(__file__).parent / "fixtures" / "kr_origin_w34.json"      # 고정 정답 199건 — 테스트와 tools/kr_origin_eval.py 가 잰다
 
 
 def criteria_text() -> str:
     return CRITERIA.read_text(encoding="utf-8")
 
 
-def llm_judge_origin(unknowns: list[dict], criteria: str | None = None) -> Fetched:
+def llm_judge_origin(unknowns: list[dict], criteria: str) -> Fetched:
     """규칙이 판정하지 못한 앱의 국적을 LLM 으로 판정한다. 기준은 `criteria.md`(사람이 깎는다).
 
     입력: [{app_id, seller_name, app_name, description}, ...]
@@ -214,7 +195,7 @@ def llm_judge_origin(unknowns: list[dict], criteria: str | None = None) -> Fetch
         lines.append(f"{u['app_id']}\t{sn}\t{name}\t{desc}")
 
     prompt = (
-        f"{criteria or criteria_text()}\n\n"
+        f"{criteria}\n\n"
         "# 입력 (app_id · seller_name · app_name · description[:200])\n"
         + "\n".join(lines)
         + f"\n\n# 출력 형식\n정확히 {len(unknowns)}줄. 각 줄은 `app_id<TAB>kr|foreign<TAB>이유(한 문장)`.\n"
@@ -268,6 +249,4 @@ def check_health(results: list[tuple[str, str]], total_fresh: int) -> list[str]:
     if ratio > warn_ratio:
         warnings.append(
             f"국적 필터 외국 비율 {ratio:.0%} (>{warn_ratio:.0%}) — lookup 장애 의심")
-    if foreign_count == total_fresh:
-        warnings.append("국적 필터 전량 외국 판정 — 필터가 정상인지 확인 필요")
     return warnings

@@ -788,7 +788,7 @@ def run_all(*, dry_run: bool = False) -> int:
     acted = act_all(g, rows)
     print(f"· 행동: {acted or '없음'} | 문 {g.level()}")
     daily_report(g, acted)
-    bdir = paths.data("bplan", "db", "backup")
+    bdir = db_path().parent / "backup"
     if not (bdir / f"bplan-{datetime.now(timezone.utc):%Y-%m-%d}.sqlite").exists():
         store.backup(g.con, bdir, "bplan", _cfg("backup_keep"))
     return 2 if j["stopped"] else rc

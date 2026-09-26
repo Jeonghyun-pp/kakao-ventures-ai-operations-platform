@@ -17,16 +17,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from skills.appstore import kr_origin  # noqa: E402
 
-FIXTURE = Path(__file__).resolve().parent.parent / "skills/appstore/fixtures/kr_origin_w34.json"
-
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="kr_origin 분류기 정확도 측정")
     ap.add_argument("--verbose", action="store_true")
-    ap.add_argument("--fixture", default=str(FIXTURE))
     args = ap.parse_args(argv)
 
-    data = json.loads(Path(args.fixture).read_text(encoding="utf-8"))
+    data = json.loads(kr_origin.FIXTURE.read_text(encoding="utf-8"))
     rows = data["rows"]
 
     lost, leaked, cells = [], [], {}

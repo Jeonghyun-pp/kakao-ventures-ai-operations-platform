@@ -68,11 +68,10 @@ def _send(ch: str, text: str) -> str:
     return slack.post(ch, text).require()
 
 
-def _input(d: dict, v: dict) -> str:
+def _input(d: dict) -> str:
     """판정이 본 것 — 이 문자열을 저장한다(replay 가 다시 판정한다)."""
     return json.dumps({"seller_name": d.get("seller_name", ""), "seller_url": d.get("seller_url", ""), "app_name": d.get("name", ""),
-                       "description": (d.get("description") or "")[:400], "released_at": d.get("released_at"),
-                       "chart": v.get("chart"), "rank": v.get("rank")}, ensure_ascii=False)
+                       "description": (d.get("description") or "")[:400]}, ensure_ascii=False)
 
 
 def judge_lines(lines: list[str], keys: list[str], criteria: str) -> Fetched:
@@ -103,8 +102,8 @@ def label(con, rows: list[dict]) -> int:
 # ---------------------------------------------------------------- collect
 
 def collect(*, dry_run: bool = False, limit_genres: int | None = None,
-            limit: int | None = None, gate: Gate | None = None) -> int:
-    g = gate or _gate(dry_run)
+            limit: int | None = None) -> int:
+    g = _gate(dry_run)
     itunes.reset_circuit()
     run_id = f"{date.today():%Y-%m-%d}-{uuid.uuid4().hex[:6]}"
     print(f"▶ collect run={run_id}")
@@ -155,7 +154,7 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
     print(f"· 처음 보는 앱 {len(found)}개 (시도 {attempts} · 미상 {len(unknowns)})")
 
     if not found:
-        _report(run_id, landed=0, unknowns=len(unknowns), attempts=attempts)
+        _report()
         if unknowns:
             raise Degraded(f"미상 {len(unknowns)}건")
         return 0
@@ -179,7 +178,7 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
 
     # ---- 국적 필터 — 규칙 → 애매하면 모델. 앱마다 판정을 저장한다(무엇을 보고 그랬나). foreign 은 노션에 안 가므로 이 기록이 유일하다
     crit = kr_origin.criteria_text()
-    lines = {aid: _input(details[aid], v) for aid, v in fresh.items()}
+    lines = {aid: _input(details[aid]) for aid in fresh}
     verdicts = judge_lines(list(lines.values()), list(lines), crit).require()
     judgments.save(g.con, judgments.LIVE, judgments.criteria_sha(kr_origin._ORIGIN_SYSTEM, crit), lines, verdicts)
     origins: dict[str, tuple[str, str]] = {x["key"]: (x["verdict"], x["reason"]) for x in verdicts}
@@ -191,8 +190,7 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
     print(f"· 국적 필터(규칙): foreign {len(foreign_by_rule)} 제거 · unknown {sum(1 for v, r in origins.values() if not r.startswith('규칙'))} → LLM")
     print(f"· 국적 필터(LLM): foreign {llm_foreign} 추가 제거")
 
-    health_results = [(v, r) for v, r in origins.values()]
-    for warn in kr_origin.check_health(health_results, len(origins)):
+    for warn in kr_origin.check_health(list(origins.values()), len(origins)):
         print(f"  ⚠️  {warn}")
 
     print(f"· 국적 필터 후 후보 {len(fresh)}개")
@@ -233,7 +231,10 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
         landed += 1
 
     print(f"· 착지 {landed} · 실패 {failed}")
-    _report(run_id, landed=landed, unknowns=len(unknowns), attempts=attempts, failed=failed)
+    _report()
+    bdir = db_path().parent / "backup"
+    if not (bdir / f"appstore-{ledger.today()}.sqlite").exists():                    # judgments 가 foreign 판정의 유일한 기록이다
+        store.backup(g.con, bdir, "appstore", _cfg("backup_keep"))
     daily_report(g, landed=landed, candidates=len(lines), fresh=len(fresh), unknowns=[t for t, _ in unknowns], attempts=attempts)
 
     # 🔴 포팅은 노션 자동화가 한다 (2026-09-23 활성). 체크한 사람이 발굴자로 들어가야 해서
@@ -248,8 +249,7 @@ def _d(s: str) -> date:
     return datetime.strptime(s[:10], "%Y-%m-%d").date()
 
 
-def _props(aid: str, v: dict, d: dict, run_id: str,
-           origin: tuple[str, str] = ("unknown", "")) -> dict:
+def _props(aid: str, v: dict, d: dict, run_id: str, origin: tuple[str, str]) -> dict:
     genre_name = itunes.GENRE_NAMES.get(v.get("genre"), "전체")
     chart_label = itunes.CHART_LABEL.get(v["chart"], v["chart"])
     entry = "new_release" if v["chart"] == "new" else "chart_new"
@@ -281,39 +281,10 @@ def _props(aid: str, v: dict, d: dict, run_id: str,
 
 # ---------------------------------------------------------------- 포팅
 
-_GENRE_MAP = {
-    "교육": "교육", "금융": "금융", "식음료": "식음료",
-    "비즈니스": "비즈니스", "엔터테인먼트": "엔터테인먼트",
-    "지식정보": "지식정보",
-}
-
-
 def port() -> int:
     """앱스토어 DB에서 'DB로 업데이트' 체크된 앱을 극초기 DB로 포팅한다."""
     print("▶ port: 앱스토어 → 극초기 DB")
 
-    checked = notion.query(
-        notion.writable_id(DB),
-        ["서비스명", "App ID", "One Liner", "Post URL", "Rating", "Genre"],
-    )
-    if not checked.is_measured:
-        print(f"  ⚠️  앱스토어 DB 조회 실패: {checked.reason}")
-        return 0
-
-    targets = []
-    for row in checked.require():
-        targets.append(row)
-
-    if not targets:
-        print("· 체크된 앱 0개 — 포팅할 것 없음")
-        return 0
-
-    # DB로 업데이트 = true 인 행만 필터 (query 는 전체를 가져오므로)
-    # → Notion API query 에 filter 를 써야 하지만, 현재 통로에 filter 지원이 없다.
-    #   대신 앱스토어 DB 를 전부 읽은 뒤 SQL 로 필터하는 대신,
-    #   MCP 로 이미 확인한 체크 앱 목록을 기준으로 한다.
-    #   실제로는 query 결과에서 checkbox 를 읽을 수 없으므로,
-    #   별도로 체크 여부를 조회한다.
     checked_with_flag = notion.query(
         notion.writable_id(DB),
         ["서비스명", "App ID", "One Liner", "Post URL", "Rating", "Genre", "DB로 업데이트"],
@@ -346,8 +317,7 @@ def port() -> int:
     ported = failed = 0
     for row in new:
         genre_list = row.get("Genre") or []
-        mapped = [_GENRE_MAP[g] for g in genre_list if g in _GENRE_MAP]
-        mapped = [g for g in mapped if g in 극초기_allowed_genres]
+        mapped = [g for g in genre_list if g in 극초기_allowed_genres]        # 옵션은 라이브에서 — 코드 표를 두면 사람이 추가한 영역을 되돌린다
 
         props = {
             "법인(서비스)": row.get("서비스명") or "",
@@ -404,7 +374,7 @@ def daily_report(g: Gate, *, landed: int, candidates: int, fresh: int, unknowns:
     print(f"· 보고서 {out} | 슬랙 {report.post('appstore', f'*앱스토어 하루* — {head}' + chr(10) + f'전체: `{out}`', _send)}")
 
 
-def _report(run_id: str, **counts) -> None:
+def _report() -> None:
     """🔴 보고는 장부에서 만든다. claude 나 변수 기억이 아니라 **줄 수를 센다.**"""
     s = ledger.summary(TASK)
     print(f"· 장부: 오늘 {s['total_today']}줄 {s['counts']} · 총 {s['ledger_lines']}줄 · 마지막 {s['last_ts']}")
@@ -432,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
             port()
             return 0
         if a.cmd == "status":
-            print(ledger.summary(TASK))
+            _report()
             return 0
         if a.cmd == "health":
             return report.health("appstore", _reports_dir(), _send, label="앱스토어 collect")

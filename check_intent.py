@@ -37,6 +37,7 @@ TRANSPORTS = {
 }
 # 외부 접촉 모듈
 NET_MODULES = {"requests", "urllib", "urllib3", "http", "socket", "httpx", "aiohttp"}
+NET_EXEMPT = {"urllib.parse"}        # 망에 닿지 않는 순수 파서. urllib.request 는 그대로 막힌다
 SPAWN_MODULES = {"subprocess"}
 
 # 🔴 프로세스를 띄워도 되는 파일. **명단은 작게 유지하고 한 줄씩 이유를 적는다.**
@@ -106,11 +107,12 @@ def a1_single_transport() -> None:
         for node in ast.walk(tree):
             mods = []
             if isinstance(node, ast.Import):
-                mods = [a.name.split(".")[0] for a in node.names]
+                mods = [a.name for a in node.names]
             elif isinstance(node, ast.ImportFrom) and node.module:
-                mods = [node.module.split(".")[0]]
-            for m in mods:
-                if m in NET_MODULES and r not in TRANSPORTS:
+                mods = [node.module]
+            for full in mods:
+                m = full.split(".")[0]
+                if m in NET_MODULES and full not in NET_EXEMPT and r not in TRANSPORTS:
                     bad.append(f"{r}:{node.lineno} {m} (망)")
                 elif m in SPAWN_MODULES and r not in SPAWN_ALLOWED:
                     bad.append(f"{r}:{node.lineno} {m} (프로세스)")

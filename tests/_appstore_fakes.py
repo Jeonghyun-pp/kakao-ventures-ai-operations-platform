@@ -42,9 +42,6 @@ class Notion:
     def __init__(self, rows=()):
         self.rows, self.created = list(rows), []
 
-    def register_writable(self, k, db):
-        pass
-
     def writable_id(self, k):
         return k
 
@@ -72,10 +69,11 @@ class Case:
         self._stack.enter_context(mock.patch.object(run, "notion", self.notion))
         self._stack.enter_context(mock.patch.object(kr_origin, "llm_judge_origin", self.llm))
         self._stack.enter_context(mock.patch.object(run, "_GENRES", [6014]))                    # 장르 하나만 — 차트 4번
-        self.db = sqlite3.connect(":memory:"); self.db.executescript(judgments.SCHEMA)
+        self.db = sqlite3.connect(":memory:", isolation_level=None); self.db.executescript(judgments.SCHEMA)     # 자동 커밋 — store.connect 와 같게(열린 트랜잭션이 있으면 backup 이 멈춘다)
         self.gate = Gate(self.db, "appstore", force="off" if self.dry else None)
         self._stack.enter_context(mock.patch.object(run, "_gate", lambda dry_run=False: self.gate))
         self._stack.enter_context(mock.patch.object(run, "_reports_dir", lambda: d))
+        self._stack.enter_context(mock.patch.object(run, "db_path", lambda: d / "db" / "t.sqlite"))       # 백업도 임시 폴더로 — 테스트가 프로덕션을 안 건드린다
         self._stack.enter_context(mock.patch.object(run, "_send", lambda ch, text: self.posts.append((ch, text)) or "ts"))
         self.dir = d
         self._stack.enter_context(contextlib.redirect_stdout(self.out))

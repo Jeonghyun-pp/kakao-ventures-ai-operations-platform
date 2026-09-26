@@ -23,6 +23,7 @@ def connect(path: Path | str, schema: str) -> sqlite3.Connection:
 
 
 def backup(con: sqlite3.Connection, dest_dir: Path, prefix: str, keep: int) -> Path:
+    dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{prefix}-{datetime.now(timezone.utc):%Y-%m-%d}.sqlite"
     tmp = dest.with_suffix(".tmp")
     tmp.unlink(missing_ok=True)

@@ -119,11 +119,12 @@ class Case:
             self._stack.enter_context(mock.patch.object(run, name, fake))
         real = run.constraints.get
         self._stack.enter_context(mock.patch.object(run.constraints, "get", lambda k: self.cfg[k] if k in self.cfg else real(k)))
-        self.db = sqlite3.connect(":memory:"); self.db.executescript(judgments.SCHEMA)
+        self.db = sqlite3.connect(":memory:", isolation_level=None); self.db.executescript(judgments.SCHEMA)     # 자동 커밋 — store.connect 와 같게(열린 트랜잭션이 있으면 backup 이 멈춘다)
         self.gate = Gate(self.db, "bplan", lambda k: k in run.SLACK_KINDS, force="off" if self.cfg.get("_dry") else None)
         self._stack.enter_context(mock.patch.object(run, "_gate", lambda dry_run=False: self.gate))
         self._stack.enter_context(mock.patch.object(run.secrets, "get", lambda k, **kw: f"<{k}>"))
         self._stack.enter_context(mock.patch.object(run, "_reports_dir", lambda: d))
+        self._stack.enter_context(mock.patch.object(run, "db_path", lambda: d / "db" / "t.sqlite"))       # 백업도 임시 폴더로 — 테스트가 프로덕션을 안 건드린다
         self._stack.enter_context(contextlib.redirect_stdout(self.out))
         return self
 
