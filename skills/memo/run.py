@@ -296,7 +296,7 @@ def _done(g: Gate, key: str, company: str, v: int, msgs: list[dict], note_ts: st
     metrics = _metrics(v1, final) if v1.exists() and final.exists() else {}
     judgments.save(g.con, judgments.HUMAN, "", {key: ""}, [{"key": key, "verdict": "done", "reason": f"✅ v{v} · {final.name}", "raw": ""}],
                    extra={key: metrics})
-    g.put(key, "done", "done", {"final": str(final), "versions": v, **{k: metrics[k] for k in ("survival", "discard_rate", "ratio") if k in metrics}})
+    g.put(key, "done", "done", {"final": str(final), "versions": v, **{k: metrics[k] for k in ("survival", "rewrite_rate", "discard_rate", "ratio") if k in metrics}})
     print(f"  ✅ {company}: v{v} 완료 · {metrics.get('survival', '?')} 생존 · {metrics.get('discard_rate', '?')} 폐기")
 
 
@@ -306,14 +306,19 @@ def _paras(path: Path) -> list[str]:
 
 
 def _metrics(draft: Path, final: Path) -> dict:
-    """스킬의 backtest 와 같은 자(문자 유사도 0.6): 생존율(완성본 문단 중 초안 유래) · 폐기율(초안 문단 중 버려진 것) · 분량비 · 버려진 문단 표본.
+    """스킬의 backtest 와 같은 자(문자 유사도 0.6): 생존율(완성본 문단 중 초안 유래) · 폐기율(초안 문단 중 버려진 것) · 분량비.
+    초안 문단은 셋으로 가른다 — 살았다(≥0.6) · **고쳐 썼다**(0.4~0.6, 초안→완성 문장 쌍 = 문장 규칙의 재료) · 버렸다(<0.4, 내용 선택의 재료).
+    0.4 인 이유: Corpus02 실측에서 0.3 대는 141건이 거의 잡음(한글은 글자가 겹친다), 0.4 대 65건부터 같은 문장의 다른 표현이었다.
     스킬의 backtest.py 를 직접 부르지 않는 이유: 통로 밖 spawn 금지(A1)."""
     a, b = _paras(draft), _paras(final)
-    def best(x, pool): return max((difflib.SequenceMatcher(None, x, y).ratio() for y in pool), default=0.0)
-    kept = sum(len(x) for x in b if best(x, a) > 0.6)
-    discarded = [x for x in a if best(x, b) <= 0.6]
-    return {"survival": round(kept / max(1, sum(map(len, b))), 2), "discard_rate": round(len(discarded) / max(1, len(a)), 2),
-            "ratio": round(sum(map(len, a)) / max(1, sum(map(len, b))), 2), "discarded_sample": discarded[:8]}
+    def best(x, pool): return max(((difflib.SequenceMatcher(None, x, y).ratio(), y) for y in pool), default=(0.0, ""))
+    kept = sum(len(x) for x in b if best(x, a)[0] > 0.6)
+    scored = [(x, *best(x, b)) for x in a]
+    rewritten = [{"draft": x, "final": y} for x, r, y in scored if 0.4 <= r <= 0.6]
+    discarded = [x for x, r, _ in scored if r < 0.4]
+    return {"survival": round(kept / max(1, sum(map(len, b))), 2), "discard_rate": round((len(discarded) + len(rewritten)) / max(1, len(a)), 2),
+            "rewrite_rate": round(len(rewritten) / max(1, len(a)), 2), "ratio": round(sum(map(len, a)) / max(1, sum(map(len, b))), 2),
+            "rewritten_sample": rewritten[:8], "discarded_sample": discarded[:8]}
 
 
 # ---------------------------------------------------------------- 로컬 한 건 (문 밖 · 시험용)
@@ -341,15 +346,18 @@ def daily_report(g: Gate) -> None:
     by = Counter(k.rstrip("0123456789") + ":" + s for _, k, s, _ in rows)
     done = [(k, json.loads(d)) for k, kind, s, d in rows if kind == "done"]
     gaps = Counter(x for k, kind, s, d in rows if kind.startswith("generate") and s == "done" for x in json.loads(d).get("gaps", []))
-    ex = g.con.execute("SELECT extra FROM judgments WHERE run=? AND created>=?", (judgments.HUMAN, today)).fetchall()
-    samples = [x for (e,) in ex for x in (json.loads(e or "{}").get("discarded_sample") or [])][:10]
+    ex = [json.loads(e or "{}") for (e,) in g.con.execute("SELECT extra FROM judgments WHERE run=? AND created>=?", (judgments.HUMAN, today))]
+    samples = [x for m in ex for x in (m.get("discarded_sample") or [])][:10]
+    pairs = [x for m in ex for x in (m.get("rewritten_sample") or [])][:10]
     head = (f"요청 {by['request:done']} · 접수 {by['ack:done'] + by['ack:dry']} · 초안 {by['generate:done']}(실패 {by['generate:failed']})"
             f" · 전달 {by['deliver:done']}(dry {by['deliver:dry']}) · 완료 {len(done)} · 문 {g.level()}")
     md = [f"# 투심 요청 레인 하루 보고 — {today}", "", head, "",
           "## 🚩 심사역이 지운 초안 문단 표본 (기준을 깎을 재료 — headless.md · 스킬 프롬프트)", ""]
     md += [f"- {s[:160]}" for s in samples] or ["없음(오늘 완료된 요청 없음)"]
+    md += ["", "## ✍️ 심사역이 고쳐 쓴 문장 쌍 (문장 규칙의 재료 — 00_공통스타일.md 에 넣을 것)", ""]
+    md += [f"- 초안: {p['draft'][:120]}\n  완성: {p['final'][:120]}" for p in pairs] or ["없음"]
     md += ["", "## 완료된 요청 — 초안 v1 대비", ""]
-    md += [f"- `{k}` 버전 {d.get('versions')} · 생존 {d.get('survival', '?')} · 폐기 {d.get('discard_rate', '?')} · 분량비 {d.get('ratio', '?')}" for k, d in done] or ["없음"]
+    md += [f"- `{k}` 버전 {d.get('versions')} · 생존 {d.get('survival', '?')} · 고쳐씀 {d.get('rewrite_rate', '?')} · 폐기 {d.get('discard_rate', '?')} · 분량비 {d.get('ratio', '?')}" for k, d in done] or ["없음"]
     md += ["", "## 미확인 상위", ""] + ([f"- {x} × {c}" for x, c in gaps.most_common(8)] or ["없음"])
     out = _reports_dir() / f"{today}.md"
     first = not out.exists()

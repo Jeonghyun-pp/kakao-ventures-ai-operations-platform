@@ -80,15 +80,19 @@ class Lane(unittest.TestCase):
 
 
 class Metrics(unittest.TestCase):
-    def test_discarded_paragraphs_are_sampled(self):
+    def test_paragraphs_split_into_kept_rewritten_discarded(self):
+        """실측 비율로 고른 픽스처: 같은 문장 1.0 · Corpus02 실제 고쳐 쓴 쌍 0.52 · 무관한 문단 0.21."""
         from tests._memo_fakes import make_docx
         import tempfile, pathlib
         with tempfile.TemporaryDirectory() as d:
-            a = make_docx(pathlib.Path(d) / "a.docx", ["같은 문단이 여기 있습니다 하나", "초안에만 있던 긴 문단입니다 지워질 것"])
-            b = make_docx(pathlib.Path(d) / "b.docx", ["같은 문단이 여기 있습니다 하나", "완성본에서 새로 쓴 문단입니다"])
+            a = make_docx(pathlib.Path(d) / "a.docx", ["같은 문단이 여기 있습니다 하나", "특허 출원번호 10-2024-0012345 는 등록 단계까지 확인함",
+                                                       "AI 캐릭터챗은 플랫폼 종속과 공동경험 부재로 팬덤 빌딩이 어렵고 BM이 광고 제거와 토큰 구매에 한정됨"])
+            b = make_docx(pathlib.Path(d) / "b.docx", ["같은 문단이 여기 있습니다 하나", "완성본에서 새로 쓴 시장 규모 문단입니다 전혀 다른 내용",
+                                                       "게다가 AI 캐릭터챗은 플랫폼에 종속되는 구조이므로 BM이 광고 제거 혹은 토큰 구매 등 대표 서비스들의 과금 항목이 대부분 '채팅 사용성 개선'에 한정됨."])
             m = run._metrics(a, b)
-        self.assertEqual((m["discard_rate"], m["discarded_sample"]), (0.5, ["초안에만 있던 긴 문단입니다 지워질 것"]))
-
+        self.assertEqual((m["discard_rate"], m["rewrite_rate"]), (0.67, 0.33))                      # 버림 1 + 고쳐씀 1 = 폐기 2/3
+        self.assertEqual(m["discarded_sample"], ["특허 출원번호 10-2024-0012345 는 등록 단계까지 확인함"])
+        self.assertTrue(m["rewritten_sample"][0]["final"].startswith("게다가 AI 캐릭터챗은"))              # 고쳐 쓴 쌍이 재료로 남는다
 
 if __name__ == "__main__":
     unittest.main()
