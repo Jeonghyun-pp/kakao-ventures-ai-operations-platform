@@ -93,14 +93,14 @@ class Lane(unittest.TestCase):
     def test_notion_change_makes_v2_and_check_marks_done(self):
         with Case(messages=[REQ], cfg={"fund.outbound": "slack"}) as c:
             run.followup(c.gate); run.followup(c.gate)
-            self.assertEqual(len(c.slack.uploads), 1)
+            self.assertEqual([u[1] for u in c.slack.uploads], ["v1.hwp", "p01.png", "p02.png"])          # hwp + 미리보기 두 쪽
             note_ts = c.slack.posts[-1][3]
             c.slack.replies_by["1700.1"] = [{"ts": note_ts, "bot_id": "B", "text": "v1"}, {"ts": "1900.0", "user": "U1", "text": "불렛이 서식보다 커요"}]
             n = run.followup(c.gate)
-            self.assertEqual((n["open"], n["feedback"]), (1, 1)); self.assertEqual(len(c.slack.uploads), 1)     # 노션이 안 바뀌면 다시 안 만든다
+            self.assertEqual((n["open"], n["feedback"]), (1, 1)); self.assertEqual(len(c.slack.uploads), 3)     # 노션이 안 바뀌면 다시 안 만든다
             c.notion.touch("p2", "2026-09-12T00:00:00.000Z")
             n = run.followup(c.gate)
-            self.assertEqual((n["revised"], len(c.slack.uploads)), (1, 2))
+            self.assertEqual((n["revised"], len(c.slack.uploads)), (1, 6))
             note2 = c.slack.posts[-1][3]
             c.slack.replies_by["1700.1"].append({"ts": note2, "bot_id": "B", "text": "v2", "reactions": [{"name": "white_check_mark", "users": ["U1"]}]})
             final = c.dir / "final_human.hwp"; final.write_bytes(b"HWP fake final")

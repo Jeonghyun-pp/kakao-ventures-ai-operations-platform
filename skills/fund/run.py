@@ -149,7 +149,7 @@ def _generate(g: Gate, key: str, title: str, db: str, form: Path, images: Path |
         txt, ins = hwp.text(out), hwp.inspect(out)
         if txt.is_measured and ins.is_measured:
             tr = audit.transfer(items, txt.require(), ins.require().get("tables", []))
-    summary = {"hwp": str(out) if r["ok"] else "", "edited": edited, "items": len(items), "tables": r.get("tables", 0), "ops": r["ops"],
+    summary = {"hwp": str(out) if r["ok"] else "", "edited": edited, "items": len(items), "tables": r.get("tables", 0), "ops": r["ops"], "pages": r.get("pages", []),
                "structure": r.get("structure", False), "format": r.get("format", []), "build_warnings": r["warnings"],
                "transfer": {k: (len(v) if isinstance(v, list) else v) for k, v in tr.items()},
                "missing": [m[1] for m in tr["missing"]][:10], "cells_bad": [f"{a} ({b},{c}) {d!r}≠{e!r}" for a, b, c, d, e in tr["cells_bad"]][:10],
@@ -179,13 +179,15 @@ def _note_text(title: str, v: int, made: dict, prof: dict | None) -> str:
         lines.append("• ⚠️ " + " · ".join(made["build_warnings"][:3]))
     if prof:
         lines.append("• 이 서식으로 읽었습니다 — 틀리면 알려 주세요\n" + build.profile_text(prof))
-    lines.append(f"• 한글에서 열어 보세요(정적 검사는 통과했지만 렌더링은 사람만 봅니다). 노션을 고치면 다음 바퀴에 v{v + 1}. 끝났으면 이 글에 ✅ (제출본을 올리면 그게 정답)")
+    lines.append(f"• 위 그림은 미리보기(rhwp)이고 한컴의 그림이 아닙니다 — 한글에서 열어 보세요. 노션을 고치면 다음 바퀴에 v{v + 1}. 끝났으면 이 글에 ✅ (제출본을 올리면 그게 정답)")
     return "\n".join(lines)
 
 
 def _deliver(g: Gate, key: str, ch: str, title: str, v: int) -> None:
     made = g.row(key, f"generate{v}")
-    g.out(key, f"deliver{v}", {"hwp": made["hwp"]}, lambda: slack.upload(ch, Path(made["hwp"]), thread_ts=key, title=f"{title} 제안서 v{v}").require())
+    g.out(key, f"deliver{v}", {"hwp": made["hwp"], "pages": len(made.get("pages", []))},
+          lambda: [slack.upload(ch, Path(made["hwp"]), thread_ts=key, title=f"{title} 제안서 v{v}").require()]
+          + [slack.upload(ch, Path(p), thread_ts=key, title=f"v{v} {Path(p).stem}").require() for p in made.get("pages", [])[:int(_cfg("preview_pages"))]])
     prof = json.loads((_req_dir(key) / "profile.json").read_text(encoding="utf-8")) if v == 1 and (_req_dir(key) / "profile.json").exists() else None
     text = _note_text(title, v, made, prof)
     g.out(key, f"note{v}", {"text": text}, lambda: slack.post(ch, text, thread_ts=key).require())

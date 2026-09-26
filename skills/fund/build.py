@@ -105,8 +105,13 @@ def _table(rows: list[list[str]], hdr: bool, p: dict) -> dict:
     cells = [[plain(c) for c in r] for r in rows]
     width = max(len(r) for r in cells)
     cells = [r + [""] * (width - len(r)) for r in cells]
+    # 열 너비는 내용 길이에 비례(최소 폭 보장) — 같은 너비로 두면 긴 머리글이 한 줄에 눌려 찌그러진다(9/26 렌더 실측). 사람이 마지막에 손보는 건 그대로다
+    longest = [max(len(r[c]) for r in cells) for c in range(width)]
+    weights = [max(4, min(l, 40)) for l in longest]
+    total_cm = float(p["image_width_mm"]) / 10
+    widths = [round(total_cm * w / sum(weights), 2) for w in weights]
     o = {"type": "append_table", "rows": cells[1:] if hdr else cells, "header_fill": p["header_fill"], "cell_padding": p["cell_padding"],
-         "header_align": "center", "cell_line_spacing": p["line_spacing"], "cell_font_family": p["font"], "cell_font_pt": p["sizes"]["TBL"]}
+         "header_align": "center", "cell_line_spacing": p["line_spacing"], "cell_font_family": p["font"], "cell_font_pt": p["sizes"]["TBL"], "col_widths_cm": widths}
     if hdr:
         o["headers"] = cells[0]
     else:
@@ -143,13 +148,19 @@ def _image(path: Path, p: dict) -> dict:
 
 
 def ops_for(items: list[dict], p: dict) -> list[dict]:
-    s, out = p["sizes"], []
+    """BLANK 은 기본으로 빈 문단이 아니라 **다음 문단의 위 간격**이다(gap_method "spacing", 앤 제출본 실측 706 HWPUNIT).
+    빈 문단을 넣으면 rhwp 가 그 뒤 표를 다음 쪽으로 밀었다(9/26 실측: 빈 문단 하나가 첫 표를 2쪽으로). "blank_paragraph" 는 KIF 식 서식용."""
+    s, out, gap = p["sizes"], [], 0
     for it in items:
         k = it["k"]
         if k == "PB":
             out.append({"type": "append_page_break"})
         elif k == "BLANK":
-            out.append({"type": "append_paragraph", "text": "", "line_spacing": p["line_spacing"], "margin_left": 0, "indent": 0})
+            if p.get("gap_method", "spacing") == "blank_paragraph":
+                out.append({"type": "append_paragraph", "text": "", "line_spacing": p["line_spacing"], "margin_left": 0, "indent": 0})
+            else:
+                gap = int(p.get("gap_hwp", 706))
+            continue
         elif k in ("SEC", "ITEM", "H1", "H2", "H3", "H4"):
             out.append(_para(it["t"], s[k], p, bold=True))
         elif k == "TXT":
@@ -166,6 +177,8 @@ def ops_for(items: list[dict], p: dict) -> list[dict]:
             out.append(_table(it["rows"], it.get("hdr", True), p))
         elif k == "IMG" and it.get("img"):
             out.append(_image(Path(it["img"]), p))
+        if gap and out and out[-1]["type"] in ("append_paragraph", "append_table", "append_image"):
+            out[-1]["spacing_before"] = gap; gap = 0
     return out
 
 
@@ -239,4 +252,9 @@ def build(items: list[dict], p: dict, template: Path, out: Path, work: Path) -> 
     rows = (af.or_default({}) or {}).get("rows", []) if af.is_measured else []
     r["format"] = [(x["name"], x["got"], x["sev"]) for x in rows if not x.get("ok")]
     r["ok"] = out.exists() and r["structure"]
+    if r["ok"]:                                                      # 쪽 그림 — rhwp 의 그림이지 한컴은 아니다. 불렛·표·크기를 눈으로 보는 용도
+        pages = hwp.render(out, work / "render")
+        r["pages"] = [str(x) for x in pages.or_default([])]
+        if not pages.is_measured:
+            r["warnings"].append(f"렌더 못 함: {pages.reason[:100]}")
     return r

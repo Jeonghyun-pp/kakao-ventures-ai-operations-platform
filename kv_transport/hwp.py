@@ -102,3 +102,36 @@ def audit_structure(path: Path) -> Fetched:
         return Fetched.unknown(f"hwp:audit_structure:{e}")
     report = (out + err).strip()
     return Fetched.measured({"ok": rc == 0 and "❌" not in report, "report": report[-3000:]}, rc=rc)   # 스크립트는 ❌ 를 찍고도 rc 0 을 줄 때가 있다(꼬리 검사 실측)
+
+
+# ---------------------------------------------------------------- 렌더 (rhwp 미리보기 → PNG)
+
+def render(path: Path, out_dir: Path, *, max_pages: int = 60, width: int = 1240) -> Fetched:
+    """쪽마다 PNG 하나. 엔진의 미리보기 서버(node, 임시 포트) + 헤드리스 크로미움(playwright)으로 rhwp 가 그린 캔버스를 찍는다.
+    🔴 이건 rhwp 의 그림이지 한컴의 그림이 아니다 — 불렛·들여쓰기·테두리·글꼴 크기를 눈으로 보는 용도. 한컴이 여는가는 보장하지 않는다(스킬 문서 실측)."""
+    import socket
+    from playwright.sync_api import sync_playwright                          # 통로 안에서만 import — 서버에 브라우저가 없으면 여기서만 죽는다
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]
+    srv = subprocess.Popen(["node", str(HWP / "preview-server.js")], cwd=str(HWP), env={**os.environ, "CLAW_HWP_PREVIEW_PORT": str(port)},
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    pngs: list[Path] = []
+    try:
+        with sync_playwright() as pw:
+            b = pw.chromium.launch(headless=True)
+            pg = b.new_page(viewport={"width": width, "height": 1600}, device_scale_factor=1)
+            pg.goto(f"http://127.0.0.1:{port}/?path={Path(path).resolve()}", wait_until="load", timeout=constraints.get("hwp.timeout_sec") * 1000)
+            pg.wait_for_function("document.querySelectorAll('.hwp-page canvas').length > 0", timeout=constraints.get("hwp.timeout_sec") * 1000)
+            pg.wait_for_timeout(1500)                                             # 마지막 쪽까지 그릴 시간 — 캔버스는 렌더 루프가 순서대로 채운다
+            canvases = pg.query_selector_all(".hwp-page canvas")
+            for i, c in enumerate(canvases[:max_pages]):
+                c.scroll_into_view_if_needed(); pg.wait_for_timeout(150)
+                f = out_dir / f"p{i + 1:02d}.png"
+                c.screenshot(path=str(f)); pngs.append(f)
+            b.close()
+    except Exception as e:                                                        # playwright 의 예외 종류가 많다 — 어느 것이든 '못 찍었다'로 재는 게 맞다
+        return Fetched.unknown(f"hwp:render:{type(e).__name__}:{str(e)[:200]}")
+    finally:
+        srv.terminate()
+    return Fetched.measured(pngs, pages=len(pngs))

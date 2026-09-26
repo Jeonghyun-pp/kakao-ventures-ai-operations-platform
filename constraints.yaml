@@ -257,6 +257,7 @@ fund:
     - {glyph: "-", gap: " ", margin_left: 5100, indent: -2000}
   image_width_mm: 170            # 본문 폭(A4 210 − 좌우 20). 세로가 아래 상한을 넘으면 가로를 줄인다
   image_max_height_mm: 120
+  preview_pages: 2               # 스레드에 같이 올리는 쪽 그림 수(rhwp 미리보기 PNG). 전체는 요청 폴더 vN/render/
 
 # ---------------------------------------------------------------- 한글 통로 (kv_transport/hwp, 2026-09-26 — 펀드제안서 레인)
 hwp:

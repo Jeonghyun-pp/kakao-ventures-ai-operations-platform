@@ -109,6 +109,12 @@ class Hwp:
     def audit_format(self, path, preset=None):
         return Fetched.measured({"rows": [{"n": 1, "name": "쪽 여백", "got": "ok", "ok": True, "sev": None}]})
 
+    def render(self, path, out_dir, **kw):
+        out_dir.mkdir(parents=True, exist_ok=True); pngs = []
+        for i in (1, 2, 3):
+            f = out_dir / f"p0{i}.png"; f.write_bytes(b"PNG fake"); pngs.append(f)
+        return Fetched.measured(pngs)
+
 
 class Case:
     def __init__(self, *, messages=(), cfg=None, people=({"names": ["심사역"], "slack_id": "U1"},), hwp=None, notion=None):
