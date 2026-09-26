@@ -18,7 +18,7 @@ from kvlib import paths
 from skills.mail import route, rules
 
 FIXTURE = paths.data("mail", "fixtures") / "recorded_decisions_20260903_20260921.json"
-COMPARE = ("action", "to", "body", "note", "also_reply", "kind", "ch", "lead", "ask", "unknown")
+COMPARE = ("action", "to", "body", "note", "also_reply", "kind", "ch", "lead", "unknown")     # ask 는 09-21 에 '무반응 7일' 문구를 뺐다 — 녹음은 옛 문구
 
 
 def _load() -> list[dict]:

@@ -21,7 +21,6 @@
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import secrets as _rand
@@ -30,7 +29,9 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from kvlib import constraints, ledger, lock, paths, report, store
+from kvlib import constraints, judgments, ledger, lock, paths, store, text
+from kvlib import report as kvreport                             # observe.report(보고서 만들기) 와 이름이 겹친다
+from kvlib.gate import SCHEMA as _GATE_SCHEMA
 
 from . import clean, rules
 
@@ -69,11 +70,7 @@ def db_path() -> Path:
 
 
 def connect(path: Path | str) -> sqlite3.Connection:
-    con = store.connect(path, _SCHEMA)
-    cols = [r[1] for r in con.execute("PRAGMA table_info(actions)")]
-    if "message_id" in cols:                                     # 2026-09-25 이전 DB — kvlib.gate 의 열 이름(key)으로
-        con.execute("ALTER TABLE actions RENAME COLUMN message_id TO key")
-    return con
+    return store.connect(path, _SCHEMA + _GATE_SCHEMA)          # actions 표도 여기서 — 보고서가 "아직 없다"를 따로 가르지 않는다
 
 
 # ---------------------------------------------------------------- 수집
@@ -122,7 +119,7 @@ def collect(con, reader, *, days: int) -> dict:
 # ---------------------------------------------------------------- 분류
 
 def criteria_sha(criteria: str) -> str:
-    return hashlib.sha256((SYSTEM + OUTPUT + criteria).encode("utf-8")).hexdigest()[:12]
+    return judgments.criteria_sha(SYSTEM, OUTPUT, criteria)
 
 
 def build_input(con, row, criteria: str) -> str:
@@ -132,8 +129,8 @@ def build_input(con, row, criteria: str) -> str:
     if row["webflow_kind"] is not None:
         body = clean.webflow(body)["content"]
     new, quoted = clean.split_quoted(clean.text(body))
-    new, cut = clean.clip(new, constraints.get("mail_observe.body_chars"))
-    quoted, _ = clean.clip(quoted, constraints.get("mail_observe.quoted_chars"))
+    new, cut = text.clip(new, constraints.get("mail_observe.body_chars"))
+    quoted, _ = text.clip(quoted, constraints.get("mail_observe.quoted_chars"))
 
     facts = [f"수신자 {m.get('recipient_count', 0)}명",
              "List-Unsubscribe 헤더 " + ("있음" if m.get("list_unsubscribe") else "없음")]
@@ -215,9 +212,6 @@ def judge(con, llm, *, run: str, criteria: str, limit: int = -1) -> dict:
 
 # ---------------------------------------------------------------- 보기
 
-
-
-
 def diff(con, a: str, b: str) -> list[dict]:
     """두 run 이 갈린 메일."""
     rows = con.execute(
@@ -249,11 +243,8 @@ def status(con) -> str:
 def _send_section(con, since: str) -> list[str]:
     """자동 회신의 후보와 제외, 그리고 갈래를 **켜도 되는지**. 🔴 승격 원칙은 gmail.promote 그대로다 —
     기간 안에 사람 정답이 붙은 표본이 min_samples 이상이고 분류 일치율이 rate 이상일 때만 "켜도 된다"고 말한다."""
-    try:
-        rows = con.execute("SELECT a.key AS message_id, a.status, a.detail, a.created, m.subject FROM actions a"
-                           " JOIN messages m ON m.id=a.key WHERE a.kind='send' ORDER BY a.created DESC").fetchall()
-    except sqlite3.OperationalError:
-        return ["아직 없음"]
+    rows = con.execute("SELECT a.key AS message_id, a.status, a.detail, a.created, m.subject FROM actions a"
+                       " JOIN messages m ON m.id=a.key WHERE a.kind='send' ORDER BY a.created DESC").fetchall()
     rows = [{**dict(r), **json.loads(r["detail"])} for r in rows]    # detail 의 to·category·why·blocked 를 행에 편다
     out, p = [], constraints.get("gmail.promote")
     floor = ledger.now(timedelta(days=p["window_days"]))
@@ -289,12 +280,9 @@ def report(con, since: str) -> tuple[str, str]:
         "SELECT m.id, m.subject, m.sender, m.internal_ms, m.rule_category rc, j.category c, j.reason, j.followup f,"
         " j.ok, j.error FROM judgments j JOIN messages m ON m.id=j.message_id"
         " WHERE j.run=? AND j.created>=? ORDER BY m.internal_ms DESC", (LIVE, since)).fetchall()
-    try:
-        acts = {}
-        for mid, kind, st in con.execute("SELECT key, kind, status FROM actions"):
-            acts.setdefault(mid, []).append(f"{kind}:{st}")
-    except sqlite3.OperationalError:                             # 판단 흐름이 아직 한 번도 안 돌았다
-        acts = {}
+    acts = {}
+    for mid, kind, st in con.execute("SELECT key, kind, status FROM actions"):
+        acts.setdefault(mid, []).append(f"{kind}:{st}")
 
     def flag(r) -> str:
         if not r["ok"]:
@@ -333,43 +321,11 @@ def report(con, since: str) -> tuple[str, str]:
     return "\n".join(md), slack
 
 
-# ---------------------------------------------------------------- 백업
-
-def backup(con, dest_dir: Path) -> Path:
-    """🔴 돌고 있는 DB 파일을 그냥 복사하지 않는다 — SQLite 온라인 백업으로 **일관된 사본**을 뜬다."""
-    dest = dest_dir / f"mail-{datetime.now(timezone.utc):%Y-%m-%d}.sqlite"
-    tmp = dest.with_suffix(".tmp")
-    tmp.unlink(missing_ok=True)
-    out = sqlite3.connect(str(tmp))
-    with out:
-        con.backup(out)
-    ok = out.execute("PRAGMA integrity_check").fetchone()[0]
-    out.close()
-    if ok != "ok":
-        raise RuntimeError(f"백업 무결성 검사 실패: {ok}")
-    tmp.replace(dest)
-    dest.chmod(0o600)
-    for old in sorted(dest_dir.glob("mail-*.sqlite"))[:-constraints.get("mail_observe.backup_keep")]:
-        old.unlink()
-    return dest
-
-
-def restore_test(dest_dir: Path) -> str:
-    """가장 최근 백업을 **실제로 열어** 읽어 본다. 백업이 있다는 것과 되살릴 수 있다는 것은 다르다."""
-    files = sorted(dest_dir.glob("mail-*.sqlite"))
-    if not files:
-        raise RuntimeError("백업이 없다")
-    con = sqlite3.connect(f"file:{files[-1]}?mode=ro", uri=True)
-    ok = con.execute("PRAGMA integrity_check").fetchone()[0]
-    n_m = con.execute("SELECT count(*) FROM messages").fetchone()[0]
-    n_j = con.execute("SELECT count(*) FROM judgments").fetchone()[0]
-    con.close()
-    if ok != "ok":
-        raise RuntimeError(f"복원 시험 실패: {ok}")
-    return f"{files[-1].name} · 무결성 ok · 메일 {n_m} · 판정 {n_j}"
-
-
 # ---------------------------------------------------------------- 진입점
+
+def _backup(con, bdir: Path) -> Path:
+    return store.backup(con, bdir, "mail", constraints.get("mail_observe.backup_keep"))
+
 
 def run_once(con, reader, llm, *, days: int, max_judge: int | None, no_judge: bool) -> int:
     rc = 0
@@ -398,24 +354,16 @@ def run_once(con, reader, llm, *, days: int, max_judge: int | None, no_judge: bo
 def health() -> int:
     """observe 는 자기가 안 돌았다고 말할 수 없다. 이건 **다른 시각의 작업**이 오늘 보고서 파일이 있는지 보는 것이다."""
     from . import flow
-    today = paths.data("mail", "reports") / f"{ledger.today()}.md"
-    if today.exists():
-        print(f"✅ 오늘 보고서 있음 · {today.name}")
-        return 0
-    print("🔴 " + flow.post_report(f"🔴 *오늘({ledger.today()}) 메일 observe 가 안 돌았습니다* — 보고서 파일이 없습니다. "
-                                   "맥이 잠들었거나 launchd 작업이 내려갔을 수 있습니다: `launchctl list | grep kv.mail`"))
-    return 2
+    return kvreport.health("mail_observe", paths.data("mail", "reports"), flow.RealIO().slack_post, label="메일 observe")
 
 
 def main(a) -> int:
-    if a.op == "health":
-        return health()
     from kv_transport import claude, gmail                       # 통로는 여기서만 잡는다
 
     llm = lambda prompt, system: claude.run_session(prompt, system=system, tools="")   # noqa: E731
     bdir = paths.data("mail", "db", "backup")
     if a.op == "restore-test":
-        print(f"✅ {restore_test(bdir)}")
+        print(f"✅ {store.restore_test(bdir, 'mail', {'messages': '메일', 'judgments': '판정'})}")
         return 0
     con = connect(db_path())
     if a.op == "status":
@@ -461,7 +409,7 @@ def main(a) -> int:
             f.close()
             return 0
         if a.op == "backup":
-            print(f"✅ {backup(con, bdir).name}")
+            print(f"✅ {_backup(con, bdir).name}")
             return 0
         if a.op == "replay":
             crit = Path(a.criteria or CRITERIA).read_text(encoding="utf-8")
@@ -493,5 +441,5 @@ def main(a) -> int:
             out.write_text(md, encoding="utf-8")
             print(f"  · 보고서 {out} | 슬랙 {flow.post_report(summary + f'\n전체 표: `{out}`')}")
         if not (bdir / f"mail-{datetime.now(timezone.utc):%Y-%m-%d}.sqlite").exists():
-            backup(con, bdir)                                    # 하루 한 번. 스케줄 행을 따로 안 만든다
+            _backup(con, bdir)                                   # 하루 한 번. 스케줄 행을 따로 안 만든다
         return rc

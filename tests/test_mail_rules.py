@@ -90,32 +90,5 @@ class RuleOrder(unittest.TestCase):
         self.assertEqual(hit["category"], rules.AD_NOISE)
 
 
-WEBFLOW_BODY = (
-    "문의 유형 : 투자 문의\n"
-    "이메일 : founder@example.com\n"
-    "문의 제목 : 투자 검토 요청\n"
-    "문의 내용 : 안녕하세요.\n"
-    "저희는 B2B SaaS 를 만드는 팀입니다.\n"
-    "\n"
-    "시드 라운드를 준비하고 있어 검토를 부탁드립니다.\n"
-)
-
-
-class Webflow(unittest.TestCase):
-    def test_reply_to_and_kind(self):
-        f = rules.parse_webflow(WEBFLOW_BODY)
-        self.assertEqual((f["kind"], f["reply_to"], f["title"]),
-                         ("투자 문의", "founder@example.com", "투자 검토 요청"))
-
-    def test_content_is_first_line_only_known_defect(self):
-        """🔴 알려진 결함: `문의 내용` 의 첫 줄만 잡힌다. 실측 3건 — 실제 886~3,904자 중
-        6~37자만 잡혔고, LLM 은 인사말 한 줄로 판정했다. 고치면 이 기대값을 바꾼다."""
-        self.assertEqual(rules.parse_webflow(WEBFLOW_BODY)["content"], "안녕하세요.")
-
-    def test_fallback_skips_webflow_and_kakao_addresses(self):
-        body = "문의 유형 : 기타 문의\nno-reply-forms@webflow.com\ndeals@example.vc\nreal@example.org\n"
-        self.assertEqual(rules.parse_webflow(body)["reply_to"], "real@example.org")
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,6 @@
     archive    인박스 라벨만 뗀다. 삭제가 아니라 되돌릴 수 있다
     reply      답장 초안. 원본 스레드에 붙는다
     forward    포워드 초안. 수신자를 **호출부가 명시**한다 — 절대 헤더에서 추측하지 않는다
-    escalate   인박스에 두고 보고서에 🚩 로 올린다. 초안을 안 만든다
     slack      #Squad-비플랜 에 올린다. 메일은 인박스에 남는다 — 반응을 기다리는 중이므로
 
 ## 🔴 "회신하지 않는다"와 "인박스에 남긴다"는 별개다
@@ -14,9 +13,6 @@
     채용   템플릿은 전부 "안 뽑음"인데 채용 상태는 시점마다 바뀐다.
            채용 중인데 안 뽑는다고 **회사 이름으로** 나가는 사고를 막는다
     사칭   회신 절대 금지. 오탐이 조용히 사라지므로 rules.py 의 힌트를 좁혔다
-
-지금 escalate 는 **한 곳뿐이다** — 웹플로우 문의자 주소를 못 찾은 경우.
-거기서만은 초안을 안 만든다. 주소를 추측하면 반송되기 때문이다.
 
 ## 🔴 웹플로우는 reply 가 아니라 forward 다
 
@@ -161,17 +157,6 @@ def body_chunks(msg: dict) -> list[str]:
             for i, c in enumerate(out, 1)]
 
 
-def _webflow(msg: dict) -> dict:
-    """웹플로우 폼인데 **문의자 주소를 본문에서 못 찾은** 경우. 여기 오는 건 그것뿐이다.
-
-    주소를 찾은 폼은 `observe.collect()` 가 문의자가 보낸 메일로 바꿔 모델에게 넘긴다(2026-09-02) — 유형별 분기는
-    그날부터 도달하지 않아 걷어냈다(2026-09-21). 그 분기들에 있던 결정은 SKILL.md '웹플로우 문의 유형별 결정'에 옮겼다.
-    🔴 no-reply 주소로는 **절대 답장하지 않는다**(550 반송). 주소를 추측하지도 않는다 — 사람에게 올린다.
-    """
-    return {"action": "escalate",
-            "note": "웹플로우 문의자 주소를 본문에서 못 찾았다 — 주소를 추측하면 반송된다"}
-
-
 def decide(msg: dict, hit: dict) -> dict:
     """카테고리 하나를 행동으로 바꾼다."""
     cat = hit["category"]
@@ -190,9 +175,6 @@ def decide(msg: dict, hit: dict) -> dict:
         #    대가: 안내에 사람이 챙겨야 할 게 섞여 있으면 놓친다. 발신 주소를 좁게
         #    잡아둔 이유가 그거다.
         return {"action": "archive", "note": "시스템 자동 안내 — 회신 없이 아카이빙"}
-
-    if cat == rules.WEBFLOW:
-        return _webflow(msg)
 
     if cat in (rules.AD_NOISE, rules.MASS_BLAST):
         return {"action": "archive", "note": hit["why"]}
@@ -215,20 +197,18 @@ def decide(msg: dict, hit: dict) -> dict:
     if cat == rules.TRUSTED_REF:
         # 🔴 [사용자 결정 2026-08-18] 답장 초안이 아니라 **슬랙에 올려 판단을 받는다.**
         #    폼을 생략하는 특혜 안내라 오판 비용이 크다 — 사람이 한 번 보고 눌러야 한다.
-        #      ⭕ → 접수 안내 초안   ❌ → 아카이브   무반응 7일 → 거절 초안 + 아카이브
+        #      ⭕ → 접수 안내 초안   ❌ → 아카이브   무반응 → 리마인드(mail_observe.remind_*). 거절로 바꾸지 않는다 [2026-09-21]
         lead = "신뢰 경로로 들어온 투자 건입니다."
-        ask = "⭕ 접수 안내 · ❌ 거절 · 무반응 7일이면 자동 거절 초안"
+        ask = "⭕ 접수 안내 · ❌ 거절"
         return {"action": "slack", "ch": POST_CH, "kind": "trusted_ref",
                 "lead": lead, "ask": ask,
-                "text": _post_text(msg, lead, ask),
                 "note": "신뢰 경로 → #Squad-비플랜 판단 요청  🔴 영원히 수동"}
 
     if cat == rules.EVENT_SPEAKER:
         lead = "행사·섭외 문의가 왔습니다."
-        ask = "⭕ 참여 검토 · ❌ 거절 · 무반응 7일이면 자동 거절 초안"
+        ask = "⭕ 참여 검토 · ❌ 거절"
         return {"action": "slack", "ch": POST_CH, "kind": "event",
                 "lead": lead, "ask": ask,
-                "text": _post_text(msg, lead, ask),
                 "note": "행사·섭외 → #Squad-비플랜"}
 
     if cat == rules.VENDOR_PITCH:

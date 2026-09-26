@@ -104,43 +104,7 @@ _AD_SENDER_TOKENS = (
 )
 _AD_SUBJECT_TOKENS = ("(광고)", "수신거부", "뉴스레터", "무료 세미나", "참가자 모집", "홍보요청")
 
-# 🔴 심사역 슬랙 사용자 ID. **핑을 찍으려면 이게 있어야 한다.**
-#    봇에 users:read 스코프가 없어 이메일로 조회할 수 없다(실측 08-18) — 값을 받아 채운다.
-#    비어 있으면 핑 없이 이름만 적어 게시한다. 조용히 넘어가지 않고 그 사실을 남긴다.
-
-
 # ---------------------------------------------------------------- 보조
-
-def parse_webflow(body: str) -> dict:
-    """웹플로우 폼 본문에서 문의 유형·문의자 주소·제목·내용을 뽑는다.
-
-    🔴 발신은 `no-reply-forms@webflow.com` 이다. 답장하면 거기로 가서 반송된다
-       (2026-07-10 실제로 550 반송, 문의자는 답을 못 받았다).
-       그래서 **본문에서 문의자 주소를 찾아 포워드**한다. 못 찾으면 초안을 안 만든다.
-    """
-    def field(label: str) -> str:
-        m = re.search(rf"{label}\s*:\s*(.+)", body or "")
-        return m.group(1).strip() if m else ""
-
-    email_line = field("이메일")
-    m = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", email_line)
-    reply_to = m.group(0) if m else ""
-
-    if not reply_to:
-        # 폴백: 본문 전체에서 찾되 webflow·kakao 주소는 뺀다 (그게 반송의 원인이다)
-        for cand in re.findall(r"[\w.+-]+@[\w-]+\.[\w.-]+", body or ""):
-            low = cand.lower()
-            if "webflow.com" not in low and "kakao" not in low:
-                reply_to = cand
-                break
-
-    return {
-        "kind": field("문의 유형"),
-        "reply_to": reply_to,
-        "title": field("문의 제목"),
-        "content": field("문의 내용"),
-    }
-
 
 # ---------------------------------------------------------------- 규칙 판정
 

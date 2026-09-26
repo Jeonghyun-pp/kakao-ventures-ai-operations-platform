@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 import unittest
 
-from kvlib import paths
-from skills.mail import clean, rules
+from kvlib import paths, text
+from skills.mail import clean
 
 WEBFLOW = (
     "You have a new form submission. 문의 유형 : 투자 문의\n"
@@ -59,11 +59,13 @@ class Webflow(unittest.TestCase):
         f = clean.webflow(WEBFLOW)
         self.assertEqual(f["content"], "안녕하세요.\n\n저희는 B2B SaaS 를 만드는 팀입니다.\n시드 라운드 검토를 부탁드립니다.")
 
-    def test_other_fields_match_the_production_parser(self):
-        new, old = clean.webflow(WEBFLOW), rules.parse_webflow(WEBFLOW)
-        for k in ("kind", "reply_to", "title"):
-            self.assertEqual(new[k], old[k], k)
-        self.assertGreater(len(new["content"]), len(old["content"]))   # 이게 고친 것이다
+    def test_reply_to_kind_and_title(self):
+        f = clean.webflow(WEBFLOW)
+        self.assertEqual((f["kind"], f["reply_to"], f["title"]), ("투자 문의", "founder@example.com", "투자 검토 요청"))
+
+    def test_fallback_skips_webflow_and_kakao_addresses(self):
+        body = "문의 유형 : 기타 문의\nno-reply-forms@webflow.com\ndeals@example.vc\nreal@example.org\n"
+        self.assertEqual(clean.webflow(body)["reply_to"], "real@example.org")
 
     def test_no_content_label(self):
         self.assertEqual(clean.webflow("문의 유형 : 기타 문의\n이메일 : a@example.com\n")["content"], "")
@@ -71,11 +73,11 @@ class Webflow(unittest.TestCase):
 
 class Clip(unittest.TestCase):
     def test_short_is_untouched(self):
-        self.assertEqual(clean.clip("짧다", 10), ("짧다", 0))
+        self.assertEqual(text.clip("짧다", 10), ("짧다", 0))
 
     def test_keeps_head_and_tail(self):
         s = "머리" + "가" * 100 + "검토 부탁드립니다"
-        out, cut = clean.clip(s, 30)
+        out, cut = text.clip(s, 30)
         self.assertTrue(out.startswith("머리") and out.endswith("검토 부탁드립니다"))
         self.assertEqual(cut, len(s) - 30)
         self.assertIn(f"중략 {cut}자", out)
@@ -91,7 +93,6 @@ class RealForms(unittest.TestCase):
             body = json.loads(p.read_text(encoding="utf-8"))["body"]
             got = len(clean.webflow(body)["content"])
             self.assertGreater(got, len(body) // 2, p.name)                       # 절반 이상이 문의 내용이다
-            self.assertGreater(got, 10 * len(rules.parse_webflow(body)["content"]), p.name)
 
 
 if __name__ == "__main__":

@@ -65,10 +65,6 @@ class Decide(unittest.TestCase):
     def test_unlisted_category_falls_through_to_unknown_forward(self):
         self.assertTrue(decide("NOT_A_CATEGORY")["unknown"])
 
-    def test_webflow_without_address_escalates(self):
-        act = decide(rules.WEBFLOW, body="문의 유형 : 기타 문의\n주소 없음\n")
-        self.assertEqual(act["action"], "escalate")
-
 
 class BodyChunks(unittest.TestCase):
     def test_empty_body_gives_nothing(self):

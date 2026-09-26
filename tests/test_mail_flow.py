@@ -250,10 +250,6 @@ class FlowCase(unittest.TestCase):
             self.flow(Hands()).decide("ko", "yes", by="manual")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class SendCase(unittest.TestCase):
     """폼 안내 자동 회신. 검사마다 하나씩."""
 
@@ -447,3 +443,6 @@ class ActCase(unittest.TestCase):
             n = f.act_all()
         self.assertEqual((len(h.calls), n["archive"], n["forward"]), (k, 0, 0))         # 두 번째 실행은 아무것도 안 한다
 
+
+if __name__ == "__main__":
+    unittest.main()

@@ -9,7 +9,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from kvlib import Fetched
+from kvlib import Fetched, store
 from skills.mail import observe, rules
 
 OK = "CATEGORY: INBOUND_KO\nREASON: \"투자 검토를 부탁\" 이라고 썼다\nFOLLOWUP: no\n"
@@ -170,8 +170,7 @@ class Report(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             observe.run_once(con, Reader([mail("u", subject="빈 메일", ms=20), mail("k", ms=10)]),
                              lambda p, s: next(outs), days=2, max_judge=50, no_judge=False)
-        con.executescript("CREATE TABLE actions(key TEXT, kind TEXT, status TEXT, detail TEXT, created TEXT, PRIMARY KEY(key, kind));"
-                          "INSERT INTO actions VALUES('k','send','dry','{}','2026-09-22T00:00:00Z');"
+        con.executescript("INSERT INTO actions VALUES('k','send','dry','{}','2026-09-22T00:00:00Z');"
                           "INSERT INTO actions VALUES('k','draft','dry','{}','2026-09-22T00:00:00Z');"
                           "INSERT INTO actions VALUES('u','forward','dry','{}','2026-09-22T00:00:00Z');")
         md, slack = observe.report(con, "2000-01-01T00:00:00Z")
@@ -189,8 +188,6 @@ class Promotion(unittest.TestCase):
     def setUp(self):
         self.con = observe.connect(":memory:")
         self.addCleanup(self.con.close)
-        self.con.executescript("CREATE TABLE actions(key TEXT, kind TEXT, status TEXT, detail TEXT, created TEXT,"
-                               " PRIMARY KEY(key, kind));")
         for i in range(6):
             self.con.execute("INSERT INTO messages(id, subject) VALUES(?, ?)", (f"m{i}", "투자 문의"))
             self.con.execute("INSERT INTO actions VALUES(?, 'send', 'dry', ?, ?)",
@@ -230,10 +227,10 @@ class Backup(unittest.TestCase):
             writer.execute("INSERT INTO messages(id) VALUES('half')")
             bdir = Path(d) / "backup"
             bdir.mkdir()
-            observe.backup(con, bdir)
+            observe._backup(con, bdir)
             writer.execute("ROLLBACK")
             writer.close()
-            out = observe.restore_test(bdir)
+            out = store.restore_test(bdir, "mail", {"messages": "메일", "judgments": "판정"})
             self.assertIn("무결성 ok", out)
             self.assertIn("메일 7", out)                            # 끝나지 않은 쓰기는 사본에 없다
 
@@ -264,24 +261,22 @@ class ReadOnly(unittest.TestCase):
         self.assertFalse([m for m in froms if m.startswith("kv_transport")], froms)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class Health(unittest.TestCase):
     """꺼짐 알림 — 오늘 보고서 파일이 없으면 한 줄, 있으면 조용하다."""
 
     def test_alerts_only_when_todays_report_is_missing(self):
         from kvlib import ledger
-        from skills.mail import flow
         d = Path(self.enterContext(tempfile.TemporaryDirectory()))
         said = []
         with contextlib.redirect_stdout(io.StringIO()), \
                 unittest.mock.patch.object(observe.paths, "data", lambda *a, **k: d), \
-                unittest.mock.patch.object(flow, "post_report", lambda text, io=None: said.append(text) or "게시함"):
+                unittest.mock.patch.object(observe.kvreport, "post", lambda task, text, send: said.append(text) or "게시함"):
             self.assertEqual(observe.health(), 2)
             (d / f"{ledger.today()}.md").write_text("보고서")
             self.assertEqual(observe.health(), 0)
         self.assertEqual(len(said), 1)
         self.assertIn("안 돌았습니다", said[0])
 
+
+if __name__ == "__main__":
+    unittest.main()

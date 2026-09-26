@@ -2,26 +2,21 @@
 
 ## 왜 필요한가 (실측 2026-09-21)
 
-    웹플로우   `rules.parse_webflow` 는 `문의 내용` 의 **첫 줄만** 잡는다.
-              실제 886~3,904자 중 6~37자. 모델은 인사말 한 줄로 판정했다
+    웹플로우   옛 파서는 `문의 내용` 의 **첫 줄만** 잡았다 — 실제 886~3,904자 중 6~37자. 모델은 인사말 한 줄로 판정했다
     인용문     결정적 문장이 인용 원문 속에 있거나, 인용문이 앞자리를 차지한다
     잔재       HTML 을 글자로 바꾸며 `<o:p>`·`&nbsp;` 가 남는다
-
-`rules.parse_webflow` 는 **안 고친다** — 현행 plan 이 쓰고 있고 테스트가 그 동작을 고정해 뒀다.
-옛 흐름을 걷어낼 때 이쪽으로 바꾼다.
 """
 from __future__ import annotations
 
 import html
 import re
 
-from kvlib.text import clip  # noqa: F401 — observe 가 clean.clip 으로 부른다
-
-from . import route, rules
+from . import route
 
 # 웹플로우 알림의 꼬리. 여기부터는 문의 내용이 아니다.
 _WF_FOOTER = "If you believe this is a spam submission"
 _WF_CONTENT = re.compile(r"문의 내용\s*:\s*(.*)", re.S)
+_EMAIL = r"[\w.+-]+@[\w-]+\.[\w.-]+"
 
 # 여기부터는 상대가 **새로 쓴 글이 아니다.** 첫 표식에서 자른다.
 # ponytail: 흔한 표식 다섯 가지만. 놓친 인용문은 그냥 본문으로 들어간다(모델이 읽을 뿐 해는 없다).
@@ -59,9 +54,21 @@ def split_quoted(s: str) -> tuple[str, str]:
 
 
 def webflow(body: str) -> dict:
-    """`rules.parse_webflow` 와 같되 `content` 가 **끝까지**다."""
-    form = rules.parse_webflow(body or "")
-    m = _WF_CONTENT.search(body or "")
-    if m:
-        form["content"] = text(m.group(1).split(_WF_FOOTER)[0])
-    return form
+    """웹플로우 폼 본문 → 문의 유형·문의자 주소·제목·내용(끝까지).
+
+    🔴 발신은 `no-reply-forms@webflow.com` 이다. 답장하면 거기로 가서 반송된다(2026-07-10 실제 550 반송, 문의자는 답을 못 받았다).
+       그래서 **본문에서 문의자 주소를 찾아** 문의자가 보낸 메일처럼 본다. 못 찾으면 초안을 안 만든다(flow 의 no-reply 수신자 검사).
+       폴백으로 본문 전체에서 찾되 webflow·kakao 주소는 뺀다 — 그게 반송의 원인이다.
+    """
+    body = body or ""
+
+    def field(label: str) -> str:
+        m = re.search(rf"{label}\s*:\s*(.+)", body)
+        return m.group(1).strip() if m else ""
+
+    m = re.search(_EMAIL, field("이메일"))
+    reply_to = m.group(0) if m else next((c for c in re.findall(_EMAIL, body)
+                                          if "webflow.com" not in c.lower() and "example.vc" not in c.lower()), "")
+    c = _WF_CONTENT.search(body)
+    return {"kind": field("문의 유형"), "reply_to": reply_to, "title": field("문의 제목"),
+            "content": text(c.group(1).split(_WF_FOOTER)[0]) if c else ""}

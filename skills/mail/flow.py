@@ -137,7 +137,7 @@ class Flow(Gate):
     def _post(self, s: State) -> dict:
         m, row = self._msg(s["mid"])
         act = route.decide(m, {"category": row["category"], "why": row["reason"]})
-        ask = act["ask"].split(" · 무반응")[0]                            # 현행 문구에서 '무반응 7일이면 자동 거절'만 뺀다 — 여기선 안 한다
+        ask = act["ask"]
         ping = mention(f"{m['subject']}\n{m['body'][:constraints.get('gmail.named_partner_body_chars')]}")
         text = route._post_text(m, act["lead"], ask, ping=ping, summary=row["reason"])   # 요약은 분류가 이미 쓴 한 문장
 
