@@ -60,7 +60,6 @@ cd ~/kv
 ./.venv/bin/python -m skills.linkedin.run status            # 축별 마지막 실행·다음 페이지·커버리지·재고
 ./.venv/bin/python -m skills.linkedin.run label             # 노션 Tier → human (card 가 매일 하지만 손으로도)
 ./.venv/bin/python -m skills.linkedin.run replay | diff --b r-<sha>
-./.venv/bin/python tools/replay_linkedin.py                 # 원본 1,865행으로 파서 검증 (돈 0·망 0)
 ```
 
 ## 구성

@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from kvlib import Fetched, constraints, paths, secrets
+from kvlib import Fetched, constraints, paths, secrets, ledger
 
 _API = "https://api.apify.com/v2"
 _NET_ERRORS = (
@@ -71,7 +71,7 @@ def _ledger_path():
 
 def _record(skill: str, slug: str, usd: float, ok: bool, note: str = "") -> None:
     """🔴 지출 장부. 옛 시스템엔 이게 **없었다** — 프로세스가 죽으면 기록이 사라졌다."""
-    row = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    row = {"ts": ledger.now(),
            "skill": skill, "slug": slug, "usd": round(usd, 4), "ok": ok}
     if note:
         row["note"] = note
@@ -142,11 +142,12 @@ def _archive(slug: str, payload: dict, items: list) -> None:
 # ---------------------------------------------------------------- 호출
 
 def run_actor(slug: str, payload: dict, *, skill: str, est_usd: float,
-              memory_mb: int | None = None, timeout: int = 300) -> Fetched:
+              memory_mb: int | None = None, timeout: int | None = None) -> Fetched:
     """액터 한 번. **skill 은 키워드 필수** — 꼬리표 없는 지출을 불가능하게 만든다.
 
     est_usd 는 이 호출의 예상 비용이다. 응답 전에 장부에 반영한다.
     """
+    timeout = timeout or constraints.get("apify.run_timeout_sec")
     global _spent_this_run
     if not skill:
         raise TypeError("skill 꼬리표가 없다 — 누가 쓴 돈인지 모르는 지출을 만들지 않는다")

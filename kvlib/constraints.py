@@ -51,11 +51,3 @@ def get(dotted: str) -> Any:
             )
         node = node[part]
     return node
-
-
-def has(dotted: str) -> bool:
-    try:
-        get(dotted)
-        return True
-    except KeyError:
-        return False

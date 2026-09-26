@@ -582,7 +582,7 @@ def _draft(g: Gate, key: str, row: dict, n: Counter) -> None:
     if (g.row(key, "draft") or {}).get("status") in ("done", "skipped"):
         return
     email = (row.get("이메일") or "").strip().lower()
-    since = (datetime.now(timezone.utc) - timedelta(days=_cfg("drop_after_days"))).strftime("%Y-%m-%dT%H:%M:%SZ")
+    since = ledger.now(timedelta(days=_cfg("drop_after_days")))
     if g.con.execute("SELECT 1 FROM actions WHERE kind='draft' AND status='done' AND created>=? AND json_extract(detail,'$.email')=?",
                      (since, email)).fetchone():
         g.put(key, "draft", "skipped", {"email": email, "why": f"같은 사람에게 {_cfg('drop_after_days')}일 안에 이미 초안"})

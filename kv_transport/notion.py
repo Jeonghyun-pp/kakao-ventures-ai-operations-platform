@@ -328,6 +328,8 @@ def archive(page_id: str) -> Fetched:
     """
     try:
         _req("PATCH", f"/pages/{page_id}", json_body={"archived": True})
+        if not _req("GET", f"/pages/{page_id}").get("archived"):            # 쓴 것은 되읽는다 — 200 은 저장을 뜻하지 않는다
+            return Fetched.unknown(f"notion:archive 되읽기 실패 {page_id}")
     except NotionError as e:
         # 🔴 이미 아카이브된 페이지에 PATCH 하면 400 이 난다. 그건 실패가 아니라
         #    **이미 원하는 상태**다. 멱등이어야 재실행이 안전하다.

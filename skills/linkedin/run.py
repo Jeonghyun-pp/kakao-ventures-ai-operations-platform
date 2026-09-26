@@ -871,7 +871,7 @@ def daily_report(g: Gate, *, pool: int, picked: int) -> None:
     today = ledger.today()
     day = {ev: sum(1 for r in ledger.rows(TASK, ev=ev) if str(r.get("ts", "")).startswith(today) or r.get("day") == today)
            for ev in ("landed", "carded", "outreach", "resolved", "promoted")}
-    week = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    week = ledger.now(timedelta(days=7))
     dist = dict(g.con.execute("SELECT verdict, count(*) FROM judgments WHERE run='live' AND ok=1 AND created>=? GROUP BY verdict", (week,)))
     human = g.con.execute("SELECT h.key, l.verdict, h.verdict FROM judgments h JOIN judgments l ON l.key=h.key AND l.run='live'"
                           " WHERE h.run='human' ORDER BY h.created DESC").fetchall()

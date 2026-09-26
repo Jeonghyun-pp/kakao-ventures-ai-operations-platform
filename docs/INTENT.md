@@ -13,14 +13,14 @@
 
 | # | 의도 | 어떻게 세나 |
 |---|---|---|
-| A1 | **통로는 소스마다 하나** | 통로 파일 밖에서 `requests`·외부 SDK import 0건 (AST) |
+| A1 | **통로는 소스마다 하나** | 통로 파일 밖의 import 는 stdlib(망 모듈 제외) · 리포 패키지 · **서드파티 허용 목록**(yaml·langgraph·docx)만 (AST). 09-26 에 금지 목록(requests…)에서 허용 목록으로 뒤집었다 — 새 SDK 가 조용히 뚫리지 않게 |
 | A2 | **0과 미상을 가른다** | 통로 반환이 전부 `Fetched`. `.value` 직접 접근 0건 |
 | A3 | **rc 로 성공을 판정하지 않는다** | `returncode == 0` 을 성공 근거로 쓰는 곳 0건 |
-| A4 | **쓴 것은 되읽는다** | 노션 쓰기 함수에 되읽기 없는 경로 0건 |
+| A4 | **쓴 것은 되읽는다** | notion.py 에서 POST·PATCH·DELETE 를 부르는 **모든** 함수(읽기 POST `/search`·`/databases/{}/query` 제외)에 `_verify` 또는 되읽는 GET 이 있다. 09-26 에 함수 이름 나열(create·update)에서 메서드 기준으로 뒤집었다 — archive 도 그날부터 되읽는다 |
 | A5 | **옵션을 코드에 박지 않는다** | select 값 문자열 리터럴 0건 (라이브 스키마에서 읽는다) |
 | A6 | **제약 숫자를 코드에 박지 않는다** | `2000`·`200`·`100`·`0.34` 같은 값이 `constraints` 밖에 0건 |
 | A7 | **돈은 꼬리표 없이 못 쓴다** | 유료 호출에 `skill` 인자 필수 (없으면 TypeError) |
-| A8 | **발송 경로는 하나이고 부르는 곳도 하나다** | A8a: `/send` 문자열은 `kv_transport/gmail_send.py` 한 줄에만 · A8b: 그 모듈을 import 하는 곳은 `skills/mail/flow.py`(+그 테스트)뿐. 나머지 금지 엔드포인트(`/trash`·`/batchDelete`·`/import`·`/insert`) + SDK 체인 + `smtplib` 는 어디서도 0건. 독스트링만 예외.<br>🔴 2026-09-21 까지는 "발송 경로 0건"이었다. 폼 안내 회신을 사람 없이 보내려고 바꿨다 — 검사를 끄지 않고 **허용 목록 둘**로 좁혔다. 실제로 나가려면 그 위에 `mail_observe.outbound: on` 과 `send_branches` 가 더 필요하다 |
+| A8 | **발송 경로는 하나이고 부르는 곳도 하나다** | A8a: 지메일에 쓰는 비GET `_req` 는 **닫힌 허용 집합**만 — gmail.py 의 `POST /messages/{}/modify`·`POST /drafts`, gmail_send.py 의 `POST /drafts/send`(리터럴 아닌 경로도 실패) · A8b: 발송 모듈을 import 하는 곳은 `skills/mail/flow.py`(+그 테스트)뿐. 지메일 호스트 문자열은 그 두 파일 밖에 없다 · SDK 체인 · `smtplib` 0건. 09-26 에 금지 엔드포인트 목록에서 허용 집합으로 뒤집었다(DELETE /messages/{id}·/batchModify·/settings/forwarding 이 뚫리던 구멍).<br>🔴 2026-09-21 까지는 "발송 경로 0건"이었다. 폼 안내 회신을 사람 없이 보내려고 바꿨다 — 검사를 끄지 않고 **허용 목록 둘**로 좁혔다. 실제로 나가려면 그 위에 `mail_observe.outbound: on` 과 `send_branches` 가 더 필요하다 |
 | A9 | **선언과 설치가 일치한다** | `SKILL.md` 스케줄 선언 ↔ launchd 실제 설치 대조 |
 | A10 | **검사가 실제로 문다** | 방어 코드를 되돌리면 검사가 실패한다 (변이 테스트) |
 | A11 | **테스트가 망을 안 부른다** | 테스트 중 소켓 연결 0건 |

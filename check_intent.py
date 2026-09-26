@@ -35,10 +35,13 @@ TRANSPORTS = {
     "kv_transport/sheets.py",
     "kv_transport/drive.py",
 }
-# 외부 접촉 모듈
-NET_MODULES = {"requests", "urllib", "urllib3", "http", "socket", "httpx", "aiohttp"}
+# 🔴 통로 밖에서 써도 되는 서드파티 — **허용 목록**. 금지 목록(requests·httpx…)은 새 SDK(googleapiclient·slack_sdk·boto3)가 들어오면 조용히 뚫린다.
+#    stdlib 는 닫힌 집합이라 통과시키되, 그 안의 망 모듈만 따로 막는다.
+ALLOWED_THIRD_PARTY = {"yaml": "설정·명부", "langgraph": "메일 flow 의 대기 그래프", "docx": "초안 vs 완성본 대조(memo._metrics)"}
+LOCAL_PACKAGES = {"kvlib", "kv_transport", "skills", "tests", "tools", "schedule", "check_intent"}
+STDLIB_NET = {"urllib", "http", "socket", "ftplib", "smtplib", "poplib", "imaplib", "telnetlib", "xmlrpc"}
 NET_EXEMPT = {"urllib.parse"}        # 망에 닿지 않는 순수 파서. urllib.request 는 그대로 막힌다
-SPAWN_MODULES = {"subprocess"}
+SPAWN_MODULES = {"subprocess"}       # 이 검사는 subprocess 만 본다(os.system·pty·multiprocessing 은 안 본다)
 
 # 🔴 프로세스를 띄워도 되는 파일. **명단은 작게 유지하고 한 줄씩 이유를 적는다.**
 #    "tools/ 는 전부 예외" 같은 카테고리 면제를 두지 않는다 — 그러면 그 안에서 뭐가
@@ -97,6 +100,7 @@ def rel(p: Path) -> str:
 
 # ---------------------------------------------------------------- A1
 def a1_single_transport() -> None:
+    """망은 통로에서만 · 서드파티는 허용 목록만 · 프로세스는 명단만."""
     bad = []
     for p in py_files():
         r = rel(p)
@@ -108,17 +112,22 @@ def a1_single_transport() -> None:
             mods = []
             if isinstance(node, ast.Import):
                 mods = [a.name for a in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module:
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:      # 상대 import(`from . import x`)는 리포 안이다
                 mods = [node.module]
             for full in mods:
                 m = full.split(".")[0]
-                if m in NET_MODULES and full not in NET_EXEMPT and r not in TRANSPORTS:
-                    bad.append(f"{r}:{node.lineno} {m} (망)")
-                elif m in SPAWN_MODULES and r not in SPAWN_ALLOWED:
+                if m in SPAWN_MODULES and r not in SPAWN_ALLOWED:
                     bad.append(f"{r}:{node.lineno} {m} (프로세스)")
-    check("A1", "통로 밖에서 외부에 닿는 코드 0건", not bad,
+                if r in TRANSPORTS:
+                    continue                                              # 통로는 망을 불러도 된다 — 그게 통로다
+                if m in sys.stdlib_module_names:
+                    if m in STDLIB_NET and full not in NET_EXEMPT:
+                        bad.append(f"{r}:{node.lineno} {full} (stdlib 망)")
+                elif m not in LOCAL_PACKAGES and m not in ALLOWED_THIRD_PARTY:
+                    bad.append(f"{r}:{node.lineno} {m} (통로 밖 서드파티 — 허용 목록에 없다)")
+    check("A1", "통로 밖에서 외부에 닿는 코드 0건 (서드파티는 허용 목록만)", not bad,
           f"{len(bad)}건: {bad[:5]}" if bad
-          else f"망: 통로 {len(TRANSPORTS)}개만 · 프로세스: 명단 {len(SPAWN_ALLOWED)}개만")
+          else f"망: 통로 {len(TRANSPORTS)}개만 · 서드파티 {sorted(ALLOWED_THIRD_PARTY)} · 프로세스: 명단 {len(SPAWN_ALLOWED)}개만")
 
 
 # ---------------------------------------------------------------- A2
@@ -148,20 +157,47 @@ def a3_no_rc_success() -> None:
 
 
 # ---------------------------------------------------------------- A4
+def _req_calls(fn: ast.AST, name: str = "_req") -> list[tuple[str, str | None]]:
+    """함수 안의 `_req(METHOD, PATH, …)` 호출 → (메서드, 정규화한 경로). f-string 의 변수 자리는 `{}`, 리터럴이 아니면 None."""
+    out = []
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == name and len(n.args) >= 2:
+            method = n.args[0].value if isinstance(n.args[0], ast.Constant) else None
+            path_node = n.args[1]
+            if isinstance(path_node, ast.Constant) and isinstance(path_node.value, str):
+                path = path_node.value
+            elif isinstance(path_node, ast.JoinedStr):
+                path = "".join(v.value if isinstance(v, ast.Constant) else "{}" for v in path_node.values)
+            elif isinstance(path_node, ast.Name):
+                path = f"${path_node.id}"                                   # 모듈 상수 이름 — 호출부가 풀어 준다
+            else:
+                path = None
+            out.append((str(method), path))
+    return out
+
+
+NOTION_READ_POST = {"/search", "/databases/{}/query"}                    # POST 지만 읽기다 — 닫힌 집합(노션 API 가 정한 것)
+
+
 def a4_readback() -> None:
-    """노션 쓰기 뒤에 되읽기가 붙어 있나."""
-    src = (ROOT / "kv_transport/notion.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    writers = {"create", "update"}
-    missing = []
+    """노션에 **쓰는** 함수(POST·PATCH·DELETE 를 부르는 것)는 전부 되읽는다 — 이름을 나열하지 않고 메서드로 가른다."""
+    tree = ast.parse((ROOT / "kv_transport/notion.py").read_text(encoding="utf-8"))
+    missing, writers = [], []
     for fn in ast.walk(tree):
-        if isinstance(fn, ast.FunctionDef) and fn.name in writers:
-            calls = {n.func.id for n in ast.walk(fn)
-                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-            if "_verify" not in calls:
-                missing.append(fn.name)
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        calls = _req_calls(fn)
+        writes = [(m, pth) for m, pth in calls if m != "GET" and not (m == "POST" and pth in NOTION_READ_POST)]
+        if not writes:
+            continue
+        writers.append(fn.name)
+        names = {n.func.id for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        if "_verify" not in names and not any(m == "GET" for m, _ in calls):
+            missing.append(fn.name)
+        if any(pth is None for _, pth in writes):
+            missing.append(f"{fn.name}(경로가 리터럴이 아니다)")
     check("A4", "노션 쓰기에 되읽기가 붙어 있다", not missing,
-          f"빠진 함수: {missing}" if missing else f"{sorted(writers)} 전부 _verify 호출")
+          f"빠진 함수: {missing}" if missing else f"쓰는 함수 {sorted(writers)} 전부 되읽음")
 
 
 # ---------------------------------------------------------------- A5
@@ -183,7 +219,7 @@ def a5_option_source() -> None:
 def a6_no_magic_constraints() -> None:
     """제약 숫자를 코드에 박지 않는다. 두 진실원을 원천 차단한다."""
     magic = {"2000": "노션 글자 한계", "0.34": "노션 rate limit",
-             "180": "claude timeout", "29": "apify 월 천장"}
+             "300": "claude timeout", "29": "apify 월 천장"}
     bad = []
     for p in py_files():
         if "constraints" in p.name or rel(p) in FIXTURE_FILES:
@@ -205,7 +241,7 @@ def a6_no_magic_constraints() -> None:
             for m, why in magic.items():
                 if re.search(rf"(?<![\w.]){re.escape(m)}(?![\w.])", code) and "constraints.get" not in code:
                     bad.append(f"{rel(p)}:{i} {m}({why})")
-    check("A6", "제약 숫자가 코드에 박혀 있지 않다", not bad, f"{len(bad)}건: {bad[:4]}" if bad else "")
+    check("A6", "제약 숫자 넷(2000·0.34·300·29)이 코드에 박혀 있지 않다 — 이 넷만 본다", not bad, f"{len(bad)}건: {bad[:4]}" if bad else "")
 
 
 # ---------------------------------------------------------------- A8
@@ -224,7 +260,13 @@ def a6_no_magic_constraints() -> None:
 #    전용이고, requests 로 짜면 **아무것도 못 잡는다** — 통로가 생기는 순간 무력해지는
 #    검사였다. 게다가 `drafts().send(id)` 로도 메일이 나가는데 그것도 못 잡았다.
 #    (옛 리포에 `drafts().send` 는 0건이었지만, 막아서가 아니라 우연히 없었다.)
-GMAIL_FORBIDDEN_ENDPOINTS = ("/send", "/trash", "/batchDelete", "/import", "/insert")
+# 🔴 지메일에 **쓰는** 호출은 이 넷뿐이다 — 닫힌 허용 집합. 금지 목록(/send·/trash…)은 DELETE /messages/{id}·/batchModify·
+#    /settings/forwarding 같은 다음 엔드포인트에 조용히 뚫린다. 목록 밖의 비GET `_req` 는 어디서든 실패다.
+GMAIL_ALLOWED_WRITES = {
+    "kv_transport/gmail.py": {("POST", "/messages/{}/modify"), ("POST", "/drafts")},
+    "kv_transport/gmail_send.py": {("POST", "/drafts/send")},
+}
+GMAIL_HOST = "gmail.googleapis.com"                                        # 이 문자열이 있을 수 있는 파일 = 위 둘
 SMTP_MODULES = {"smtplib", "aiosmtplib"}
 
 # 🔴 [2026-09-21] "발송 경로 0건" → "**발송 경로는 하나이고 부르는 곳도 하나다.**"
@@ -256,9 +298,11 @@ def _docstring_lines(tree: ast.AST) -> set[int]:
 
 
 def a8_no_send() -> None:
-    """메일이 바깥으로 나가는 경로가 **허용된 한 곳**뿐인가 (A8a · A8b).
+    """발송 경로는 하나 · 부르는 곳도 하나 · 지메일에 쓰는 호출은 닫힌 집합.
 
-    스코프로는 못 막는다 — 토큰이 가진 gmail.modify 에 send 가 포함된다. 막는 자리는 여기뿐이다.
+    A8a  비GET `_req` 는 GMAIL_ALLOWED_WRITES 에 있는 (메서드, 경로)만 — 리터럴이 아닌 경로도 실패
+    A8b  SEND_FILE 을 import 할 수 있는 곳은 SEND_CALLERS 뿐
+         + 지메일 호스트 문자열은 그 두 파일 밖에 없다 · smtplib 없다 · 옛 SDK `.send(` 패턴 없다
     """
     bad = []
     for p in py_files():
@@ -270,31 +314,33 @@ def a8_no_send() -> None:
             tree = ast.parse(src)
         except SyntaxError:
             continue                      # A0 가 이미 셌다
-        # smtplib 는 지메일 API 를 통째로 우회하는 발송 경로다
+        consts = {n.targets[0].id: n.value.value for n in ast.walk(tree)
+                  if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
+                  and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)}
         for node in ast.walk(tree):
             mods = ([a.name for a in node.names] if isinstance(node, ast.Import)
                     else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
             if any(str(m).split(".")[0] in SMTP_MODULES for m in mods):
                 bad.append(f"{r}:{node.lineno} smtp")
-            # A8b — 발송 통로를 부를 수 있는 곳은 허용 목록뿐이다 (`import x.gmail_send` · `from x import gmail_send` 둘 다)
             names = mods + ([a.name for a in node.names] if isinstance(node, ast.ImportFrom) else [])
             if any(str(m).split(".")[-1] == "gmail_send" for m in names) and r not in SEND_CALLERS:
                 bad.append(f"{r}:{node.lineno} 발송 통로를 허용되지 않은 곳에서 import")
+        if r in GMAIL_ALLOWED_WRITES:
+            for method, path in _req_calls(tree):
+                if method == "GET":
+                    continue
+                path = consts.get(path[1:], None) if isinstance(path, str) and path.startswith("$") else path
+                if (method, path) not in GMAIL_ALLOWED_WRITES[r]:
+                    bad.append(f"{r} {method} {path} (지메일 쓰기 허용 집합 밖)")
+        elif GMAIL_HOST in src:
+            bad.append(f"{r} 지메일 호스트를 통로 밖에서 부른다")
         skip_lines = _docstring_lines(tree)
         for i, line in enumerate(src.splitlines(), 1):
-            if i in skip_lines:
-                continue
-            code = line.split("#")[0]
-            for ep in GMAIL_FORBIDDEN_ENDPOINTS:
-                if ep in code and not (ep == "/send" and r == SEND_FILE):      # A8a
-                    bad.append(f"{r}:{i} {ep}")
-            # 옛 SDK 패턴도 계속 본다 — 누가 googleapiclient 를 다시 들여올 수 있다
-            if re.search(r"\.send\s*\(", code) and ("messages()" in code or "drafts()" in code):
-                bad.append(f"{r}:{i} sdk-send")
-    check("A8", "발송 경로는 하나 · 부르는 곳도 하나", not bad,
+            if i not in skip_lines and re.search(r"\.send\s*\(", line.split("#")[0]) and ("messages()" in line or "drafts()" in line):
+                bad.append(f"{r}:{i} sdk-send")                          # 옛 SDK 패턴 — 누가 googleapiclient 를 다시 들여올 수 있다
+    check("A8", "발송 경로는 하나 · 부르는 곳도 하나 · 지메일 쓰기는 닫힌 집합", not bad,
           f"{len(bad)}건: {bad[:4]}" if bad
-          else f"/send 는 {SEND_FILE} 에만 · import 는 {len(SEND_CALLERS)}곳만 · "
-               f"나머지 금지 엔드포인트 {len(GMAIL_FORBIDDEN_ENDPOINTS) - 1}종 · SDK send · smtplib — 전부 0")
+          else f"쓰기 {sum(len(v) for v in GMAIL_ALLOWED_WRITES.values())}종만 · import 는 {len(SEND_CALLERS)}곳만 · SDK send · smtplib · 호스트 유출 — 전부 0")
 
 
 # ---------------------------------------------------------------- 아직 못 세는 것
@@ -333,8 +379,8 @@ def a13_portability() -> None:
     bad = []
     for p in py_files():
         r = rel(p)
-        if r in ("schedule.py",) or r.startswith("tools/"):
-            continue        # 일회성 도구는 그 기계에서만 쓴다
+        if r == "schedule.py":
+            continue
         src = p.read_text(encoding="utf-8")
         try:
             in_string = set()
@@ -349,16 +395,16 @@ def a13_portability() -> None:
             for m in marks:
                 if m in line.split("#")[0]:
                     bad.append(f"{r}:{i} {m}")
-    check("A13", "맥 전용 코드가 schedule.py 밖에 없다", not bad,
+    check("A13", "맥 표식 넷(launchctl·LaunchAgents·/Users/·Library/)이 schedule.py 밖에 없다 — 이 넷만 본다", not bad,
           f"{len(bad)}건: {bad[:4]}" if bad else "옮길 때 고칠 곳이 schedule.py 하나다")
 
 
 def not_yet() -> None:
 
 
-    skip("A10", "검사가 실제로 문다(변이 테스트)", "별도 러너 필요 — 다음 단계")
-    skip("A11", "테스트가 망을 안 부른다", "테스트 러너가 아직 없다")
-    skip("A12", "테스트가 프로덕션을 안 건드린다", "테스트 러너가 아직 없다")
+    skip("A10", "검사가 실제로 문다(변이 테스트)", "tools/mutation_test.py 로 사람이 돌린다(10/10) — 검사기 안에서 자동으로 돌리지는 않는다")
+    skip("A11", "테스트가 망을 안 부른다", "A1 이 tests/ 를 같은 규칙으로 검사한다 — 별도로 세지 않는다")
+    skip("A12", "테스트가 프로덕션을 안 건드린다", "가짜 손이 db_path·reports·ledger 를 임시 폴더로 패치하는지는 사람이 본다(09-26 사고 뒤 넷 다 패치)")
 
 
 def main() -> int:

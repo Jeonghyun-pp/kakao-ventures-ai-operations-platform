@@ -23,7 +23,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kvlib import Fetched, constraints, paths
+from kvlib import Fetched, constraints, ledger, paths
 
 
 class SessionError(RuntimeError):
@@ -61,7 +61,7 @@ def _calls_today() -> int:
 def _record(ok: bool, err: str = "") -> None:
     """spawn 을 **시도했으면** 기록한다. timeout 도 쿼터를 태웠으므로 센다.
     게이트에 막힌 호출은 spawn 자체가 없으므로 안 센다 — 이 비대칭이 의도다."""
-    row = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "ok": ok}
+    row = {"ts": ledger.now(), "ok": ok}
     if err:
         row["err"] = err
     with _usage_path().open("a", encoding="utf-8") as f:
@@ -151,5 +151,5 @@ def dlq(skill: str, name: str, rows: list[dict]) -> None:
     p = paths.data(skill, "dlq") / f"{name}.jsonl"
     with p.open("a", encoding="utf-8") as f:
         for r in rows:
-            f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(), **r},
+            f.write(json.dumps({"ts": ledger.now(), **r},
                                ensure_ascii=False) + "\n")

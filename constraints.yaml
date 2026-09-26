@@ -4,7 +4,7 @@
 # **코드에 이 값을 리터럴로 박지 않는다.** 여기서 읽는다.
 # 그래야 제약이 흩어지지 않고, 바뀔 때 한 줄만 고친다.
 #
-# 근거는 ~/kv-automation/docs/contracts/30-external-constraints.md (56항목, 네트워크 0으로 실측)
+# 근거는 각 키의 주석이다(옛 kv-automation/docs 의 실측 문서는 2026-09-26 정리 때 지웠다 — 남은 기록은 여기와 각 통로의 docstring).
 
 appstore:
   # 🔴 밖으로 나가는 문(kvlib.gate). 나가는 것은 노션 착지(land) 하나. 살아 있는 시스템이라 on 에서 시작 — off 는 시험·중단용
@@ -42,11 +42,6 @@ appstore:
   #    → 요청 사이에 간격을 두고, 429 는 Retry-After 를 존중해 재시도한다.
   request_gap_sec: 1.0
 
-  # 판정 기준일은 **로컬(KST)** 이다. 스케줄러 period 는 UTC 라 00~09시 KST 에 하루 어긋난다.
-  # 07:00 KST = 22:00 UTC(전날). UTC 로 날짜를 세면 사람이 보는 날짜와 어긋나 매일 아침 오탐이 난다.
-  # (08-17 실측: 보고가 "오늘 2,808건 착지"라고 했는데 실제는 77건이었다)
-  day_boundary: local_kst
-
   # 신규 판정 기준. 이보다 오래된 앱은 버린다.
   max_age_days: 180
 
@@ -74,9 +69,7 @@ http:
 notion:
   rich_text_limit: 2000        # UTF-16 코드유닛. 파이썬 len 이 아니다.
                                # 이모지 3개로 2000자가 2003유닛 되어 495명 중 7명 착지 실패 (07-27)
-  rich_text_unit: utf16_code_units
   truncation_mark: "…⟪잘림⟫"    # 잘렸으면 잘렸다고 말한다. 값만으로는 구별이 안 된다.
-  children_max: 100
   # 🔴 [2026-08-17 실측 · 새 제약] 노션은 유니코드 줄 구분자를 **조용히 제거한다.**
   #    앱 설명 864자를 보냈더니 862자가 저장됐다(U+2028 두 개가 사라짐).
   #    되읽기가 없었으면 영영 몰랐을 손실이다 — 옛 시스템엔 되읽기가 없었다.
@@ -93,13 +86,6 @@ notion:
   #    되읽기 불일치(610 vs 608)로 실패했다. 이건 개행이 아니라 **없애는** 게 맞다(폭이 0이다).
   strips_zero_width: ["\u200b", "\u200c", "\u200d", "\ufeff"]
   rate_limit_rps: 3            # 공식 한도. 성공해도 잔다.
-  # 200 은 저장을 뜻하지 않는다 — 모르는 select 옵션을 조용히 버리면서 200 을 준다.
-  write_verify: read_back
-  # 옵션 목록의 정본은 항상 라이브 스키마다. 코드 상수를 믿으면 사람이 추가한 옵션을 되돌린다 (07-19).
-  option_source: live_schema
-  # 망 계열 예외 — ChunkedEncodingError 는 ConnectionError 의 서브클래스가 **아니다**.
-  # 헤더는 왔는데 본문 도중 끊긴 경우로, 노션 query 응답에서 가장 흔하다 (08-13 재발).
-  net_errors: [Timeout, ConnectionError, ChunkedEncodingError, ContentDecodingError]
 
 claude:
   # 구독 세션에는 사용량 API 가 없다 → 호출 수를 프록시로 잰다.
@@ -110,30 +96,18 @@ claude:
   daily_calls_block: 1000
   timeout_sec: 300             # 권한 프롬프트에 걸리면 무한정 멈춘다.
                                # 180 은 배치 하나를 못 끝내는 일이 잦았다 (08-30·31).
-  # rc 0 + 빈 출력 = 인증 만료. rc 로 성공을 판정하면 인증 만료가 ok:true 로 기록된다.
-  success_is_output_not_rc: true
-  # 출력은 soft 다. 스키마를 줘도 강제가 아니다 → 되읽어 검증한다.
-  wire: tsv                    # JSON 은 claude 가 " 를 이스케이프 안 해 배치 32건이 유실됐다.
   forbidden_tools: [Bash, WebFetch, WebSearch]
   # run_skill(긴 세션·MCP) 의 상시 금지. 허용 목록(memo.allowed_tools)과 별개로 편집·삭제·git 은 어떤 스킬도 못 쓴다
   skill_forbidden_tools: ["Edit", "Write", "NotebookEdit", "Bash(rm *)", "Bash(git *)"]
 
 apify:
   monthly_cap_usd: 29          # STARTER 실한도. 플랫폼이 정하고 우리가 못 넘긴다.
-  bill_on: request             # 런이 시작되면 과금. 응답을 못 받아도 돈은 나갔다.
   fallback_memory_mb: 8192     # 메모리 폴백 시 비싼 쪽을 가정한다 (과소계상 방지).
-  archive_raw: true            # 원본을 안 남기면 파싱 버그를 돈 다시 써서 고친다.
+  run_timeout_sec: 300         # 액터 한 번 기다리는 상한. 링크드인 1페이지(25명) 실측 1~2분 — 넘기면 액터 쪽 장애다
 
 slack:
   # 명시 값만 억제로 인정한다. truthy 판정이면 KV_NO_SEND=0 도 "켜짐"이 된다.
   suppress_values: ["1", "true", "yes", "on"]
-  # webhook 은 ts 를 안 준다 → 반응 조회 불가. 그래서 2026-08-18 에 bot API 로 옮겼다.
-  webhook_returns_ts: false
-  # 🔴 실패해도 HTTP 200 을 준다. 본문의 ok 로 판정해야 한다.
-  failure_is_http_200: true
-  # 봇에 부여된 스코프(실측 08-18): incoming-webhook · groups:history · channels:history · chat:write
-  # reactions:read 가 없어 reactions.list 는 못 쓴다 → conversations.history 로 읽는다.
-  reactions_via_history: true
   # 승인 어휘. 아무나 눌러도 인정한다 [사용자 결정 2026-08-18] —
   # 정현님이 심사역 대신 누르는 경우가 있다.
   reaction_no: [x, heavy_multiplication_x, negative_squared_cross_mark, no_entry_sign]
@@ -187,8 +161,6 @@ sheets:
   # 노션 `접수키` 가 그 문자열(한국어 로케일 타임스탬프)에서 만들어졌다.
   # UNFORMATTED 로 바꾸면 일련번호(float)가 와서 기존 키와 어긋난다 — 같은 접수가 두 번 들어간다.
   value_render: FORMATTED_VALUE
-  # values.get 은 뒤쪽 빈 칸을 **생략한 채** 준다 → 행 길이가 제각각이다. 인덱스로 읽으면 IndexError.
-  ragged_rows: true
 
 linkedin:
   # 🔴 밖으로 나가는 문(kvlib.gate). 살아 있는 시스템이라 **on 에서 시작**한다 — off/slack 은 시험·중단용.

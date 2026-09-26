@@ -24,6 +24,8 @@
                               `check()` 가 그걸 미리 확인한다
     반응은 conversations.history 로  reactions.list 는 reactions:read 가 필요한데 없다.
                               실측(08-18): history 응답의 message.reactions 로 읽힌다
+    봇 스코프(실측 09-26)       channels:history · groups:history · chat:write. **files:read·files:write 없음** —
+                              투심 레인(thread 파일 다운로드·docx 업로드)은 관리자가 스코프를 더해야 돈다
 """
 from __future__ import annotations
 
@@ -182,23 +184,6 @@ def check() -> Fetched:
     if bad:
         return Fetched.unknown(f"접근 불가 채널 {len(bad)}개: {bad}")
     return Fetched.measured(sorted(_CHANNELS))
-
-
-# ---------------------------------------------------------------- 편의
-
-def notify_owner(key: str, msg: str) -> Fetched:
-    return post(key, f":inbox_tray: {msg}")
-
-
-def send_text(key: str, text: str, *, dry_run: bool = False) -> bool:
-    """서식은 스킬이 만든다 — 그건 도메인이다. 반환은 **발송 성공 여부**.
-
-    억제·실패는 전부 False 다. dry_run 은 화면에만 찍고 True.
-    """
-    if dry_run:
-        print(_indent(text))
-        return True
-    return post(key, text).is_measured
 
 
 # ---------------------------------------------------------------- 이력·파일 (2026-09-26, 투심 레인)
