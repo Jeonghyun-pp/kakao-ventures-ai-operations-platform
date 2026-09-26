@@ -147,7 +147,9 @@ CUT_RULES: dict[str, dict[str, tuple[str, ...]]] = {
                   "홍보성: 이벤트/공구 미끼", "홍보성: 제3자 상품/매장 홍보",
                   "홍보성: 타사 뉴스 전달"),
     },
-    "링크드인": {},                              # L0 없음 — 검색이 이미 타이틀 필터다
+    "링크드인": {
+        "외국인 컷": ("외국인(비한국 거주)",),
+    },
 }
 
 
@@ -158,7 +160,28 @@ def _hardcut(cfg: dict, c: dict) -> str:
         return _hardcut_appstore(cfg, c)
     if src == "스레드":
         return _hardcut_threads(cfg, c)
-    return ""                                  # 링크드인 = L0 없음(검색이 이미 타이틀 필터)
+    if src == "링크드인":
+        return _hardcut_linkedin(cfg, c)
+    return ""
+
+
+def _hardcut_linkedin(cfg: dict, c: dict) -> str:
+    """링크드인 L0 — **확실한 외국 거주자만** 제거. 위치 미상은 통과(recall 우선).
+
+    kr_origin.py(앱스토어)와 같은 3값 철학:
+      · 한국 신호 있음 → 통과
+      · 위치 비어있음 → 통과 (모르면 살린다)
+      · 위치 있는데 한국 신호 0 → 외국인으로 컷
+
+    비용 비대칭: 한국 창업자를 잘못 버리면 영구 유실, 외국인이 남으면 사람이 거른다.
+    """
+    sig = c.get("signals") or {}
+    if sig.get("korea_signal"):
+        return ""
+    loc = (sig.get("location") or "").strip()
+    if not loc:
+        return ""
+    return f"외국인(비한국 거주)({loc})"
 
 
 def _hardcut_appstore(cfg: dict, c: dict) -> str:

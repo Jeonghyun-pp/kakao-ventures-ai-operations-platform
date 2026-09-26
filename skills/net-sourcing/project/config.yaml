@@ -306,6 +306,23 @@ channels:
     new_entry_only: false                # false = 차트 전체를 훑고 6개월 컷 + app_id 중복제거로만 거른다
     baseline_bridge: ["appstore_board"]  # appstore-rank 스킬이 쌓은 보드 스냅샷을 baseline 재사용
     enrich: true                         # lookup 보강(최초 출시일·평점·리뷰수·seller_url)
+    # 🔴 [2026-08-19 사용자 요청] 노션 착지 **전에** 한국 개발사만 남긴다.
+    #   KR 스토어프론트라 외국 앱도 설명이 한국어로 번역돼 들어온다 — W34 착지분 204건 중
+    #   **131건(64%)이 외국 개발사**였고, 사람이 매주 그걸 손으로 걸러왔다.
+    #
+    #   ⚠️ 이건 "한국을 골라내는" 필터가 **아니다**. `core/kr_origin` 은 3값(kr/foreign/unknown)을
+    #      내고 여기서는 **foreign 만 버린다.** unknown 은 통과다. 비용이 비대칭이라서다 —
+    #      한국 앱을 잘못 버리면 영구 유실(아무도 모른다), 외국이 남으면 사람이 거른다.
+    #      "한국만 남는다"고 기대하지 마라. 남는 건 "확실한 외국이 빠진 것"이다.
+    #
+    #   실측(W34 199건 고정 라벨, `python tools/kr_origin_eval.py`):
+    #      외국 126건 중 105건 제거(83%) · 한국 73건 중 유실 **0건**
+    #   판정 근거는 Match Reason 문장 끝에 `국적 kr(...)` / `국적 unknown(...)` 으로 붙는다.
+    #
+    #   🔴 enrich: false 와 함께 켜면 판정 재료(seller_name/seller_url/description)가 없어
+    #      전건 unknown = 필터가 **켜진 척만** 한다. 어댑터가 그때 HEALTH 로 경고한다.
+    #   롤백: 이 한 줄을 false. 코드 변경 불필요.
+    kr_only: true
   threads:
     enabled: true
     # ★ [정책 2026-07-11] **매일 실행**. max_posts=40 캡이 실측상 하루치에서 이미 찬다

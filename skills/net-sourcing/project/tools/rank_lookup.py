@@ -143,6 +143,14 @@ def enrich(apps: list[dict]) -> None:
                     continue
                 a.setdefault("name", res.get("trackName", ""))
                 a.setdefault("developer", res.get("sellerName", ""))
+                # 🔴 [2026-08-19] 위 줄은 **setdefault라서 사실상 발동하지 않는다** — SSR/RSS가
+                #   이미 developer(=artistName)를 채워놓기 때문이다. 그래서 `sellerName`이
+                #   **통째로 유실되고 있었다.** 둘은 다른 값이고 국적 판별력이 하늘과 땅 차이다:
+                #     artistName "Quvarte" ↔ sellerName "Quvarte Teknoloji Anonim Sirketi"(튀르키예)
+                #   developer 를 덮어쓰지는 않는다 — 노션 `Developer` 열의 기존 표기가 바뀐다.
+                #   **별도 키로 보존**하고 core/kr_origin 이 이걸 읽는다.
+                a["seller_name"] = res.get("sellerName", "")
+                a["langs"] = res.get("languageCodesISO2A") or []
                 a["released_at"] = (res.get("releaseDate") or "")[:10]
                 a["updated_at"] = (res.get("currentVersionReleaseDate") or "")[:10]
                 a["version"] = res.get("version", "")

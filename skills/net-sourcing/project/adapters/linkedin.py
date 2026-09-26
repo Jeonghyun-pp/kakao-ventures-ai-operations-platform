@@ -336,9 +336,10 @@ class LinkedInAdapter(Adapter):
             (PROJ / (seen_path + ".pending")).parent.mkdir(parents=True, exist_ok=True)
             (PROJ / (seen_path + ".pending")).write_text(
                 json.dumps(pend, ensure_ascii=False), encoding="utf-8")
-        # ★ "외국인 빼고 **한국인 먼저**" (요구 ver3) — 지금까지 score를 계산만 하고 **아무도 안 읽었다**.
-        #   하드컷은 하지 않는다(수집에서 자르지 않는 게 이 스킬의 원칙이고, 위치가 빈 프로필도 있다).
-        #   대신 **정렬**한다: 착지 순서가 곧 사람이 노션에서 위에서부터 읽는 순서다.
+        # ★ "외국인 빼고 **한국인 먼저**" (요구 ver3 → ver4: 외국인 하드컷 추가).
+        #   ver3까지는 정렬만 했으나, ver4(2026-09-03)부터 **확실한 외국 거주자를 judge.hardcut에서 제거**한다.
+        #   위치가 빈 프로필은 살린다(recall 우선). 컷 로직은 core/judge._hardcut_linkedin.
+        #   여기서는 **정렬**만 한다: 착지 순서가 곧 사람이 노션에서 위에서부터 읽는 순서다.
         #   kr_location/kr_school/stealth/fresh_tenure가 높은 사람이 위로 온다.
         out.sort(key=lambda c: c.signals.get("score", 0), reverse=True)
         kr = sum(1 for c in out if c.signals.get("korea_signal"))

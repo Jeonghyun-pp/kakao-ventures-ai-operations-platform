@@ -1,7 +1,7 @@
 """App Store 어댑터 — **판단 없는 신규진입 보드**.
 
 방침(사용자 결정 2026-07-11): *"발굴 가치가 큰지는 생각할 필요 없다. 2주 내에 새로 들어온 앱을
-나열하고 정보를 보여주면 끝."* → 이 어댑터는 **나열기**다. AI 판별도, 한국팀 추정도 하지 않는다.
+나열하고 정보를 보여주면 끝."* → 이 어댑터는 **나열기**다. AI 판별을 하지 않는다.
 사람이 노션에서 출시일·개발사 도메인·순위를 보고 직접 거른다.
 
   수집: 25개 카테고리 × 4개 차트
@@ -10,11 +10,21 @@
   필터: ① 차트 신규 진입(과거 스냅샷에 없던 app_id)
         ② **최초 출시일 6개월 이내** ← core/judge가 담당. 이게 사실상 유일한 필터다.
         ③ 대기업/기관 denylist (보조 — 6개월 컷이 대부분 이미 잡는다)
+        ④ **확실한 외국 개발사 제외** ← core/kr_origin (config `kr_only`, 2026-08-19 신설)
 
 ⚠️ 지우고 온 것들 (같은 실수 반복 금지):
 - **kr_signal(한국팀 정규식 추정)**: 넓게 잡으면 424개 중 225개가 한국으로 찍히고(절반이 베트남·중국·
   터키 오탐), 좁게 잡으면 실제 한국팀 123개 중 100개를 놓친다. **정규식으로는 어느 방향으로도 안 된다.**
   → 대신 seller_url(개발사 도메인)을 그대로 노출한다. .cn/.vn/.kr은 사람이 0.5초에 판단한다.
+
+  🔵 [2026-08-19 추기] 위 문단은 **여전히 유효하다** — 그리고 core/kr_origin 은 그 반례가 아니다.
+     옛 kr_signal 이 본 건 `artistName`(법인격이 안 보이는 표시명)이었고, kr_origin 이 보는 건
+     **`sellerName`(법인 실명)**이다. 후자는 그동안 rank_lookup 이 받아놓고 버리던 필드다.
+       artistName "Quvarte" ↔ sellerName "Quvarte Teknoloji Anonim Sirketi"(튀르키예)
+     그리고 방향이 반대다: kr_origin 은 "한국을 고르지" 않고 **"확실한 외국만 뺀다"**(3값 판정,
+     unknown 은 통과). 한국식 성씨 정규식은 판정이 아니라 **veto로만** 쓴다.
+     실측 199건 고정 라벨: 외국 126→105 제거(83%) · 한국 73건 유실 **0건**.
+     재측정: `python tools/kr_origin_eval.py` — 규칙을 고쳤으면 반드시 돌려라.
 - **genre=36(전체) 단독**: 종합 top-200에는 극초기 앱이 구조적으로 못 든다. 신규진입 29건 중 24건이
   홈플러스·배민·라인의 시즌성 재진입이었다.
 
@@ -24,6 +34,7 @@ from __future__ import annotations
 
 import requests
 
+from core import kr_origin
 from tools import rank_lookup
 
 from . import _util
@@ -69,6 +80,15 @@ class AppStoreAdapter(Adapter):
         new_only = ch.get("new_entry_only", True)
         do_enrich = ch.get("enrich", True)
         bridge = tuple(ch.get("baseline_bridge", ["appstore_board"]))
+        kr_only = ch.get("kr_only", False)
+
+        # 🔴 국적 판정의 입력(seller_name·seller_url·description)은 **전부 lookup 보강에서 온다.**
+        #   enrich 가 꺼져 있으면 판정 재료가 0이고, kr_origin 은 전건 unknown 을 뱉는다
+        #   → 필터가 **조용히 아무것도 안 하면서 켜져 있는 척** 한다. 이 스킬의 반복 실패 패턴이라
+        #   여기서 끊고 알린다(끄지는 않는다 — 사람이 의도적으로 그렇게 뒀을 수도 있다).
+        if kr_only and not do_enrich:
+            print("🔴 HEALTH: appstore kr_only=true 인데 enrich=false — "
+                  "판정 재료(seller_name/seller_url/description)가 없어 필터가 무력화된다.")
 
         out: list[Candidate] = []
         for chart in charts:
@@ -78,6 +98,7 @@ class AppStoreAdapter(Adapter):
             fetched_total = 0
             newentry_total = 0                          # 그중 '차트 최초 등장'이 몇 개인가(신호용)
             noreldate_total = 0                         # 출시일을 못 얻어 버린 개수
+            krdrop_total = 0                            # 국적 필터가 버린 개수
             for genre in targets:
                 try:
                     apps = self._fetch(genre, chart, n)
@@ -118,6 +139,17 @@ class AppStoreAdapter(Adapter):
                     before = len(picked)
                     picked = [a for a in picked if a.get("released_at")]
                     noreldate_total += before - len(picked)
+
+                # 🔴 [2026-08-19] 국적 필터. **확실한 외국만** 버린다(core/kr_origin 참조).
+                #   판정은 여기서 한 번만 하고 결과를 앱 dict에 실어 둔다 — _to_candidate 가
+                #   근거 문자열을 match_reason 에 붙여야 사람이 노션에서 "왜 남았나"를 본다.
+                for a in picked:
+                    a["kr_verdict"], a["kr_reason"] = self._origin(a)
+                if kr_only:
+                    before = len(picked)
+                    picked = [a for a in picked if a["kr_verdict"] != "foreign"]
+                    krdrop_total += before - len(picked)
+
                 for a in picked:
                     out.append(self._to_candidate(a, genre, chart,
                                                   is_new=a["app_id"] not in prev))
@@ -136,9 +168,20 @@ class AppStoreAdapter(Adapter):
             #     첫 실행에서 110개를 통째로 '기준선'으로 삼켜버려 emit이 0이 됐다. 그 110개는
             #     노션에 **한 번도** 안 올라갔다. new_entry_only: false 로 해결됐다.
             #   ⚠️ 장르 파라미터가 무시되는 건 사실이다(실측: 전체=게임=금융 결과 동일).
+            # 🔴 국적 필터가 **과하게 먹었는지** 본다. 실측 기준선: 외국 판정률 63%
+            #   (W34 204건 중 확실한 외국 109건). 이게 90%를 넘으면 필터가 아니라 사고다 —
+            #   lookup 이 설명을 못 가져와 한글비율 0으로 전건 외국 처리되는 경로가 실재한다.
+            #   (kr_origin 이 짧은 설명은 판정 안 하도록 막아두긴 했지만, 방어를 두 겹으로 둔다.)
+            if kr_only and krdrop_total:
+                rate = krdrop_total / (krdrop_total + picked_total)
+                if rate > 0.90:
+                    print(f"🔴 HEALTH: appstore {label} — 국적 필터가 {rate:.0%}를 버렸다"
+                          f"({krdrop_total}건). 평시 ~63%. lookup 장애 의심 — 확인 전엔 믿지 마라.")
+
             if fetched_total and not picked_total:
                 print(f"🔴 HEALTH: appstore {label} — {fetched_total}건을 받았는데 emit **0건**. "
-                      f"피드 정지 또는 lookup 전면 실패 의심.")
+                      f"피드 정지 또는 lookup 전면 실패 의심"
+                      + (f" (국적 필터가 {krdrop_total}건 버림)." if krdrop_total else "."))
             elif not new_only:
                 # 🔴 lookup이 대량 실패하면 '출시일 미상'이 폭증하고, 미상은 버려진다
                 #   → **수집이 성공한 척하며 아무것도 안 준다.** 평시 미상 비율은 0%다(실측 4,971/4,971).
@@ -147,12 +190,25 @@ class AppStoreAdapter(Adapter):
                     print(f"🔴 HEALTH: appstore {label} — 출시일 미상 {noreldate_total}건"
                           f"({lost:.0%}). lookup 장애/레이트리밋 의심 — 이만큼이 그냥 버려졌다.")
                 extra = f" · 출시일 미상 {noreldate_total}건 버림" if noreldate_total else ""
+                extra += f" · 외국 {krdrop_total}건 버림" if krdrop_total else ""
                 print(f"✅ appstore {label}: {picked_total}건 "
                       f"(그중 차트 최초등장 {newentry_total}건{extra})")
             else:
-                print(f"✅ appstore {label}: 신규진입 {picked_total}건")
+                kr = f" · 외국 {krdrop_total}건 버림" if krdrop_total else ""
+                print(f"✅ appstore {label}: 신규진입 {picked_total}건{kr}")
 
         return _dedupe_by_app(out)
+
+    # ---------- 국적 판정 ----------
+    @staticmethod
+    def _origin(a: dict) -> tuple[str, str]:
+        """(verdict, reason). enrich 가 안 돌았으면 재료가 없어 항상 unknown = 통과."""
+        return kr_origin.classify(
+            seller_name=a.get("seller_name", "") or a.get("developer", ""),
+            seller_url=a.get("seller_url", ""),
+            app_name=a.get("name", ""),
+            description=a.get("description", "") or a.get("subtitle", ""),
+        )
 
     # ---------- 차트 소스 분기 ----------
     def _fetch(self, genre: int | None, chart: str, n: int) -> list[dict]:
@@ -216,8 +272,19 @@ class AppStoreAdapter(Adapter):
                 "search_mode": "CHART",
                 "search_type": ("NEW_RELEASE" if chart == "new"
                                 else ("CHART_NEW" if is_new else "TOP")),
+                # 국적 판정 근거를 **문장에 남긴다.** kr_only 를 켜면 남은 행은 전부
+                #   kr 아니면 unknown 인데, 둘의 뜻이 전혀 다르다("한국 확인" vs "판정 못 함").
+                #   구분이 안 보이면 사람이 unknown 뭉치를 한국으로 오해한다.
                 "match_reason": (f"{gname} · {cname} {a.get('rank')}위 "
-                                 + ("신규진입" if is_new else "차트 진입")),
+                                 + ("신규진입" if is_new else "차트 진입")
+                                 + (f" · 국적 {a['kr_verdict']}({a['kr_reason']})"
+                                    if a.get("kr_verdict") else "")),
+                "kr_verdict": a.get("kr_verdict"),
+                "kr_reason": a.get("kr_reason"),
+                # 노션에 `Korea Signal`(multi_select) 열이 있으면 자동으로 채워진다.
+                # 없으면 notion.py 의 스키마 루프가 조용히 건너뛴다 — DB 오염 없음.
+                "korea_signal": ([a["kr_verdict"]] if a.get("kr_verdict") else []),
+                "seller_name": a.get("seller_name", ""),
                 "seller_url": a.get("seller_url", ""),
                 "artwork": a.get("artwork") or a.get("artwork_url"),
                 "rating": (a.get("avg_rating") if a.get("avg_rating") is not None
