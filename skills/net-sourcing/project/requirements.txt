@@ -1,7 +1,0 @@
-# net-sourcing 의존성 (머신별 .venv에 설치)
-requests>=2.31
-PyYAML>=6.0
-anthropic>=0.40        # judge: Anthropic API 직접 호출 (무인 실행용) [E4]
-# Notion/Gmail은 bplan-automation의 클라이언트 재활용 예정. 독립 실행 시 아래 사용:
-# notion-client>=2.2
-openpyxl
