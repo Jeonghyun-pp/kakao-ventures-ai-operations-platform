@@ -50,13 +50,13 @@ class Collect(unittest.TestCase):
 
     def test_unknown_origin_goes_to_llm_and_foreign_is_dropped(self):
         seen = []
-        llm = lambda unknowns: seen.append([u["app_id"] for u in unknowns]) or Fetched.measured([{"app_id": "9", "verdict": "foreign", "reason": "LLM: x"}])
+        llm = lambda unknowns, criteria=None: seen.append([u["app_id"] for u in unknowns]) or Fetched.measured([{"app_id": "9", "verdict": "foreign", "reason": "LLM: x", "raw": "9\tforeign\tx"}])
         with Case([app("9", seller="Minsu Kim", url="", desc="English only text here. " * 10)], llm=llm) as c:
             run.collect()
         self.assertEqual((seen, c.notion.created), ([["9"]], []))
 
     def test_dry_run_writes_nothing(self):
-        with Case([app("1")]) as c:
+        with Case([app("1")], dry=True) as c:
             run.collect(dry_run=True)
         self.assertEqual((c.notion.created, c.ledger), ([], []))
         self.assertIn("dry-run — 착지하지 않았다", c.out.getvalue())

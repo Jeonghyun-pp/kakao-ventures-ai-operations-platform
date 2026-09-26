@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import contextlib
 import io
+import sqlite3
 import tempfile
 from pathlib import Path
 from unittest import mock
 
-from kvlib import Fetched, ledger
+from kvlib import Fetched, judgments, ledger
+from kvlib.gate import Gate
 from skills.appstore import kr_origin, run
 
 
@@ -57,9 +59,10 @@ class Notion:
 
 
 class Case:
-    def __init__(self, apps, *, notion_rows=(), fail_charts=(), llm=None):
-        self.itunes, self.notion, self.llm = Itunes(apps, fail_charts), Notion(notion_rows), llm or (lambda unknowns: Fetched.measured([]))
-        self.out = io.StringIO()
+    def __init__(self, apps, *, notion_rows=(), fail_charts=(), llm=None, dry=False):
+        self.itunes, self.notion = Itunes(apps, fail_charts), Notion(notion_rows)
+        self.llm = llm or (lambda unknowns, criteria=None: Fetched.measured([]))
+        self.out, self.posts, self.dry = io.StringIO(), [], dry
 
     def __enter__(self):
         self._stack = contextlib.ExitStack().__enter__()
@@ -69,9 +72,16 @@ class Case:
         self._stack.enter_context(mock.patch.object(run, "notion", self.notion))
         self._stack.enter_context(mock.patch.object(kr_origin, "llm_judge_origin", self.llm))
         self._stack.enter_context(mock.patch.object(run, "_GENRES", [6014]))                    # 장르 하나만 — 차트 4번
+        self.db = sqlite3.connect(":memory:"); self.db.executescript(judgments.SCHEMA)
+        self.gate = Gate(self.db, "appstore", force="off" if self.dry else None)
+        self._stack.enter_context(mock.patch.object(run, "_gate", lambda dry_run=False: self.gate))
+        self._stack.enter_context(mock.patch.object(run, "_reports_dir", lambda: d))
+        self._stack.enter_context(mock.patch.object(run, "_send", lambda ch, text: self.posts.append((ch, text)) or "ts"))
+        self.dir = d
         self._stack.enter_context(contextlib.redirect_stdout(self.out))
         return self
 
     def __exit__(self, *a):
         self.ledger = ledger.rows("appstore")
+        self.reports = sorted(p.name for p in self.dir.glob("*.md"))
         return self._stack.__exit__(*a)

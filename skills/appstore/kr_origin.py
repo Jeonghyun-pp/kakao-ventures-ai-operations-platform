@@ -10,6 +10,8 @@ LLM 이 실패하면 착지를 막지 않는다 — 사람이 거르는 게 유�
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import re
 
 from kvlib import Fetched, constraints
@@ -188,11 +190,18 @@ _ORIGIN_SYSTEM = (
 )
 
 
-def llm_judge_origin(unknowns: list[dict]) -> Fetched:
-    """규칙이 판정하지 못한 앱의 국적을 LLM 으로 판정한다.
+CRITERIA = Path(__file__).parent / "criteria.md"
+
+
+def criteria_text() -> str:
+    return CRITERIA.read_text(encoding="utf-8")
+
+
+def llm_judge_origin(unknowns: list[dict], criteria: str | None = None) -> Fetched:
+    """규칙이 판정하지 못한 앱의 국적을 LLM 으로 판정한다. 기준은 `criteria.md`(사람이 깎는다).
 
     입력: [{app_id, seller_name, app_name, description}, ...]
-    반환: Fetched.measured([{app_id, verdict, reason}, ...])
+    반환: Fetched.measured([{app_id, verdict, reason, raw}, ...])
     """
     if not unknowns:
         return Fetched.measured([])
@@ -205,10 +214,7 @@ def llm_judge_origin(unknowns: list[dict]) -> Fetched:
         lines.append(f"{u['app_id']}\t{sn}\t{name}\t{desc}")
 
     prompt = (
-        "# 국적 판정 요청\n"
-        "아래 앱의 seller_name · app_name · description 을 보고 한국(kr) / 외국(foreign)을 판정하라.\n"
-        "seller_name 이 한국식 이름의 영어 표기(예: Minsu Kim, Minsu Kim)이면 kr 이다.\n"
-        "확실하지 않으면 kr 로 판정한다.\n\n"
+        f"{criteria or criteria_text()}\n\n"
         "# 입력 (app_id · seller_name · app_name · description[:200])\n"
         + "\n".join(lines)
         + f"\n\n# 출력 형식\n정확히 {len(unknowns)}줄. 각 줄은 `app_id<TAB>kr|foreign<TAB>이유(한 문장)`.\n"
@@ -238,7 +244,7 @@ def llm_judge_origin(unknowns: list[dict]) -> Fetched:
         if verdict not in ("kr", "foreign"):
             bad.append({"line": line, "why": f"verdict '{verdict}' 이상"})
             continue
-        good.append({"app_id": aid, "verdict": verdict, "reason": f"LLM: {reason}"})
+        good.append({"app_id": aid, "verdict": verdict, "reason": f"LLM: {reason}", "raw": line})
 
     if bad:
         claude.dlq("appstore", "kr_origin_dlq", bad)

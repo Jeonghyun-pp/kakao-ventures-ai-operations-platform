@@ -7,6 +7,12 @@
 # 근거는 ~/kv-automation/docs/contracts/30-external-constraints.md (56항목, 네트워크 0으로 실측)
 
 appstore:
+  # 🔴 밖으로 나가는 문(kvlib.gate). 나가는 것은 노션 착지(land) 하나. 살아 있는 시스템이라 on 에서 시작 — off 는 시험·중단용
+  outbound: "on"
+  report_channel: "test"       # 하루 보고 요약 · health → review_test. 심사역은 노션 뷰를 본다(9/22) — 슬랙 카드 없음
+  report_slack: "on"
+  foreign_sample: 8            # 보고서에 보여줄 foreign 판정 표본 수 — 노션에 안 가는 앱을 사람이 5초씩 훑는 자리
+  backup_keep: 7
   # 차트 천장. "200 요청했는데 100 왔다"를 결손으로 오판하지 않기 위해 안다.
   chart_caps:
     top-free: 200        # SSR

@@ -1,6 +1,8 @@
-"""앱스토어 스킬 — 수집 → 국적 필터 → 노션 착지.
+"""앱스토어 스킬 — 수집 → 국적 필터 → 노션 착지. 메일·링크드인·비플랜과 같은 뼈대(kvlib store·gate·report·judgments).
 
-    collect   09:10  25장르 × 4차트 수집 → 6개월 컷 → 국적 필터(규칙+LLM) → 한국 앱만 착지
+    collect   09:10  25장르 × 4차트 수집 → 6개월 컷 → 국적 필터(규칙+LLM · 앱마다 판정 저장) → 착지(문 뒤) → 하루 보고서
+    health    12:30  오늘 보고서가 있나
+    label · replay · diff   정답(노션 판정 Pass / DB로 업데이트) 동기화 · 고친 기준으로 다시 판정 · 갈림
 
 ## 지키는 규율
 
@@ -16,11 +18,15 @@ import sys
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from kvlib import constraints
-from kvlib import ledger, lock
-from kv_transport import itunes, notion
+import json
+
+from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, store
+from kvlib.gate import Gate
+from kv_transport import itunes, notion, slack
 
 from . import kr_origin
+
+slack.register("test",  "C000E8E4F75")     # review_test
 
 # 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.** 통로는 명단을 안 들고 있다.
 notion.register_writable("ch_앱스토어", "00000000-0000-0000-0000-30deea8edcc5")
@@ -39,10 +45,66 @@ class Degraded(RuntimeError):
     """수집이 온전하지 않다. '0건'과 다른 사건이라 종료코드로 가른다."""
 
 
+def _cfg(k: str):
+    return constraints.get(f"appstore.{k}")
+
+
+def db_path():
+    return paths.data("appstore", "db") / "appstore.sqlite"
+
+
+def _reports_dir():
+    return paths.data("appstore", "reports")
+
+
+def _gate(dry_run: bool = False) -> Gate:
+    """나가는 것은 하나 — 노션 착지(land). 문은 on(살아 있는 시스템). --dry-run 은 이 실행만 내린다."""
+    con = store.connect(db_path(), judgments.SCHEMA)
+    judgments.ensure(con)
+    return Gate(con, "appstore", lambda k: False, force="off" if dry_run else None)
+
+
+def _send(ch: str, text: str) -> str:
+    return slack.post(ch, text).require()
+
+
+def _input(d: dict, v: dict) -> str:
+    """판정이 본 것 — 이 문자열을 저장한다(replay 가 다시 판정한다)."""
+    return json.dumps({"seller_name": d.get("seller_name", ""), "seller_url": d.get("seller_url", ""), "app_name": d.get("name", ""),
+                       "description": (d.get("description") or "")[:400], "released_at": d.get("released_at"),
+                       "chart": v.get("chart"), "rank": v.get("rank")}, ensure_ascii=False)
+
+
+def judge_lines(lines: list[str], keys: list[str], criteria: str) -> Fetched:
+    """저장된 입력 → 규칙 → 애매하면 모델. collect 와 replay 가 같은 길을 쓴다."""
+    out, ask = [], []
+    for k, line in zip(keys, lines):
+        d = json.loads(line)
+        verdict, why = kr_origin.classify(d["seller_name"], d["seller_url"], d["app_name"], d["description"])
+        if verdict == "unknown":
+            ask.append({"app_id": k, "seller_name": d["seller_name"], "app_name": d["app_name"], "description": d["description"]})
+        out.append({"key": k, "verdict": verdict, "reason": f"규칙: {why}", "raw": ""})
+    if ask:
+        f = kr_origin.llm_judge_origin(ask, criteria)
+        if f.is_measured:
+            got = {x["app_id"]: x for x in f.require()}
+            out = [{**o, "verdict": got[o["key"]]["verdict"], "reason": got[o["key"]]["reason"], "raw": got[o["key"]]["raw"]} if o["key"] in got else o for o in out]
+        else:
+            print(f"  ⚠️  국적 LLM 실패: {f.reason} — unknown 은 그대로 착지")
+    return Fetched.measured(out)
+
+
+def label(con, rows: list[dict]) -> int:
+    """심사역이 본 결과 — `판정=Pass` 또는 `DB로 업데이트` 체크 = pick. Drop 은 국적과 무관한 결정이라 안 센다."""
+    return judgments.label(con, rows, "판정", lambda v: "pick" if v == "Pass" else None,
+                           same=lambda live, human: live != "foreign")
+
+
 # ---------------------------------------------------------------- collect
 
 def collect(*, dry_run: bool = False, limit_genres: int | None = None,
-            limit: int | None = None) -> int:
+            limit: int | None = None, gate: Gate | None = None) -> int:
+    g = gate or _gate(dry_run)
     itunes.reset_circuit()
     run_id = f"{date.today():%Y-%m-%d}-{uuid.uuid4().hex[:6]}"
     print(f"▶ collect run={run_id}")
@@ -115,42 +177,19 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
              if details[aid]["released_at"] and _d(details[aid]["released_at"]) >= cutoff}
     print(f"· 출시일 미상 {len(lost)} 제외 · 6개월 초과 {len(found) - len(fresh)} 제외 → 후보 {len(fresh)}개")
 
-    # ---- 국적 필터
-    origins: dict[str, tuple[str, str]] = {}
-    foreign_by_rule = []
-    unknowns_for_llm = []
-    for aid in list(fresh):
-        d = details[aid]
-        verdict, reason = kr_origin.classify(
-            d.get("seller_name", ""), d.get("seller_url", ""),
-            d.get("name", ""), d.get("description", ""))
-        origins[aid] = (verdict, reason)
-        if verdict == "foreign":
-            foreign_by_rule.append(aid)
-        elif verdict == "unknown":
-            unknowns_for_llm.append({
-                "app_id": aid,
-                "seller_name": d.get("seller_name", ""),
-                "app_name": d.get("name", ""),
-                "description": d.get("description", ""),
-            })
-
-    for aid in foreign_by_rule:
-        fresh.pop(aid, None)
-    print(f"· 국적 필터(규칙): foreign {len(foreign_by_rule)} 제거 · unknown {len(unknowns_for_llm)} → LLM")
-
-    if unknowns_for_llm:
-        llm_result = kr_origin.llm_judge_origin(unknowns_for_llm)
-        if llm_result.is_measured:
-            llm_foreign = 0
-            for item in llm_result.require():
-                origins[item["app_id"]] = (item["verdict"], item["reason"])
-                if item["verdict"] == "foreign":
-                    fresh.pop(item["app_id"], None)
-                    llm_foreign += 1
-            print(f"· 국적 필터(LLM): foreign {llm_foreign} 추가 제거")
-        else:
-            print(f"  ⚠️  국적 LLM 실패: {llm_result.reason} — unknown 은 그대로 착지")
+    # ---- 국적 필터 — 규칙 → 애매하면 모델. 앱마다 판정을 저장한다(무엇을 보고 그랬나). foreign 은 노션에 안 가므로 이 기록이 유일하다
+    crit = kr_origin.criteria_text()
+    lines = {aid: _input(details[aid], v) for aid, v in fresh.items()}
+    verdicts = judge_lines(list(lines.values()), list(lines), crit).require()
+    judgments.save(g.con, judgments.LIVE, judgments.criteria_sha(kr_origin._ORIGIN_SYSTEM, crit), lines, verdicts)
+    origins: dict[str, tuple[str, str]] = {x["key"]: (x["verdict"], x["reason"]) for x in verdicts}
+    foreign_by_rule = [k for k, (v, r) in origins.items() if v == "foreign" and r.startswith("규칙")]
+    llm_foreign = sum(1 for v, r in origins.values() if v == "foreign" and not r.startswith("규칙"))
+    for aid, (v, _) in origins.items():
+        if v == "foreign":
+            fresh.pop(aid, None)
+    print(f"· 국적 필터(규칙): foreign {len(foreign_by_rule)} 제거 · unknown {sum(1 for v, r in origins.values() if not r.startswith('규칙'))} → LLM")
+    print(f"· 국적 필터(LLM): foreign {llm_foreign} 추가 제거")
 
     health_results = [(v, r) for v, r in origins.values()]
     for warn in kr_origin.check_health(health_results, len(origins)):
@@ -158,7 +197,7 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
 
     print(f"· 국적 필터 후 후보 {len(fresh)}개")
 
-    if dry_run:
+    if g.level() == "off":
         for aid, v in list(fresh.items())[:10]:
             d = details[aid]
             ov, oreason = origins.get(aid, ("?", ""))
@@ -180,18 +219,22 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
     for aid, v in fresh.items():
         origin = origins.get(aid, ("unknown", ""))
         props = _props(aid, v, details[aid], run_id, origin=origin)
-        res = notion.create(DB, props)
-        if not res.is_measured:
-            failed += 1
-            print(f"  ✗ {aid} 착지 실패: {res.reason}")
+        st = g.out(aid, "land", {"name": details[aid]["name"], "origin": origin[0]}, lambda props=props: notion.create(DB, props).require())
+        if st != "done":
+            if st == "failed":
+                failed += 1
+                print(f"  ✗ {aid} 착지 실패: {g.row(aid, 'land')['error']}")
             continue
-        ledger.append(TASK, aid, ledger.LANDED, page_id=res.require(), run=run_id,
+        page_id = g.row(aid, "land")["result"]
+        judgments.set_page(g.con, aid, page_id)
+        ledger.append(TASK, aid, ledger.LANDED, page_id=page_id, run=run_id,
                       name=details[aid]["name"], released=details[aid]["released_at"],
                       origin=origin[0])
         landed += 1
 
     print(f"· 착지 {landed} · 실패 {failed}")
     _report(run_id, landed=landed, unknowns=len(unknowns), attempts=attempts, failed=failed)
+    daily_report(g, landed=landed, candidates=len(lines), fresh=len(fresh), unknowns=[t for t, _ in unknowns], attempts=attempts)
 
     # 🔴 포팅은 노션 자동화가 한다 (2026-09-23 활성). 체크한 사람이 발굴자로 들어가야 해서
     #    코드는 그 사람을 알 수 없다. 코드 port() 는 수동 명령으로만 남긴다 — 둘 다 돌면 두 줄씩 생긴다.
@@ -329,6 +372,38 @@ def port() -> int:
 
 # ---------------------------------------------------------------- 보고
 
+def daily_report(g: Gate, *, landed: int, candidates: int, fresh: int, unknowns: list[str], attempts: int) -> None:
+    """하루 한 번. 첫 절 = **foreign 으로 걸러진 앱 표본** — 노션에 안 가서 아무도 못 보는 자리다. 억울하게 죽은 한국 앱은 여기서만 보인다."""
+    out = _reports_dir() / f"{ledger.today()}.md"
+    if out.exists():
+        return
+    today = ledger.today()
+    rows = g.con.execute("SELECT key, verdict, reason, input_text FROM judgments WHERE run=? AND created>=? ORDER BY created DESC", (judgments.LIVE, today)).fetchall()
+    foreign = [(k, r, json.loads(t)) for k, v, r, t in rows if v == "foreign"]
+    llm = [(k, r, json.loads(t)) for k, v, r, t in rows if not r.startswith("규칙")]
+    week = ledger.now(timedelta(days=7))
+    picked_unknown = g.con.execute("SELECT l.key, l.reason FROM judgments h JOIN judgments l ON l.key=h.key AND l.run=? WHERE h.run=? AND h.verdict='pick'"
+                                   " AND l.reason NOT LIKE '규칙%' AND h.created>=?", (judgments.LIVE, judgments.HUMAN, week)).fetchall()
+    n_sample = int(_cfg("foreign_sample"))
+    head = (f"착지 {landed} · 후보 {candidates} → 국적 필터 뒤 {fresh} · foreign {len(foreign)}(모델 {sum(1 for _, r, _ in foreign if not r.startswith('규칙'))})"
+            + (f" · 🔴 차트 미상 {len(unknowns)}/{attempts}" if unknowns else ""))
+    md = [f"# 앱스토어 하루 보고 — {today}", "", head, "",
+          f"## 🚩 foreign 으로 걸러진 앱 표본 {min(n_sample, len(foreign))}/{len(foreign)} (억울한 한국 앱이 있나 — 5초씩)", "",
+          "| 앱 | 개발사 | 도메인 | 근거 |", "|---|---|---|---|"]
+    md += [f"| {d['app_name'][:30]} | {d['seller_name'][:30]} | {d['seller_url'][:40]} | {r[:60]} |" for _, r, d in foreign[:n_sample]] or ["| 없음 | | | |"]
+    md += ["", f"## 모델이 본 앱 {len(llm)} (규칙이 못 가른 것)", ""]
+    md += [f"- `{k}` {d['app_name'][:30]} · {d['seller_name'][:25]} → {r[:70]}" for k, r, d in llm[:20]] or ["없음"]
+    md += ["", "## 지난 7일 심사역이 Pass·체크한 앱 중 모델이 살린 것", ""]
+    md += [f"- `{k}` {r[:70]}" for k, r in picked_unknown] or ["없음"]
+    md += ["", f"## 문 = {g.level()}", "", "## 고치는 법", "", "```bash", "cd ~/kv",
+           "# 억울한 앱이 보이면: skills/appstore/criteria.md (모델 기준) 또는 kr_origin.py 규칙 → 다시 재기",
+           "./.venv/bin/python tools/kr_origin_eval.py                       # 규칙: 고정 정답 199건, 한국 유실 0 이어야 한다",
+           "./.venv/bin/python -m skills.appstore.run replay [--limit 200]    # 저장된 입력으로 규칙+모델 다시",
+           "./.venv/bin/python -m skills.appstore.run diff --b r-<sha>", "```", ""]
+    out.write_text("\n".join(md), encoding="utf-8")
+    print(f"· 보고서 {out} | 슬랙 {report.post('appstore', f'*앱스토어 하루* — {head}' + chr(10) + f'전체: `{out}`', _send)}")
+
+
 def _report(run_id: str, **counts) -> None:
     """🔴 보고는 장부에서 만든다. claude 나 변수 기억이 아니라 **줄 수를 센다.**"""
     s = ledger.summary(TASK)
@@ -340,10 +415,14 @@ def _report(run_id: str, **counts) -> None:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="appstore")
     sub = p.add_subparsers(dest="cmd", required=True)
-    c = sub.add_parser("collect"); c.add_argument("--dry-run", action="store_true")
+    c = sub.add_parser("collect", help="수집 → 국적 판정(저장) → 착지(문 뒤) → 보고서"); c.add_argument("--dry-run", action="store_true")
     c.add_argument("--genres", type=int); c.add_argument("--limit", type=int)
     sub.add_parser("port")
     sub.add_parser("status")
+    sub.add_parser("health", help="오늘 보고서가 있나 — 없으면 슬랙 한 줄")
+    sub.add_parser("label", help="노션 판정(Pass)·DB로 업데이트 → human(pick)")
+    rp = sub.add_parser("replay"); rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
+    df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
     a = p.parse_args(argv)
     try:
         if a.cmd == "collect":
@@ -354,6 +433,27 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if a.cmd == "status":
             print(ledger.summary(TASK))
+            return 0
+        if a.cmd == "health":
+            return report.health("appstore", _reports_dir(), _send, label="앱스토어 collect")
+        if a.cmd == "label":
+            f = notion.query(notion.writable_id(DB), ["판정", "DB로 업데이트"])
+            if not f.is_measured:
+                print(f"🔴 노션을 못 읽었다: {f.reason}"); return 1
+            rows = [{**r, "판정": "Pass"} if r.get("DB로 업데이트") else r for r in f.require()]     # 체크 = Pass 와 같은 뜻
+            print(f"· 심사역 Pass·체크 {sum(1 for r in rows if r.get('판정') == 'Pass')}건 → human · 갈림 {label(_gate().con, rows)}")
+            return 0
+        if a.cmd == "replay":
+            crit = open(a.criteria, encoding="utf-8").read() if a.criteria else kr_origin.criteria_text()
+            r = judgments.replay(_gate().con, judge_lines, crit, judgments.criteria_sha(kr_origin._ORIGIN_SYSTEM, crit), limit=a.limit)
+            print(f"replay {r['run']}: 판정 {r['judged']} · 누락 {r['missing']}\n  다음: appstore diff --b {r['run']}")
+            return 0
+        if a.cmd == "diff":
+            rows = judgments.diff(_gate().con, a.a, a.b)
+            for r in rows:
+                if r["a"] != r["b"]:
+                    print(f"  {r['a']:8} → {r['b']:8} 정답={r['human'] or '-':5} {r['key']}")
+            print(f"{a.a} ↔ {a.b}: 비교 {len(rows)}건 · 갈림 {sum(r['a'] != r['b'] for r in rows)}건")
             return 0
     except lock.Busy as e:
         print(f"🔴 {e}")
