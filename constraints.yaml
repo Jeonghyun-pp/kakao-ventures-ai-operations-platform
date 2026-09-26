@@ -265,3 +265,17 @@ memo:
   skill_python: "~/kv-automation/.venv/bin/python"       # MCP 서버를 띄울 파이썬(mcp<2 · pdfplumber · python-docx 가 든 venv)
   # 세션에 허용하는 도구 — 허용 목록이다. 편집·삭제·git 은 run_skill 이 상시 금지한다
   allowed_tools: ["mcp__investment-memo", "Read", "WebSearch", "WebFetch", "Bash(cd *)", "Bash(*python*)"]
+
+# ---------------------------------------------------------------- 살림 (skills/ops, 2026-09-26 — 옛 kv-automation 스케줄러의 backup·retention 이관)
+ops:
+  backup_dir: "~/kv-data-backup"
+  backup_keep: 7               # 스냅샷 보관 일수. 하드링크라 실제 디스크는 변한 파일만큼만 는다
+  backup_min_files: 100        # 원본 파일이 이보다 적으면 중단 — 마운트 실패·경로 오타로 빈 백업이 멀쩡한 스냅샷을 밀어낸 사고를 막는다
+  backup_stale_days: 2         # 이틀 넘게 스냅샷이 없으면 health 가 말한다. 하루는 맥이 잠들 수 있다
+  report_channel: "test"
+  report_slack: "on"
+  # 🔴 보존 규칙 = 허용 목록. 여기 없는 glob 은 지울 수 없다. 오늘 백업이 성공했을 때만 집행한다.
+  #    영구(규칙에 넣지 않는다): linkedin/raw(유료 Apify 원본) · _archive/(옛 시스템 데이터) · */db/backup(스킬 sqlite 사본은 store.backup 이 스스로 7일 보관) · reports
+  retention:
+    - { name: claude-usage, glob: "_usage/claude/*.jsonl", keep_days: 90, min_keep: 30 }   # 호출 수 프록시. 석 달이면 폭주 패턴을 보기에 충분
+    - { name: memo-request-inputs, glob: "memo/requests/*/in/*", keep_days: 180, min_keep: 0 }   # 심사역이 스레드에 올린 자료 사본. 반년 뒤엔 슬랙이 원본
