@@ -33,7 +33,7 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
 매일 11:00 card     평일만. 노션 Tier 되읽기(사람이 고친 것 = 정답으로 저장, label) → 아직 안 나간 사람 좋은 순 5명 → 헤더 + 사람별 스레드
                     → 하루 보고서(파일 + review_test 요약)
 10분마다  followup  ✅ → 누른 분 성함으로 콜드 메시지 초안(짧게·길게)을 스레드에 → 극초기 승격 · 7일 무반응은 만기(요일 안 봄)
-매일 12:10 health   평일에 오늘 보고서 파일이 없으면 review_test 에 한 줄
+매일 12:55 ops health  평일에 오늘 보고서 파일이 없으면 review_test 에 한 줄 (skills/ops 가 여섯 스킬을 한 번에)
 ```
 **전량 착지하는 이유**: 심사역이 노션을 직접 열 수 있어야 한다. 슬랙엔 그중 하루 5명만 간다.
 🔴 **우리가 보내지 않는다.** 콜드 메시지는 심사역 개인 계정으로 나가는 글이라 글만 써서 올린다. **발신자는 ✅ 를 누른 분**이다 — `people.yaml` 명단 밖이면 이름을 비우고 `발신자 이름을 채워주세요`.
@@ -59,7 +59,7 @@ cd ~/kv
 ./.venv/bin/python -m skills.linkedin.run followup [--dry-run]
 ./.venv/bin/python -m skills.linkedin.run status            # 축별 마지막 실행·다음 페이지·커버리지·재고
 ./.venv/bin/python -m skills.linkedin.run label             # 노션 Tier → human (card 가 매일 하지만 손으로도)
-./.venv/bin/python -m skills.linkedin.run replay | diff --b r-<sha> | health
+./.venv/bin/python -m skills.linkedin.run replay | diff --b r-<sha>
 ./.venv/bin/python tools/replay_linkedin.py                 # 원본 1,865행으로 파서 검증 (돈 0·망 0)
 ```
 

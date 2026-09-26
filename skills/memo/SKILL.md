@@ -17,7 +17,7 @@ constraints.yaml  memo.outbound: "off"     off = 기록만(actions:dry) · slack
 request_channel: test   요청을 읽는 채널도 처음엔 review_test. 실채널은 사용자가 정한 날 slack.register 한 줄 + 이 값
 요청자 = people.yaml 의 slack_id + memo.extra_requesters. 명단 밖은 조용히 무시(기본 거부)
 ```
-노션에는 쓰지 않는다. 모델 호출은 로컬 `claude -p`(`kv_transport.claude.run_skill`). 하루 요약·health 는 기존 승인 종류(review_test).
+노션에는 쓰지 않는다. 모델 호출은 로컬 `claude -p`(`kv_transport.claude.run_skill`). 하루 요약은 저녁 ops digest 로, 접수 지연 경보는 ops health 로(review_test).
 `--dry-run` 은 이 실행만 문을 내린다. 무엇을 했(을)는지는 `~/kv-data/memo/db/memo.sqlite` 의 `actions`, 판정·입력·산출 md 는 `judgments`.
 
 ## 하루
@@ -30,10 +30,10 @@ request_channel: test   요청을 읽는 채널도 처음엔 review_test. 실채
                     → [deliverN] docx · [noteN] 미확인 목록 + "고칠 점은 스레드에 · 끝나면 ✅"
                     → 사람 답글(글·파일)이 오면 v(N+1) (max_versions 까지) · ✅ 면 완료
                     → 완료: 스레드에 사람이 올린 docx(없으면 마지막 버전) = 정답 → v1 과 대조(생존율·폐기율·분량비·버려진 문단 표본) → judgments human
-12:40 health         오늘 요청이 있었는데 접수 답글이 없으면 review_test 에 한 줄. 요청 없는 날은 조용
+12:55 ops health      요청이 있었는데 접수 답글이 없으면 review_test 에 한 줄(skills/ops 가 본다). 요청 없는 날은 조용
 저녁(followup 끝에)  ~/kv-data/memo/reports/<날짜>.md — 첫 절 = 심사역이 지운 초안 문단 표본 · review_test 요약(하루 첫 회만)
 ```
-**스케줄은 아직 설치하지 않는다** — `followup` 을 켜면 요청 채널을 읽기 시작하고 문이 slack 이면 답글이 나간다. 설치는 사용자 결정(비플랜과 같다). 설치할 때 frontmatter 에 `followup 10분마다 · health 12:40` 두 행을 넣는다.
+**스케줄은 아직 설치하지 않는다** — `followup` 을 켜면 요청 채널을 읽기 시작하고 문이 slack 이면 답글이 나간다. 설치는 사용자 결정(비플랜과 같다). 설치할 때 frontmatter 에 `followup 10분마다` 한 행을 넣는다(health 는 ops 가 본다).
 
 ## 사람이 하는 것 — 기준 깎기
 
@@ -50,7 +50,7 @@ request_channel: test   요청을 읽는 채널도 처음엔 review_test. 실채
 cd ~/kv
 ./.venv/bin/python -m skills.memo.run followup [--dry-run]                  # 요청 채널 한 바퀴
 ./.venv/bin/python -m skills.memo.run run --company Corpus02 --folder ~/Downloads/투심보고서/Corpus02 [--dry-run]   # 슬랙 없이 한 건(--dry-run 은 무인 규칙 본문만)
-./.venv/bin/python -m skills.memo.run health | status | report
+./.venv/bin/python -m skills.memo.run status | report
 cd ~/kv-automation/skills/investment-memo && ../../.venv/bin/python scripts/backtest.py compare <초안.docx> <완성본.docx>   # 스킬의 자
 ```
 

@@ -17,14 +17,14 @@ constraints.yaml  appstore.outbound: "on"     ← 살아 있는 시스템이다.
 ```
 `--dry-run` 은 이 실행만 문을 내리는 것. 무엇을 했(을)는지는 `~/kv-data/appstore/db/appstore.sqlite` 의 `actions` 에, **판정은 `judgments` 에** 남는다.
 장부(`~/kv-data/_ledger/appstore.jsonl`)는 그대로 한 일의 기록이고 "처음 보는 앱"의 기준이다.
-슬랙으로 나가는 것은 review_test 요약·health 한 줄뿐(`report_channel: test`). 심사역 카드는 없다 — 심사역은 노션 뷰를 본다(9/22).
+슬랙으로 나가는 것은 review_test 요약(저녁 ops digest 로 묶임)뿐(`report_channel: test`). 심사역 카드는 없다 — 심사역은 노션 뷰를 본다(9/22).
 
 ## 하루
 
 ```
 09:10  collect   25장르 × 4차트 → 처음 보는 앱 → 6개월 이내 → 국적 판정(규칙 L1~L7 → 애매하면 모델, criteria.md)
                  · **앱마다 저장**(무엇을 보고 kr/foreign 이라 했나) → 한국·미상 앱만 착지(문 뒤) → 하루 보고서(파일 + review_test 요약)
-12:30  health    오늘 보고서 파일이 없으면 review_test 에 한 줄
+12:55  ops health  오늘 보고서 파일이 없으면 review_test 에 한 줄 (skills/ops 가 여섯 스킬을 한 번에)
 
 🔴 왜 9시 이후인가: 맥이 자다 깨면 launchd 가 밀린 작업을 **즉시** 발화하는데, 그때가 DNS 가 아직 안 올라온 순간이다.
    옛 시스템이 그걸로 76요청을 전멸시킨 적이 있다.
@@ -49,7 +49,7 @@ foreign 판정은 노션에 안 간다. **아무도 못 본다.** 그래서 이 
 ```bash
 cd ~/kv
 ./.venv/bin/python -m skills.appstore.run collect [--dry-run] [--limit N] [--genres N]
-./.venv/bin/python -m skills.appstore.run status | health | label
+./.venv/bin/python -m skills.appstore.run status | label
 ./.venv/bin/python -m skills.appstore.run replay | diff --b r-<sha>
 ./.venv/bin/python tools/kr_origin_eval.py [--verbose]          # 규칙만 · 고정 정답 199건 건별로
 ```

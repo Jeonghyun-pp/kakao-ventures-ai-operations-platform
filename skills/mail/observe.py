@@ -30,7 +30,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from kvlib import constraints, judgments, ledger, lock, paths, store, text
-from kvlib import report as kvreport                             # observe.report(보고서 만들기) 와 이름이 겹친다
 from kvlib.gate import SCHEMA as _GATE_SCHEMA
 
 from . import clean, rules
@@ -349,12 +348,6 @@ def run_once(con, reader, llm, *, days: int, max_judge: int | None, no_judge: bo
             rc = 2
     print(f"  {status(con)} | 메일함 쓰기 0")
     return rc
-
-
-def health() -> int:
-    """observe 는 자기가 안 돌았다고 말할 수 없다. 이건 **다른 시각의 작업**이 오늘 보고서 파일이 있는지 보는 것이다."""
-    from . import flow
-    return kvreport.health("mail_observe", paths.data("mail", "reports"), flow.RealIO().slack_post, label="메일 observe")
 
 
 def main(a) -> int:

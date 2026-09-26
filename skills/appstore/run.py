@@ -1,7 +1,6 @@
 """앱스토어 스킬 — 수집 → 국적 필터 → 노션 착지. 메일·링크드인·비플랜과 같은 뼈대(kvlib store·gate·report·judgments).
 
     collect   09:10  25장르 × 4차트 수집 → 6개월 컷 → 국적 필터(규칙+LLM · 앱마다 판정 저장) → 착지(문 뒤) → 하루 보고서
-    health    12:30  오늘 보고서가 있나
     label · replay · diff   정답(노션 판정 Pass / DB로 업데이트) 동기화 · 고친 기준으로 다시 판정 · 갈림
 
 ## 지키는 규율
@@ -390,7 +389,6 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--genres", type=int); c.add_argument("--limit", type=int)
     sub.add_parser("port")
     sub.add_parser("status")
-    sub.add_parser("health", help="오늘 보고서가 있나 — 없으면 슬랙 한 줄")
     sub.add_parser("label", help="노션 판정(Pass)·DB로 업데이트 → human(pick)")
     rp = sub.add_parser("replay"); rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
     df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
@@ -405,8 +403,6 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "status":
             _report()
             return 0
-        if a.cmd == "health":
-            return report.health("appstore", _reports_dir(), _send, label="앱스토어 collect")
         if a.cmd == "label":
             f = notion.query(notion.writable_id(DB), ["판정", "DB로 업데이트"])
             if not f.is_measured:

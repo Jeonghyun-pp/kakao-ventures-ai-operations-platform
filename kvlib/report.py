@@ -2,13 +2,12 @@
 
     constraints.yaml  <task>.report_slack: on|off · <task>.report_channel
     post(task, text, send)        send(ch, text) 는 스킬이 준다(통로는 kvlib 이 모른다)
-    health(task, dir, send, ...)  잡은 자기가 안 돌았다고 말할 수 없다. 다른 시각의 잡이 오늘 보고서 파일이 있는지 본다
+    daily(task, text, send)       하루 요약 — ops.digest_slack 이 on 이면 저녁 ops digest 한 통으로 묶인다
+    health 는 skills/ops 가 여섯 스킬을 한 번에 본다(2026-09-26)
 """
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date
-from pathlib import Path
 
 from . import constraints, ledger
 
@@ -31,18 +30,3 @@ def daily(task: str, text: str, send: Callable[[str, str], object]) -> str:
     if constraints.get("ops.digest_slack") == "on":
         return "묶음(ops digest)"
     return post(task, text, send)
-
-
-def health(task: str, reports_dir: Path, send: Callable[[str, str], object], *, label: str,
-           weekdays_only: bool = False) -> int:
-    today = ledger.today()
-    if weekdays_only and date.fromisoformat(today).weekday() >= 5:
-        print(f"· 주말 — {label} 이 안 나가는 날이다")
-        return 0
-    f = reports_dir / f"{today}.md"
-    if f.exists():
-        print(f"✅ 오늘 보고서 있음 · {f.name}")
-        return 0
-    print("🔴 " + post(task, f"🔴 *오늘({today}) {label} 이 안 돌았습니다* — 보고서 파일이 없습니다. "
-                        "맥이 잠들었거나 launchd 작업이 내려갔을 수 있습니다: `launchctl list | grep kv.`", send))
-    return 2

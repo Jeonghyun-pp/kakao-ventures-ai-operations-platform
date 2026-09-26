@@ -336,7 +336,7 @@ def run_folder(company: str, folder: Path, *, dry_run: bool = False) -> int:
     return 0 if _generate(g, key, company, folder, notion_line, _versions(g, key) + 1, []) else 2
 
 
-# ---------------------------------------------------------------- 보고서 · health
+# ---------------------------------------------------------------- 보고서
 
 def daily_report(g: Gate) -> None:
     today = ledger.today()
@@ -366,19 +366,6 @@ def daily_report(g: Gate) -> None:
         print(f"· 보고서 {out} | 슬랙 {report.daily(TASK, f'*투심 레인 하루* — {head}' + chr(10) + f'전체: `{out}`', _send)}")
 
 
-def health() -> int:
-    """요청이 있었는데 접수 답글이 없으면 한 줄. 요청 없는 날은 조용하다(그 자체가 정상)."""
-    g = _gate()
-    today = ledger.today()
-    keys = [k for (k,) in g.con.execute("SELECT key FROM actions WHERE kind='request' AND created>=?", (today,))]
-    stuck = [k for k in keys if not g.row(k, "ack")]
-    if stuck:
-        print("🔴 " + report.post(TASK, f"🔴 *투심 요청 {len(stuck)}건이 접수 답글 없이 서 있습니다* — followup 이 안 돌았거나 채널을 못 읽습니다", _send))
-        return 2
-    print(f"✅ 오늘 요청 {len(keys)}건 · 막힌 것 없음")
-    return 0
-
-
 # ---------------------------------------------------------------- CLI
 
 def main(argv: list[str] | None = None) -> int:
@@ -387,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
     f = sub.add_parser("followup", help="요청 채널을 읽어 접수·생성·전달·피드백·완료를 잇는다"); f.add_argument("--dry-run", action="store_true")
     r = sub.add_parser("run", help="슬랙 없이 폴더 하나로 초안 한 건 (시험·코퍼스 보정)")
     r.add_argument("--company", required=True); r.add_argument("--folder", required=True); r.add_argument("--dry-run", action="store_true", help="무인 규칙 본문만 찍는다")
-    sub.add_parser("health"); sub.add_parser("status"); sub.add_parser("report")
+    sub.add_parser("status"); sub.add_parser("report")
     a = p.parse_args(argv)
     try:
         if a.cmd == "followup":
@@ -398,8 +385,6 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "run":
             with lock.hold("memo-run"):
                 return run_folder(a.company, Path(a.folder).expanduser(), dry_run=a.dry_run)
-        if a.cmd == "health":
-            return health()
         if a.cmd == "report":
             daily_report(_gate()); return 0
         if a.cmd == "status":

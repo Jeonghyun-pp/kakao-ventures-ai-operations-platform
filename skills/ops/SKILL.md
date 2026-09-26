@@ -1,6 +1,6 @@
 ---
 name: ops
-description: 살림 — kv-data 스냅샷 백업(7일)·보존 규칙 집행·그 둘의 health. 옛 kv-automation 스케줄러의 backup·retention 을 2026-09-26 에 옮겨 왔다.
+description: 살림 — kv-data 스냅샷 백업(7일)·보존 규칙 집행·여섯 스킬 health 하나·하루 요약 한 통·현황판(dashboard.html)·`kv` 입구. 옛 kv-automation 스케줄러의 backup·retention 을 2026-09-26 에 옮겨 왔다.
 schedule:
   - { cmd: backup,    when: "매일 12:45", why: "맥이 깨어 있는 낮. 스킬들의 sqlite 일일 사본(db/backup/)이 오전 실행 뒤에 생기므로 그 뒤" }
   - { cmd: retention, when: "월 13:00",  why: "주 1회면 충분(하루 수십 MB). 백업 뒤 — 오늘 백업이 없으면 스스로 아무것도 안 지운다" }
@@ -14,9 +14,11 @@ schedule:
 backup     ~/kv-data → ~/kv-data-backup/<날짜>/   안 변한 파일은 전날 스냅샷에 하드링크. 7일 보관. 열린 sqlite(*/db/*.sqlite) 는 제외 —
            각 스킬이 매일 db/backup/ 에 뜨는 일관된 사본이 대신 들어간다
 retention  constraints.yaml ops.retention 의 glob **만**(허용 목록) 보관일수 지나면 지운다. 🔴 오늘 백업이 성공했을 때만. glob 이 루트 밖이면 중단
-health     .last-success 가 backup_stale_days 보다 오래됐으면 review_test 한 줄
+health     여섯 스킬(오늘 보고서·스케줄 설치·투심 접수 지연) + 백업 나이 — 막힌 것만 review_test 한 줄. 스킬별 health 여섯을 이것 하나로(09-26)
+digest     하루 한 통(review_test) + 현황판 ~/kv-data/_reports/dashboard.html. 스킬별 하루 요약 슬랙 다섯을 이것 하나로(report.daily · ops.digest_slack)
+status     현황 한 화면 — 문 · 오늘 판정/행동 · 정답 누적 · 보고서 · 스케줄(선언↔설치) · 마지막 실행
 ```
-밖으로 나가는 것은 review_test 한 줄(health·백업 실패)뿐이다.
+밖으로 나가는 것은 review_test 뿐이다(health 한 줄 · 하루 한 통 · 백업 실패). 스킬별 실패 경보는 각자 그대로 낸다.
 
 ## 알아둘 것
 
@@ -27,5 +29,5 @@ health     .last-success 가 backup_stale_days 보다 오래됐으면 review_tes
 
 ```bash
 cd ~/kv
-./.venv/bin/python -m skills.ops.run backup | retention [--dry-run] | health
+./kv status | health | digest | backup | retention [--dry-run]      # kv 는 리포 루트의 입구. 스킬은 ./kv <스킬> <명령…>
 ```

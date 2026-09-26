@@ -18,7 +18,7 @@ slack   카드·인수 기록·리마인드(슬랙 글)만 실제로 → card_ch
 on      노션 점수·to do 이동 · 드랍 **초안**까지
 send    send_branches: [칼드랍] — 초안을 실제 발송. 보고서 '발송 승격' 줄이 "켜도 된다"를 낸 뒤     ← 회사 이름으로 나가는 유일한 순간 (아직 코드 없음 — 메일의 gmail_send 한 문을 그대로 쓴다)
 ```
-열린 것은 `report_slack`(review_test 아침 요약·health)뿐이다. **발송 코드는 아직 없다** — 넣을 때 A8b `SEND_CALLERS` 에 이 파일을 올리고 변이 테스트를 붙인다.
+열린 것은 `report_slack`(review_test 요약 — 저녁 ops digest 로 묶임)뿐이다. **발송 코드는 아직 없다** — 넣을 때 A8b `SEND_CALLERS` 에 이 파일을 올리고 변이 테스트를 붙인다.
 
 ## 접수 한 건이 가는 길
 
@@ -30,7 +30,7 @@ judge     Newly Added 이고 판정 없는 행 → 덱(drive) + 폼 8칸 → 모
             └ ?            → card   같은 스레드에 "애매 — 사람이 봐 주세요"
           그리고 score  노션 `점수` + `포워드 이유`(이유/리스크)
 followup  카드 스레드 반응: ⭕ → to do=미팅요청 · ❌ → To Drop + 드랍 초안 · 🙋 → "맡았습니다" 기록. 조용하면 3일마다 3번 리마인드. **만기 없음**(접수는 답을 받아야 한다)
-report    하루 보고서(파일 + review_test 요약) · health
+report    하루 보고서(파일 + review_test 요약). health 는 skills/ops
 ```
 심사역이 이미 `to do` 를 움직인 행에는 아무것도 하지 않는다.
 
@@ -60,7 +60,7 @@ cd ~/kv
 ./.venv/bin/python -m skills.bplan.run judge [--past N] [--limit N]   # 판정만 저장. --past 는 결정 난 옛 행(보정용, 행동 없음)
 ./.venv/bin/python -m skills.bplan.run act [--dry-run]           # 판정 있는 접수에 행동 — 문 뒤
 ./.venv/bin/python -m skills.bplan.run followup [--dry-run]
-./.venv/bin/python -m skills.bplan.run label | replay [--limit N] [--criteria 파일] | diff --b r-<sha> | health | status
+./.venv/bin/python -m skills.bplan.run label | replay [--limit N] [--criteria 파일] | diff --b r-<sha> | status
 ```
 
 ## 스케줄 — 아직 선언하지 않는다 [사용자 결정 대기]
@@ -71,7 +71,6 @@ cd ~/kv
 schedule:
   - { cmd: run,      when: "매일 09:20", why: "메일 관찰(10:00) 앞. 접수 메일을 먼저 라벨로 옮겨 두면 관찰이 그걸 접수 알림으로 본다. 판정·행동은 문 뒤" }
   - { cmd: followup, when: "10분마다",  why: "심사역이 언제 누를지 우리가 못 정한다" }
-  - { cmd: health,   when: "매일 12:20", why: "run 은 자기가 안 돌았다고 말할 수 없다. 메일(12:00)·링크드인(12:10) 뒤" }
 ```
 
 ## sync 의 규율 (그대로)

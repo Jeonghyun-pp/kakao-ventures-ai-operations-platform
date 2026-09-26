@@ -904,7 +904,6 @@ def main(argv: list[str] | None = None) -> int:
     fu = sub.add_parser("followup", help="✅ 를 걷어 콜드 메시지 초안을 스레드에 올린다")
     fu.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
-    sub.add_parser("health", help="평일에 오늘 보고서가 있나 — 없으면 슬랙 한 줄")
     rp = sub.add_parser("replay", help="고친 기준으로 저장된 사람을 다시 판정 (돈 0 · 노션 0)")
     rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
     df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
@@ -926,8 +925,6 @@ def main(argv: list[str] | None = None) -> int:
             if rc and not a.dry_run:
                 _alert("followup", f"종료코드 {rc} — ✅ 를 걷거나 초안을 올리지 못했다")
             return rc
-        if a.cmd == "health":
-            return report.health("linkedin", paths.data("linkedin", "reports"), _send, label="linkedin card", weekdays_only=True)
         if a.cmd == "replay":
             crit = Path(a.criteria).read_text(encoding="utf-8") if a.criteria else judge.criteria_text()
             r = judgments.replay(_gate().con, judge.judge_lines, crit, judge.sha(crit), limit=a.limit)

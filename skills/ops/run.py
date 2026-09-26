@@ -1,14 +1,4 @@
-"""살림 — kv-data 스냅샷 백업 · 보존 규칙 집행 · 그 둘의 health. 옛 kv-automation 스케줄러(backup·retention)를 2026-09-26 에 이리로 옮겼다.
-
-    backup     매일  ~/kv-data → ~/kv-data-backup/<날짜>/  변하지 않은 파일은 전날 스냅샷에 하드링크(rsync --link-dest 와 같은 효과). 7일 보관
-    retention  주 1회  constraints ops.retention 의 glob 만(허용 목록) 보관일수 지나면 지운다. 🔴 오늘 백업이 성공했을 때만
-    health     매일  여섯 스킬(오늘 보고서·스케줄 설치·투심 접수 지연) + 백업 나이 — 막힌 것만 review_test 한 줄. 스킬별 health 여섯을 이것 하나로
-    digest     매일  하루 한 통(review_test) + 현황판(~/kv-data/_reports/dashboard.html). 스킬별 하루 요약 슬랙 다섯을 이것 하나로
-    status     현황 한 화면 (status.py)
-
-🔴 같은 디스크다. 맥·디스크 고장은 못 막는다 — 오프사이트 1벌은 서버 이관의 몫이다.
-🔴 스킬별 sqlite(*/db/*.sqlite) 는 여기서 제외한다 — 열려 있는 파일을 복사하면 깨질 수 있고, 각 스킬이 store.backup 으로 db/backup/ 에 일관된 사본을 매일 뜬다. 그 사본은 여기 포함된다.
-"""
+"""살림 — 백업·보존·health·하루 요약·현황판. 무엇을 언제 왜는 SKILL.md, 현황 렌더는 status.py."""
 from __future__ import annotations
 
 import argparse
@@ -19,8 +9,10 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from kvlib import constraints, ledger, paths, report
+from kvlib import constraints, paths, report
 from kv_transport import slack
+
+from . import status
 
 TASK = "ops"
 
@@ -56,17 +48,18 @@ def backup(src: Path | None = None, dst: Path | None = None, keep: int | None = 
     prev = next((s for s in reversed(_snapshots(dst)) if s.name != today), None)
     out, tmp = dst / today, dst / f".{today}.tmp"
     shutil.rmtree(tmp, ignore_errors=True)
-    linked = 0
-    for p in files:
-        rel = p.relative_to(src)
-        d = tmp / rel
-        d.parent.mkdir(parents=True, exist_ok=True)
-        q = prev / rel if prev else None
-        st = p.stat()
-        if q and q.exists() and q.stat().st_size == st.st_size and q.stat().st_mtime_ns == st.st_mtime_ns:
-            os.link(q, d); linked += 1                                  # 안 변한 파일은 전날 것과 같은 inode — 디스크를 안 먹는다
+    linked = [0]
+
+    def link_or_copy(a: str, b: str) -> None:
+        q = prev / Path(a).relative_to(src) if prev else None
+        st = Path(a).stat()
+        if q and q.exists() and q.stat().st_size == st.st_size and int(q.stat().st_mtime) == int(st.st_mtime):   # 초 단위 — rsync 와 같은 기준(옛 스냅샷은 초까지만 있다)
+            os.link(q, b); linked[0] += 1                              # 안 변한 파일은 전날 것과 같은 inode — 디스크를 안 먹는다
         else:
-            shutil.copy2(p, d)
+            shutil.copy2(a, b)
+    shutil.copytree(src, tmp, copy_function=link_or_copy, symlinks=True,                       # 링크는 링크로 — 따라가면 다른 트리를 통째로 복사하거나 죽은 링크에서 넘어진다
+                    ignore=lambda d, names: [n for n in names if (Path(d) / n).is_symlink() or ((Path(d) / n).is_file() and _excluded((Path(d) / n).relative_to(src)))])
+    linked = linked[0]
     n = sum(1 for _ in tmp.rglob("*") if _.is_file())
     if n < len(files):
         raise RuntimeError(f"백업 파일 수가 원본보다 적다: {n} < {len(files)}")
@@ -84,7 +77,7 @@ def backup_age_days(dst: Path | None = None) -> float | None:
     if not f.exists():
         return None
     ts = f.read_text(encoding="utf-8").split()[0]
-    return (datetime.now(timezone.utc) - datetime.fromisoformat(ts.replace("Z", "+00:00"))).total_seconds() / 86400
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(ts)).total_seconds() / 86400
 
 
 def retention(root: Path | None = None, dst: Path | None = None, *, dry: bool = False) -> dict:
@@ -111,23 +104,20 @@ def retention(root: Path | None = None, dst: Path | None = None, *, dry: bool = 
 
 def health() -> int:
     """여섯 스킬(오늘 보고서·스케줄 설치·투심 접수 지연) + 백업 나이를 한 번에 본다. 막힌 것이 없으면 조용하다."""
-    from . import status
     st = status.gather()
     if st["gaps"]:
-        print("🔴 " + report.post(TASK, "🔴 *kv health* — " + " / ".join(st["gaps"]), _send))
+        print("🔴 " + report.post(TASK, "*kv health* " + st["gaps_text"], _send))
         return 2
-    print(f"✅ {len(st['skills'])}스킬 · 백업 {st['backup']['age_days']}일 전 · 막힌 것 없음")
+    print(f"✅ {len(st['skills'])}스킬 · 백업 {st['backup']['text']} · 막힌 것 없음")
     return 0
 
 
-def digest(slack_too: bool = True) -> int:
+def digest() -> int:
     """하루 한 통 + 현황판 파일. 스킬별 요약 슬랙은 report.daily 가 여기로 넘긴다."""
-    from . import status
     st = status.gather()
     out = status.write_dashboard(st)
     print(status.render_text(st))
-    if slack_too:
-        print(f"· 현황판 {out} | 슬랙 {report.post(TASK, status.digest_text(st), _send)}")
+    print(f"· 현황판 {out} | 슬랙 {report.post(TASK, status.digest_text(st), _send)}")
     return 0
 
 
@@ -135,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="ops")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("backup"); r = sub.add_parser("retention"); r.add_argument("--dry-run", action="store_true"); sub.add_parser("health")
-    sub.add_parser("status", help="여섯 스킬 현황 한 화면"); sub.add_parser("digest", help="하루 한 통(review_test) + 현황판 html"); sub.add_parser("dashboard", help="현황판 html 만 다시 쓴다")
+    sub.add_parser("status", help="여섯 스킬 현황 한 화면"); sub.add_parser("digest", help="하루 한 통(review_test) + 현황판 html")
     a = p.parse_args(argv)
     try:
         if a.cmd == "backup":
@@ -143,12 +133,11 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "retention":
             retention(dry=a.dry_run); return 0
         if a.cmd == "status":
-            from . import status
             print(status.render_text(status.gather())); return 0
-        if a.cmd in ("digest", "dashboard"):
-            return digest(slack_too=a.cmd == "digest")
+        if a.cmd == "digest":
+            return digest()
         return health()
-    except RuntimeError as e:
+    except (RuntimeError, shutil.Error) as e:
         print(f"🔴 {e}")
         if a.cmd == "backup":
             report.post(TASK, f"🔴 *kv-data 백업 실패* — {e}", _send)

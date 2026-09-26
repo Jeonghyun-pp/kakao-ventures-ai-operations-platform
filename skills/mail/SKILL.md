@@ -18,7 +18,7 @@ constraints.yaml  mail_observe.outbound
   slack   슬랙 글만 실제로 올린다(질문·리마인드·인계·포워드 → forward_channel/POST_CH). 초안·아카이브·발송은 dry
   on      메일함에도 쓴다(초안·아카이브). 발송은 그 위에 send_branches 허용 목록을 또 지난다 — 목록 밖 갈래는 초안까지
 
-열려 있는 것   mail_observe.report_slack: on  → 아침 요약 + health 알림이 report_channel(test) 로. 이것뿐이다
+열려 있는 것   mail_observe.report_slack: on  → 아침 요약(저녁 ops digest 한 통으로 묶임)이 report_channel(test) 로. 이것뿐이다
 ```
 **켜는 순서(사람이 한다)**: `outbound: slack` → `forward_channel: bplan`(실채널) → `outbound: on` → `send_branches: [INBOUND_EN]`(보고서가 "켜도 된다"를 낸 갈래 하나씩).
 되돌리기는 같은 줄을 되돌리는 것. 각 단계에서 새로 나가는 것은 정확히 하나씩이다.
@@ -32,7 +32,7 @@ constraints.yaml  mail_observe.outbound
 10:00 observe   수집(7일 되훑기, 본 id 는 건너뜀) → 규칙 → 모델(한 통 한 번, 도구 0) → SQLite
                 → 행동 결정(route.decide) → 문 뒤에서 실행 또는 기록 → 슬랙 질문의 반응·답글 읽기 → 리마인드
                 → 하루 보고서(파일 + 슬랙 요약) → 온라인 백업(7세대)
-12:00 health    오늘 보고서 파일이 있나. 없으면 슬랙 한 줄 (9/24 실전: 맥이 잠들어 안 돌았다고 정확히 알렸다)
+12:55 ops health  오늘 보고서 파일이 있나 — 여섯 스킬을 skills/ops 가 한 번에 본다 (9/24 실전: 맥이 잠들어 안 돌았다고 정확히 알렸다)
 ```
 
 ```bash
@@ -45,7 +45,6 @@ cd ~/kv
 ./.venv/bin/python -m skills.mail.run observe --op diff --a live --b r-<sha>                          # 무엇이 달라졌나
 ./.venv/bin/python -m skills.mail.run observe --op decide --id <id> --decision yes|no                 # 슬랙 없이 결정을 넣는다
 ./.venv/bin/python -m skills.mail.run observe --op backup | restore-test
-./.venv/bin/python -m skills.mail.run health
 ```
 
 ## 사람이 매일 하는 것 — 기준 깎기
@@ -89,7 +88,7 @@ API 500 같은 일시 오류로 멈추면 다시 부르면 이어진다(9/22: �
 ## 구성
 
 ```
-run.py         진입점 (observe · health)
+run.py         진입점 (observe)
 observe.py     수집 · 판정(한 통 한 번) · 보고서 · 백업 · replay/diff/label
 flow.py        문(_out) · 기다림 없는 행동(act_all) · 판단 그래프 · 슬랙 해석 · RealIO
 clean.py       본문 정리 · 인용 분리 · 웹플로우 전문

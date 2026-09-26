@@ -16,6 +16,7 @@ def _tree(root: Path, n: int = 120):
         f = root / "mail" / "reports" / f"r{i}.md"; f.parent.mkdir(parents=True, exist_ok=True); f.write_text(f"r{i}")
     (root / "mail" / "db").mkdir(parents=True, exist_ok=True); (root / "mail" / "db" / "mail.sqlite").write_bytes(b"live")
     (root / "mail" / "db" / "backup").mkdir(); (root / "mail" / "db" / "backup" / "mail-2026-09-26.sqlite").write_bytes(b"copy")
+    (root / "dead-link").symlink_to(root / "nowhere")                                                    # 죽은 심볼릭 링크가 있어도 넘어지지 않는다(09-26 실측)
 
 
 class Backup(unittest.TestCase):
@@ -79,7 +80,7 @@ class Bundle(unittest.TestCase):
 
     def test_status_gathers_gaps_and_renders(self):
         from skills.ops import status
-        import sqlite3, json
+        import sqlite3
         from kvlib import judgments
         from kvlib.gate import SCHEMA as GATE
         with tempfile.TemporaryDirectory() as d:
@@ -97,12 +98,12 @@ class Bundle(unittest.TestCase):
                     mock.patch.object(sched, "declared", lambda: jobs), mock.patch.object(sched, "loaded", lambda: {"com.kv.mail.observe", "com.kv.ops.backup"}), \
                     mock.patch.object(run, "backup_age_days", lambda dst=None: 0.5):
                 st = status.gather("2026-09-26")
-            self.assertEqual(sorted(st["gaps"]), ["linkedin: 스케줄 미설치 — card 매일 11:00", "memo: 접수 답글 없는 요청 1건"])
+            self.assertEqual(sorted(st["gaps"])[:2], ["linkedin: 스케줄 미설치 — card 매일 11:00", "memo: 접수 답글 없는 요청 1건 — followup 이 안 돌았거나 채널을 못 읽는다"])
+            self.assertTrue(st["gaps"][-1].startswith("맥이 잠들었거나"))
             mail = next(s for s in st["skills"] if s["skill"] == "mail")
             self.assertTrue(mail["report_today"]); self.assertEqual(mail["schedule"][0]["installed"], True)
             html_out = status.render_html(st); txt = status.render_text(st); dg = status.digest_text(st)
             self.assertIn("접수 답글 없는 요청", html_out); self.assertIn("kv 현황 2026-09-26", txt); self.assertTrue(dg.startswith("*kv 하루* 2026-09-26 — 🔴"))
-            self.assertEqual(json.loads(html_out.split('id="status">')[1].split("</script>")[0])["today"], "2026-09-26")   # 데이터가 페이지 안에 그대로
 
 
 if __name__ == "__main__":

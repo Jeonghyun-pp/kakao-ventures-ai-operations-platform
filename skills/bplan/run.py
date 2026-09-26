@@ -752,7 +752,6 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="bplan")
     sub = p.add_subparsers(dest="cmd", required=True)
     r_ = sub.add_parser("run", help="매일: sync → 판정 → 행동(문 뒤) → 보고서 → 백업"); r_.add_argument("--dry-run", action="store_true")
-    sub.add_parser("health", help="오늘 보고서가 있나 — 없으면 슬랙 한 줄")
     s = sub.add_parser("sync", help="시트 → 노션 행 → 접수 메일 라벨")
     s.add_argument("--dry-run", action="store_true", help="계획만. 노션·지메일 쓰기 0")
     s.add_argument("--limit", type=int, default=0, help="이번 실행 최대 생성 건수 (0=전부)")
@@ -771,8 +770,6 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "run":
             with lock.hold("bplan-run"):
                 return run_all(dry_run=a.dry_run)
-        if a.cmd == "health":
-            return report.health("bplan", paths.data("bplan", "reports"), _send, label="비플랜 run")
         if a.cmd == "sync":
             with lock.hold("bplan-sync"):
                 return sync(dry_run=a.dry_run, limit=a.limit, since=a.since)

@@ -1,13 +1,10 @@
 #!/bin/zsh
-# kv — 한 입구. status · digest · dashboard · health · backup · retention 은 ops 로, 나머지는 스킬로.
-#   kv status            여섯 스킬 현황 한 화면            kv install [--apply]   스케줄 선언 ↔ 설치
-#   kv check             의도 검사(check_intent)          kv <스킬> <명령…>      예: kv mail observe --op status
+# kv — 한 입구. `./kv <스킬> <명령…>` 은 그 스킬로, install/check/test 는 루트 스크립트로, 나머지는 ops 로(status·health·digest·backup·retention).
 cd "$(dirname "$0")" || exit 1
 case "$1" in
-  status|digest|dashboard|health|backup|retention) exec .venv/bin/python -m skills.ops.run "$@" ;;
   install) shift; exec .venv/bin/python schedule.py install "$@" ;;
   check) exec .venv/bin/python check_intent.py ;;
   test) exec .venv/bin/python -m unittest discover -s tests -t . ;;
-  mail|linkedin|appstore|bplan|memo|ops) s=$1; shift; exec .venv/bin/python -m skills.$s.run "$@" ;;
-  *) sed -n 2,5p "$0"; exit 1 ;;
+  *) if [ -f "skills/$1/run.py" ]; then s=$1; shift; exec .venv/bin/python -m skills.$s.run "$@"; fi
+     exec .venv/bin/python -m skills.ops.run "$@" ;;
 esac
