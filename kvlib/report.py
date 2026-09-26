@@ -25,6 +25,14 @@ def post(task: str, text: str, send: Callable[[str, str], object]) -> str:
         return f"실패({type(e).__name__}: {e})"
 
 
+def daily(task: str, text: str, send: Callable[[str, str], object]) -> str:
+    """스킬의 **하루 요약**. `ops.digest_slack` 이 on 이면 여기서는 보내지 않는다 — 저녁에 ops digest 가 여섯 스킬을 한 통으로 보낸다(2026-09-26).
+    실패 경보는 이걸 쓰지 않고 `post()` 로 바로 낸다 — 묶으면 늦는다."""
+    if constraints.get("ops.digest_slack") == "on":
+        return "묶음(ops digest)"
+    return post(task, text, send)
+
+
 def health(task: str, reports_dir: Path, send: Callable[[str, str], object], *, label: str,
            weekdays_only: bool = False) -> int:
     today = ledger.today()

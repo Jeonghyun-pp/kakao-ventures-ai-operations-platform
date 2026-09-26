@@ -108,7 +108,7 @@ class Notion:
 class Case:
     def __init__(self, *, sheet=(), notion=(), intake=(), labels=None, cfg=None):
         self.sheets, self.notion, self.gmail, self.slack = Sheets(list(sheet)), Notion(list(notion)), Gmail(intake, labels), Slack()
-        self.cfg, self.out = cfg or {}, io.StringIO()
+        self.cfg, self.out = {"ops.digest_slack": "off", **(cfg or {})}, io.StringIO()   # 스킬 단독 동작을 잰다 — 묶음은 test_ops 가
 
     def __enter__(self):
         self._stack = contextlib.ExitStack().__enter__()

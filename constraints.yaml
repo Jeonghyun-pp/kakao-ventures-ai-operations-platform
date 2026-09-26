@@ -274,6 +274,8 @@ ops:
   backup_stale_days: 2         # 이틀 넘게 스냅샷이 없으면 health 가 말한다. 하루는 맥이 잠들 수 있다
   report_channel: "test"
   report_slack: "on"
+  # 하루 요약 슬랙을 ops digest 한 통으로 묶는다(report.daily). off 면 스킬마다 예전처럼 따로 보낸다. 실패 경보(report.post)는 이 키와 무관하게 각자 낸다
+  digest_slack: "on"
   # 🔴 보존 규칙 = 허용 목록. 여기 없는 glob 은 지울 수 없다. 오늘 백업이 성공했을 때만 집행한다.
   #    영구(규칙에 넣지 않는다): linkedin/raw(유료 Apify 원본) · _archive/(옛 시스템 데이터) · */db/backup(스킬 sqlite 사본은 store.backup 이 스스로 7일 보관) · reports
   retention:

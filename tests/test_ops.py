@@ -61,5 +61,49 @@ class Retention(unittest.TestCase):
             self.assertEqual((old.exists(), new.exists(), other.exists()), (False, True, True))                       # 목록 밖(other) 은 못 건드린다
 
 
+class Bundle(unittest.TestCase):
+    """묶기 — 스킬의 하루 요약은 digest 가 켜져 있으면 스킬에서 안 나가고(묶음), 꺼져 있으면 예전처럼 나간다. 경보(post)는 키와 무관."""
+
+    def test_daily_is_routed_to_digest_when_on(self):
+        from kvlib import report
+        sent = []
+        real = report.constraints.get
+        cfg = {"ops.digest_slack": "on", "x.report_slack": "on", "x.report_channel": "test"}
+        with mock.patch.object(report.constraints, "get", lambda k: cfg[k] if k in cfg else real(k)):
+            self.assertEqual(report.daily("x", "요약", lambda ch, t: sent.append(t)), "묶음(ops digest)")
+            self.assertEqual(report.post("x", "🔴 경보", lambda ch, t: sent.append(t)), "게시함")
+        cfg["ops.digest_slack"] = "off"
+        with mock.patch.object(report.constraints, "get", lambda k: cfg[k] if k in cfg else real(k)):
+            self.assertEqual(report.daily("x", "요약", lambda ch, t: sent.append(t)), "게시함")
+        self.assertEqual(sent, ["🔴 경보", "요약"])
+
+    def test_status_gathers_gaps_and_renders(self):
+        from skills.ops import status
+        import sqlite3, json
+        from kvlib import judgments
+        from kvlib.gate import SCHEMA as GATE
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for sk in ("mail", "linkedin", "appstore", "bplan", "memo"):
+                (root / sk / "db").mkdir(parents=True); (root / sk / "reports").mkdir()
+            con = sqlite3.connect(root / "memo/db/memo.sqlite"); con.executescript(judgments.SCHEMA + GATE)
+            con.execute("INSERT INTO actions VALUES('1.1','request','done','{}','2026-09-26T01:00:00Z')"); con.commit(); con.close()
+            (root / "mail/reports/2026-09-26.md").write_text("x")
+            jobs = [{"skill": "mail", "cmd": "observe", "when": "매일 10:00", "label": "com.kv.mail.observe"},
+                    {"skill": "linkedin", "cmd": "card", "when": "매일 11:00", "label": "com.kv.linkedin.card"},
+                    {"skill": "ops", "cmd": "backup", "when": "매일 12:45", "label": "com.kv.ops.backup"}]
+            import schedule as sched
+            with mock.patch.object(status.paths, "data", lambda *a, create=True: root.joinpath(*a)), \
+                    mock.patch.object(sched, "declared", lambda: jobs), mock.patch.object(sched, "loaded", lambda: {"com.kv.mail.observe", "com.kv.ops.backup"}), \
+                    mock.patch.object(run, "backup_age_days", lambda dst=None: 0.5):
+                st = status.gather("2026-09-26")
+            self.assertEqual(sorted(st["gaps"]), ["linkedin: 스케줄 미설치 — card 매일 11:00", "memo: 접수 답글 없는 요청 1건"])
+            mail = next(s for s in st["skills"] if s["skill"] == "mail")
+            self.assertTrue(mail["report_today"]); self.assertEqual(mail["schedule"][0]["installed"], True)
+            html_out = status.render_html(st); txt = status.render_text(st); dg = status.digest_text(st)
+            self.assertIn("접수 답글 없는 요청", html_out); self.assertIn("kv 현황 2026-09-26", txt); self.assertTrue(dg.startswith("*kv 하루* 2026-09-26 — 🔴"))
+            self.assertEqual(json.loads(html_out.split('id="status">')[1].split("</script>")[0])["today"], "2026-09-26")   # 데이터가 페이지 안에 그대로
+
+
 if __name__ == "__main__":
     unittest.main()

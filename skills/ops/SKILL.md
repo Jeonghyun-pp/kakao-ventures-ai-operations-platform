@@ -4,7 +4,8 @@ description: 살림 — kv-data 스냅샷 백업(7일)·보존 규칙 집행·�
 schedule:
   - { cmd: backup,    when: "매일 12:45", why: "맥이 깨어 있는 낮. 스킬들의 sqlite 일일 사본(db/backup/)이 오전 실행 뒤에 생기므로 그 뒤" }
   - { cmd: retention, when: "월 13:00",  why: "주 1회면 충분(하루 수십 MB). 백업 뒤 — 오늘 백업이 없으면 스스로 아무것도 안 지운다" }
-  - { cmd: health,    when: "매일 12:55", why: "backup 은 자기가 안 돌았다고 말할 수 없다. 이틀 넘게 스냅샷이 없으면 review_test 한 줄" }
+  - { cmd: health,    when: "매일 12:55", why: "잡은 자기가 안 돌았다고 말할 수 없다. 여섯 스킬의 오늘 보고서·스케줄 설치·백업 나이를 한 번에 보고 막힌 것만 한 줄. 스킬별 health 여섯(12:00~12:40)을 이것 하나로 묶었다(09-26)" }
+  - { cmd: digest,    when: "매일 18:30", why: "하루가 끝난 뒤 한 통. 스킬별 하루 요약 슬랙 다섯을 이것 하나로 묶었다(report.daily). 현황판 html 도 이때 다시 쓴다" }
 ---
 
 # 살림 (ops)

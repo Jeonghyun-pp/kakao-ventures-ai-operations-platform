@@ -363,7 +363,7 @@ def daily_report(g: Gate) -> None:
     first = not out.exists()
     out.write_text("\n".join(md), encoding="utf-8")
     if first:
-        print(f"· 보고서 {out} | 슬랙 {report.post(TASK, f'*투심 레인 하루* — {head}' + chr(10) + f'전체: `{out}`', _send)}")
+        print(f"· 보고서 {out} | 슬랙 {report.daily(TASK, f'*투심 레인 하루* — {head}' + chr(10) + f'전체: `{out}`', _send)}")
 
 
 def health() -> int:

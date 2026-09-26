@@ -712,7 +712,7 @@ def daily_report(g: Gate, acted: dict) -> None:
            "./.venv/bin/python -m skills.bplan.run diff --b r-<sha>", "```", ""]
     out.write_text("\n".join(md), encoding="utf-8")
     summary = f"*비플랜 하루* — {head}\n전체: `{out}`"
-    print(f"· 보고서 {out} | 슬랙 {report.post('bplan', summary, _send)}")
+    print(f"· 보고서 {out} | 슬랙 {report.daily('bplan', summary, _send)}")
 
 
 def run_all(*, dry_run: bool = False) -> int:

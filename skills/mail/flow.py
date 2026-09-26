@@ -362,7 +362,7 @@ class Flow(Gate):
 
 def post_report(text: str, io=None) -> str:
     """하루 보고 요약을 슬랙에 — `kvlib.report.post`. 문(`outbound`)과 별개의 스위치다."""
-    return report.post("mail_observe", text, (io or RealIO()).slack_post)
+    return report.daily("mail_observe", text, (io or RealIO()).slack_post)
 
 
 class RealIO:

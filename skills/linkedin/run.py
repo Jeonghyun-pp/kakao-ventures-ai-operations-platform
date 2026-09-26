@@ -890,7 +890,7 @@ def daily_report(g: Gate, *, pool: int, picked: int) -> None:
            "# 정답은 노션 Tier 칸을 고치면 된다 — 다음 card 가 human 으로 가져간다", "```", ""]
     out.write_text("\n".join(md), encoding="utf-8")
     summary = f"*링크드인 하루* — {head}" + (f"\n🚩 노션에서 고친 Tier {len(human)}명" if human else "") + f"\n전체: `{out}`"
-    print(f"· 보고서 {out} | 슬랙 {report.post('linkedin', summary, _send)}")
+    print(f"· 보고서 {out} | 슬랙 {report.daily('linkedin', summary, _send)}")
 
 
 def main(argv: list[str] | None = None) -> int:

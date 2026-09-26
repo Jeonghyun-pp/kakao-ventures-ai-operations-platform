@@ -372,7 +372,7 @@ def daily_report(g: Gate, *, landed: int, candidates: int, fresh: int, unknowns:
            "./.venv/bin/python -m skills.appstore.run replay [--limit 200]    # 저장된 입력으로 규칙+모델 다시",
            "./.venv/bin/python -m skills.appstore.run diff --b r-<sha>", "```", ""]
     out.write_text("\n".join(md), encoding="utf-8")
-    print(f"· 보고서 {out} | 슬랙 {report.post('appstore', f'*앱스토어 하루* — {head}' + chr(10) + f'전체: `{out}`', _send)}")
+    print(f"· 보고서 {out} | 슬랙 {report.daily('appstore', f'*앱스토어 하루* — {head}' + chr(10) + f'전체: `{out}`', _send)}")
 
 
 def _report() -> None:
