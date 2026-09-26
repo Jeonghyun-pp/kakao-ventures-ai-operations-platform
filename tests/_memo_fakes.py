@@ -11,8 +11,9 @@ from unittest import mock
 
 import docx
 
-from kvlib import Fetched, judgments, ledger
+from kvlib import Fetched, judgments
 from kvlib.gate import Gate
+from kv_transport import slack as _slack
 from skills.memo import run
 
 
@@ -24,25 +25,25 @@ def make_docx(path: Path, paras: list[str]) -> Path:
 
 
 class Slack:
+    files_of = staticmethod(_slack.files_of)                    # 순수 필터 — 진짜를 쓴다
+
     def __init__(self, messages=()):
-        self.messages, self.replies_by, self.files_by, self.posts, self.uploads, self.n = list(messages), {}, {}, [], [], 0
+        self.messages, self.replies_by, self.posts, self.uploads, self.n = list(messages), {}, [], [], 0
 
     def history(self, key, **kw):
         return Fetched.measured(self.messages)
 
-    def thread_files(self, key, parent):
-        return Fetched.measured(self.files_by.get(parent, []))
+    def thread(self, key, parent):
+        head = [m for m in self.messages if m.get("ts") == parent]
+        return Fetched.measured(head + self.replies_by.get(parent, []))
 
     def download(self, url, dest):
         dest.write_bytes(b"%PDF-1.4 fake " + url.encode()); return Fetched.measured(dest)
 
-    def replies(self, key, parent):
-        return Fetched.measured(self.replies_by.get(parent, []))
-
     def post(self, key, text, *, thread_ts=None, **kw):
         self.n += 1; ts = f"{1000 + self.n}.0"; self.posts.append((key, text, thread_ts, ts)); return Fetched.measured(ts)
 
-    def upload(self, key, path, *, thread_ts=None, title=None, comment=""):
+    def upload(self, key, path, *, thread_ts=None, title=None):
         self.uploads.append((key, Path(path).name, thread_ts)); return Fetched.measured(f"F{len(self.uploads)}")
 
 
@@ -60,7 +61,7 @@ class Notion:
 class Claude:
     """run_skill 가짜 — 프롬프트에서 폴더를 읽어 그 안에 docx·md 를 만든다(실제 스킬이 하는 일의 결과만)."""
     def __init__(self, paras=None, fail=False):
-        self.calls, self.paras, self.fail = [], paras or ["헤드라인 하나입니다 문단", "불릿 문장 하나 (2026.04 미팅)", "불릿 문장 둘 (미확인 — 텀시트 필요)"], fail
+        self.calls, self.paras, self.fail = [], paras or ["헤드라인 하나입니다 같은 문단 내용", "불릿 문장 하나 (2026.04 미팅)", "불릿 문장 둘 (미확인 — 텀시트 필요)"], fail
 
     def run_skill(self, prompt, **kw):
         self.calls.append((prompt, kw))
@@ -88,13 +89,12 @@ class Case:
         self.db = sqlite3.connect(":memory:", isolation_level=None); self.db.executescript(judgments.SCHEMA)
         self.gate = Gate(self.db, "memo", lambda k: k.rstrip("0123456789") in run.SLACK_KINDS, force="off" if self.cfg.get("_dry") else None)
         self._stack.enter_context(mock.patch.object(run, "_gate", lambda dry_run=False: self.gate))
-        self._stack.enter_context(mock.patch.object(run, "_people", lambda: self.people))
+        self._stack.enter_context(mock.patch.object(run.people, "load", lambda: self.people))
         def req_dir(key):
             p = d / "requests" / key.replace(".", "_"); p.mkdir(parents=True, exist_ok=True); return p
         self._stack.enter_context(mock.patch.object(run, "_req_dir", req_dir))
         self._stack.enter_context(mock.patch.object(run, "_reports_dir", lambda: d))
-        self._stack.enter_context(mock.patch.object(run, "db_path", lambda: d / "db" / "t.sqlite"))
-        self._stack.enter_context(mock.patch.object(ledger.paths, "ledger", lambda task: d / f"{task}.jsonl"))
+        self._stack.enter_context(mock.patch.object(run, "db_path", lambda: d / "db" / "t.sqlite"))       # 백업도 임시 폴더로
         self._stack.enter_context(contextlib.redirect_stdout(self.out))
         return self
 

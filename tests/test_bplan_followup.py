@@ -44,7 +44,7 @@ class Followup(unittest.TestCase):
 
     def test_raising_hand_is_acknowledged_in_thread(self):
         with Case(notion=[ROW], cfg={"bplan.outbound": "slack"}) as c, \
-                mock.patch.object(run, "_people", lambda: [{"names": ["Reviewer A"], "slack_id": "U1"}]):
+                mock.patch.object(run.people, "load", lambda: [{"names": ["Reviewer A"], "slack_id": "U1"}]):
             parent, ts = carded(c)
             react(c, parent, ts, "raising_hand::skin-tone-3")
             n = run.followup(c.gate)

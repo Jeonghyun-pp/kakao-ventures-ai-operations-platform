@@ -203,35 +203,31 @@ def send_text(key: str, text: str, *, dry_run: bool = False) -> bool:
 
 # ---------------------------------------------------------------- 이력·파일 (2026-09-26, 투심 레인)
 
-def history(key: str, *, oldest: str | None = None, limit: int = 200) -> Fetched:
+def history(key: str, *, limit: int = 200) -> Fetched:
     """채널 **최상위** 메시지(새것부터). `files`·`thread_ts`·`reply_count`·`user`·`reactions` 가 딸려 온다."""
     ch = channel_id(key)
-    params = {"channel": ch, "limit": limit}
-    if oldest:
-        params["oldest"] = oldest
     try:
-        res = _call("GET", "/conversations.history", params=params)
+        res = _call("GET", "/conversations.history", params={"channel": ch, "limit": limit})
     except SlackError as e:
         return Fetched.unknown(f"slack:{e}", channel=key)
     return Fetched.measured(res.get("messages") or [], channel=key)
 
 
-def thread_files(key: str, parent_ts: str) -> Fetched:
-    """부모 + 답글에 붙은 파일 메타 `[{id, name, url, ts, user, mimetype}]`. 봇이 올린 것은 뺀다."""
+def thread(key: str, parent_ts: str) -> Fetched:
+    """부모 + 답글 전부(부모 포함). `replies()` 는 답글만 준다 — 부모에 붙은 파일까지 보려면 이것."""
     ch = channel_id(key)
     try:
         res = _call("GET", "/conversations.replies", params={"channel": ch, "ts": parent_ts, "limit": 200})
     except SlackError as e:
         return Fetched.unknown(f"slack:{e}", channel=key)
-    out = []
-    for m in res.get("messages") or []:
-        if m.get("bot_id") or m.get("subtype") == "bot_message":
-            continue
-        for f in m.get("files") or []:
-            if f.get("url_private"):
-                out.append({"id": f.get("id"), "name": f.get("name") or f.get("title") or f.get("id"), "url": f["url_private"],
-                            "ts": m.get("ts"), "user": m.get("user"), "mimetype": f.get("mimetype", "")})
-    return Fetched.measured(out, parent=parent_ts)
+    return Fetched.measured(res.get("messages") or [], parent=parent_ts)
+
+
+def files_of(msgs: list[dict]) -> list[dict]:
+    """메시지들에 붙은 **사람이 올린** 파일 메타 `[{id, name, url, ts, user}]`. 봇 파일(우리 초안)은 뺀다. 망에 안 닿는다."""
+    return [{"id": f.get("id"), "name": f.get("name") or f.get("title") or f.get("id"), "url": f["url_private"], "ts": m.get("ts"), "user": m.get("user")}
+            for m in msgs if not m.get("bot_id") and m.get("subtype") != "bot_message"
+            for f in m.get("files") or [] if f.get("url_private")]
 
 
 def download(url: str, dest) -> Fetched:
@@ -248,7 +244,7 @@ def download(url: str, dest) -> Fetched:
     return Fetched.measured(dest, bytes=len(r.content))
 
 
-def upload(key: str, path, *, thread_ts: str | None = None, title: str | None = None, comment: str = "") -> Fetched:
+def upload(key: str, path, *, thread_ts: str | None = None, title: str | None = None) -> Fetched:
     """파일을 채널(스레드)에 올린다 — files.getUploadURLExternal → PUT → completeUploadExternal. 반환은 file id.
     files:write 스코프가 필요하다. 억제·실패는 미상으로."""
     ch = channel_id(key)
@@ -264,8 +260,6 @@ def upload(key: str, path, *, thread_ts: str | None = None, title: str | None = 
         body = {"files": [{"id": step1["file_id"], "title": title or path.name}], "channel_id": ch}
         if thread_ts:
             body["thread_ts"] = thread_ts
-        if comment:
-            body["initial_comment"] = comment
         _call("POST", "/files.completeUploadExternal", json=body)
     except SlackError as e:
         return Fetched.unknown(f"slack:{e}", channel=key)

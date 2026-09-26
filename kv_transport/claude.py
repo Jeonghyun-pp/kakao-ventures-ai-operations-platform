@@ -68,6 +68,17 @@ def _record(ok: bool, err: str = "") -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _spawn(cmd: list[str], prompt: str, timeout: int, cwd=None):
+    """claude 프로세스 한 번. prompt 는 argv 가 아니라 stdin — 데이터가 "-" 로 시작해도 플래그로 안 읽힌다."""
+    try:
+        return subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout, cwd=str(cwd) if cwd else None)
+    except FileNotFoundError:
+        raise SessionError("claude CLI 가 없다")          # spawn 자체가 없었다 → 미계상
+    except subprocess.TimeoutExpired:
+        _record(False, "timeout")                        # 쿼터는 태웠다 → 계상
+        raise SessionError("timeout")
+
+
 def run_session(prompt: str, *, system: str | None = None, tools: str | None = None) -> str:
     """claude -p 한 번. stdout 원문을 **파싱하지 않고** 그대로 돌려준다.
 
@@ -93,16 +104,7 @@ def run_session(prompt: str, *, system: str | None = None, tools: str | None = N
     if tools is not None:
         cmd += ["--tools", tools]
 
-    try:
-        # prompt 는 argv 가 아니라 stdin — 데이터가 "-" 로 시작해도 플래그로 안 읽힌다
-        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
-                           timeout=constraints.get("claude.timeout_sec"))
-    except FileNotFoundError:
-        raise SessionError("claude CLI 가 없다")          # spawn 자체가 없었다 → 미계상
-    except subprocess.TimeoutExpired:
-        _record(False, "timeout")                        # 쿼터는 태웠다 → 계상
-        raise SessionError("timeout")
-
+    r = _spawn(cmd, prompt, constraints.get("claude.timeout_sec"))
     out = (r.stdout or "").strip()
     # 🔴 rc 가 아니라 출력으로 판정한다
     if not out:
@@ -130,15 +132,12 @@ def run_skill(prompt: str, *, mcp_config, system_file, allowed_tools: list[str],
            "--append-system-prompt-file", str(system_file),
            "--permission-mode", "dontAsk",
            "--allowedTools", ",".join(allowed_tools),
-           "--disallowedTools", "Edit,Write,NotebookEdit,Bash(rm *),Bash(git *)",
+           "--disallowedTools", ",".join(constraints.get("claude.skill_forbidden_tools")),
            "--output-format", "text"]
     try:
-        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout_sec, cwd=str(cwd) if cwd else None)
-    except FileNotFoundError:
-        return Fetched.unknown("claude CLI 가 없다")
-    except subprocess.TimeoutExpired:
-        _record(False, "timeout")
-        return Fetched.unknown(f"timeout {timeout_sec}s")
+        r = _spawn(cmd, prompt, timeout_sec, cwd)
+    except SessionError as e:
+        return Fetched.unknown(str(e))
     out = (r.stdout or "").strip()
     if r.returncode != 0 or not out:
         _record(False, f"rc{r.returncode}")

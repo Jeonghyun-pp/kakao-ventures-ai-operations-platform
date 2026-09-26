@@ -18,11 +18,12 @@ class Files(unittest.TestCase):
     def setUp(self):
         slack.register("t", "C1")
 
-    def test_thread_files_skips_bot_files(self):
-        msgs = {"messages": [{"ts": "1", "user": "U1", "files": [{"id": "F1", "name": "덱.pdf", "url_private": "u"}]},
-                             {"ts": "2", "bot_id": "B", "files": [{"id": "F2", "name": "초안.docx", "url_private": "u2"}]}]}
-        with mock.patch.object(slack, "_call", lambda *a, **k: msgs):
-            self.assertEqual([f["id"] for f in slack.thread_files("t", "1").require()], ["F1"])
+    def test_files_of_skips_bot_files(self):
+        msgs = [{"ts": "1", "user": "U1", "files": [{"id": "F1", "name": "덱.pdf", "url_private": "u"}]},
+                {"ts": "2", "bot_id": "B", "files": [{"id": "F2", "name": "초안.docx", "url_private": "u2"}]}]
+        self.assertEqual([f["id"] for f in slack.files_of(msgs)], ["F1"])
+        with mock.patch.object(slack, "_call", lambda *a, **k: {"messages": msgs}):
+            self.assertEqual(len(slack.thread("t", "1").require()), 2)                          # 부모 포함
 
     def test_download_rejects_login_html(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.object(slack.secrets, "get", lambda *a, **k: "tok"):

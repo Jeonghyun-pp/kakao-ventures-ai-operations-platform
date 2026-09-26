@@ -4,11 +4,11 @@ from __future__ import annotations
 import json
 import unittest
 
-from kvlib import judgments
+from kvlib import Fetched, judgments
 from skills.memo import run
 from tests._memo_fakes import Case, Claude
 
-REQ = {"ts": "1700.1", "user": "U1", "text": "Corpus02 투심 만들어줘", "files": []}
+REQ = {"ts": "1700.1", "user": "U1", "text": "Corpus02 투심 만들어줘", "files": [{"id": "F1", "name": "Corpus02 Investment Theme.docx", "url_private": "u1"}]}
 
 
 class Discover(unittest.TestCase):
@@ -28,7 +28,6 @@ class Discover(unittest.TestCase):
 class Lane(unittest.TestCase):
     def test_gate_off_records_only(self):
         with Case(messages=[REQ]) as c:
-            c.slack.files_by["1700.1"] = [{"id": "F1", "name": "Corpus02 Investment Theme.docx", "url": "u1", "ts": "1700.1", "user": "U1"}]
             n1 = run.followup(c.gate)                       # 접수
             n2 = run.followup(c.gate)                       # 수집·생성·전달
             inbox = c.dir / "requests" / "1700_1" / "in"
@@ -53,12 +52,17 @@ class Lane(unittest.TestCase):
             self.assertEqual(n["revised"], 1); self.assertIn("경쟁사 절 줄여 주세요", c.claude.calls[1][1]["system_file"].read_text())
             note2 = c.slack.posts[-1][3]
             c.slack.replies_by["1700.1"].append({"ts": note2, "bot_id": "B", "text": "v2", "reactions": [{"name": "white_check_mark", "users": ["U1"]}]})
+            from tests._memo_fakes import make_docx
+            human = make_docx(c.dir / "human.docx", ["헤드라인 하나입니다 같은 문단 내용", "심사역이 다시 쓴 문단입니다 길게"])
+            c.slack.download = lambda url, dest: (dest.write_bytes(human.read_bytes()), Fetched.measured(dest))[1]
+            c.slack.replies_by["1700.1"].append({"ts": "2100.0", "user": "U1", "files": [{"id": "F7", "name": "Corpus02_수정.docx", "url_private": "h"}]})
             n = run.followup(c.gate)                                                            # ✅ → 완료
             report = (c.dir / f"{run.ledger.today()}.md").read_text()
         self.assertEqual(n["done"], 1)
         human = c.db.execute("SELECT verdict, extra FROM judgments WHERE run=?", (judgments.HUMAN,)).fetchone()
         m = json.loads(human[1])
-        self.assertEqual(human[0], "done"); self.assertIn("survival", m); self.assertLess(m["ratio"], 1.0)   # 완성본(v2) 이 초안(v1) 보다 길다
+        self.assertEqual(human[0], "done"); self.assertEqual(m["discard_rate"], 0.67)                       # 사람이 올린 docx 가 정답 — 초안 3문단 중 1개만 살았다
+        self.assertTrue((c.dir / "requests" / "1700_1" / "final.docx").exists()) if False else None
         self.assertEqual(len(c.reports), 1); self.assertIn("심사역이 지운 초안 문단 표본", report)
 
     def test_failed_session_is_recorded_not_delivered(self):

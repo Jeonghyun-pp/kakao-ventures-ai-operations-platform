@@ -11,7 +11,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, secrets, store
+from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, secrets, store, people
 from kvlib.gate import Gate
 from kv_transport import claude, drive, gmail, notion, sheets, slack
 
@@ -645,17 +645,12 @@ def followup(g: Gate, rows_fn=None) -> dict:
                 if decision == "no":
                     _draft(g, k, row, n)
             elif decision == "ack":
-                who = next((p_["names"][0] for p_ in _people() for u in users if p_.get("slack_id") == u), None)
+                who = next((p_["names"][0] for p_ in people.load() for u in users if p_.get("slack_id") == u), None)
                 _thread(g, k, "ack", f"🙋 {who or '누군가'} 님이 맡았습니다. 노션 `담당심사역` 칸에 이름을 남겨 주세요.")
                 n["ack"] += 1
             else:
                 n["reminded"] += _remind(g, k, created)
     return dict(n)
-
-
-def _people() -> list[dict]:
-    import yaml
-    return yaml.safe_load((paths.repo_root() / "people.yaml").read_text(encoding="utf-8")) or []
 
 
 def _remind(g: Gate, key: str, card_created: str) -> int:

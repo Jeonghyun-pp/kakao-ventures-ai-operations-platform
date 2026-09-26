@@ -56,13 +56,8 @@ cd ~/kv-automation/skills/investment-memo && ../../.venv/bin/python scripts/back
 
 ## 구성
 
-```
-run.py         discover(요청) · _ack · _collect · _generate · _deliver · followup(상태기계) · _done(정답·지표) · run_folder · daily_report · health
-headless.md    무인 규칙 — 회사명·폴더·노션 줄·피드백을 실행마다 채워 --append-system-prompt-file 로 붙인다. 스킬 프롬프트는 손대지 않는다
-../../kv_transport/notion.py   find_page · page_text(블록 재귀 → md)      ../../kv_transport/slack.py   history · thread_files · download · upload
-../../kv_transport/claude.py   run_skill — MCP 붙인 긴 세션. 성공 판정은 호출부가 산출물로
-```
-`constraints.yaml memo.*`: outbound · request_channel · request_pattern · extra_requesters · collect_wait_min · session_timeout_min · max_versions · report_* · backup_keep · skill_dir · skill_python · allowed_tools. **근거는 그 주석에**.
+`run.py` 한 파일(흐름은 위 "하루"와 같다 · `grep ^def`) + `headless.md`(무인 규칙 — 실행마다 회사명·폴더·노션 줄·피드백을 채워 `--append-system-prompt-file` 로. 스킬 프롬프트는 손대지 않는다).
+통로는 `kv_transport/{notion,slack,claude}.py` 끝의 2026-09-26 절. `constraints.yaml memo.*`: outbound · request_channel · request_pattern · extra_requesters · collect_wait_min · session_timeout_min · max_versions · report_* · backup_keep · skill_dir · skill_python · allowed_tools. **근거는 그 주석에**.
 
 ## 알아둘 것
 
