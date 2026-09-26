@@ -1,52 +1,10 @@
-"""비플랜 접수 동기화 — 구글폼 시트 → 노션 Bplan DB → 접수 메일 라벨 이동.
-
-    sync [--dry-run] [--limit N] [--since ISO]   새 접수를 노션 행으로 만들고, 접수 메일을 담당자 라벨로 옮긴다
-    status                                       장부 요약
-    selftest                                     망 불호출 자기검사 (헤더·타임스탬프·키·중복 규칙)
-
-## 이 스킬이 하는 일과 안 하는 일
-
-    하는 것    노션 **행 생성**(새 접수만) · 접수 메일에 **라벨 부여 + 인박스 제거**
-    안 하는 것  판정(점수) · `To do` 이동 · 드랍 초안 · **발송** · 시트 쓰기 · 접수 메일 본문 읽기
-
-라벨 이동은 삭제가 아니라 아카이빙이라 되돌릴 수 있다. 판정은 별도 스킬(Phase 2)의 몫이고,
-드랍 초안도 별도다 — 이 스킬은 "접수가 왔다"를 노션에 옮기는 데서 끝난다.
-
-## 🔴 진행 상태는 **바닥선 + 접수키** 두 축이다 (옛 시스템에서 실측으로 배운 것)
-
-"노션에 없으면 신규다"는 틀렸다 — 시트는 6년치 5,600행이고 노션은 최근 몇 달만 담는다.
-그대로 돌리면 5,000건을 노션에 쏟아붓는다(2026-08-13 dry-run 실측). 그래서:
-
-    바닥선(floor)   이 시각 **이후** 접수만 본다. 단조 증가. 과거를 되살리지 않는다
-                   = max(장부의 마지막 착지 시각, 노션 접수키의 최대 시각)
-    접수키          `이메일|접수시각`. 그 창 안에서 "이미 넣었나". 시트 행 위치와 무관하다
-
-옛 sync 의 멱등 키는 시트 **행 서수**였고, 행이 하나 밀리면 같은 서수가 다른 회사를 가리켰다.
-그래서 같은 사람이 드랍 메일을 6통 받았다. 접수키는 그 사고를 구조로 막는다.
-
-## 🔴 접수키가 없는 옛 행 — 2026-08-30 에 옛 코드로 68행이 들어갔다
-
-그 68행은 접수키가 없다. 키만 보면 전부 "없음"이라 다시 만들게 된다 — 그날 이미 중복 2벌이
-들어간 DB 에 3벌째를 얹는 꼴이다. 그래서 키 없는 행은 **이메일**로 대조하되,
-**행 생성 시각보다 뒤에 온 접수는 새것**으로 본다 — 행이 접수보다 먼저 생길 수는 없으니
-그 뒤의 재접수는 그 행이 대표할 수 없다.
-
-🔴 기업명은 대조에 안 쓴다. 심사역이 노션 제목을 고쳐 쓴다("주식회사 카즈아" → "주식회사 카즈아
-(MAKEMORY)"). 첫 dry-run 에서 (이메일, 기업명)으로 대조하니 14쌍이 그 이유로 어긋나 옛 접수 10건을
-다시 만들려 했다. 이메일은 사람이 안 고친다.
-
-## 지키는 규율
-
-    인증부터 본다           시트·지메일·노션 셋 다. 나중에 401 로 알면 0건과 구별이 안 된다
-    미상은 0건이 아니다      시트를 못 읽으면 "신규 0건"이 아니라 미상이고 종료코드가 0이 아니다
-    착지 먼저, 장부 나중     순서가 반대면 실패한 것이 "했음"으로 남아 영영 안 잡힌다
-    쓴 것은 되읽는다        통로가 한다. 200 은 저장을 뜻하지 않는다
-    노션에 없는 메일은 안 건드린다  라벨만 붙여 인박스에서 빼면 아무도 추적하지 않는 접수가 조용히 사라진다
-    보고는 장부에서         "56건 만들었다"는 장부 줄 수다
+"""비플랜 — 접수 동기화(sync) → 판정(judge, 덱 포함) → 행동(act: 점수·카드·드랍 초안, 문 뒤) → 반응 잇기(followup) → 보고서.
+명령·일정·흐름은 SKILL.md. 🔴 발송은 이 스킬에 없다 — 드랍 초안은 초안까지다(send_branches 가 갈래별로 연다).
 """
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import re
 import sys
@@ -92,7 +50,6 @@ _COLS: dict[str, str] = {
     "사업계획서": "팀의 사업계획서를 첨부",
     "기업명": "기업명을 알려주세요",
 }
-_TS_COL = "타임스탬프"
 KEY_PROP = "접수키"
 TITLE_PROP = "기업명"
 CREATED_PROP = "DB 업데이트 시간"
@@ -110,7 +67,7 @@ class Degraded(RuntimeError):
     """돌긴 돌았는데 온전하지 않다. 크론은 종료코드만 보므로 0 과 달라야 한다."""
 
 
-# ---------------------------------------------------------------- 순수 함수 (selftest 대상)
+# ---------------------------------------------------------------- 순수 함수 (tests/test_bplan_sync.py::Pure 가 잰다)
 
 def parse_ts(s: str) -> datetime | None:
     m = _TS_RE.match(s or "")
@@ -135,7 +92,7 @@ def submission_key(email: str, ts: datetime) -> str:
 
 def norm_company(s: str) -> str:
     """기업명 대조용 정규화. 메일 제목과 노션 제목은 표기가 흔들린다 — 대조에만 쓰고 저장하지 않는다."""
-    # 🔴 긴 패턴이 먼저다. 문자 클래스가 앞에 오면 "(주)" 의 괄호만 먼저 지워져 "주" 가 남는다(selftest ⑤가 잡았다).
+    # 🔴 긴 패턴이 먼저다. 문자 클래스가 앞에 오면 "(주)" 의 괄호만 먼저 지워져 "주" 가 남는다(test_bplan_sync ⑤가 잡는다).
     return re.sub(r"주식회사|\(주\)|㈜|[\s()（）,.\-_/·]", "", s or "").lower()
 
 
@@ -143,7 +100,7 @@ def resolve_columns(headers: list[str]) -> dict[str, int]:
     """헤더 접두사 → 열 번호. **하나라도 못 찾으면 멈춘다.**"""
     idx: dict[str, int] = {}
     missing: list[str] = []
-    for prop, prefix in list(_COLS.items()) + [("_ts", _TS_COL)]:
+    for prop, prefix in list(_COLS.items()) + [("_ts", "타임스탬프")]:
         hit = [i for i, h in enumerate(headers) if (h or "").strip().startswith(prefix)]
         if len(hit) == 1:
             idx[prop] = hit[0]
@@ -452,7 +409,7 @@ def _report(stamp, dry_run, floor, n_sheet, why, made, tally, orphans, replies, 
         out += ["", "## 🔴 노션에 행이 없는 접수 메일 — 인박스에 그대로 뒀다", ""] + [f"- {o}" for o in orphans]
     if fails:
         out += ["", "## 🔴 실패", ""] + [f"- {f}" for f in fails]
-    out += ["", "---", "", "🔴 판정·드랍 초안·발송은 이 스킬에 없다. 여기서 끝나는 일은 '접수가 왔다'를 노션에 옮기는 것뿐이다.", ""]
+    out += ["", "---", "", "🔴 발송은 이 스킬에 없다 — 드랍 초안은 초안까지다.", ""]
     return "\n".join(out)
 
 
@@ -463,7 +420,6 @@ _JUDGE_PROPS = ["기업명", "대표명", "이메일", "접수키", "사업계�
 _TODO_LABEL = {"To Drop": "drop", "미팅요청": "keep", "Mail Fwd": "keep", "Q&A": "keep"}
 DROP_SCORES = ("칼드랍", "Red")                     # 드랍 초안이 나가는 갈래. Orange·Green 은 카드, ? 는 사람
 SLACK_KINDS = ("card", "ack", "remind1", "remind2", "remind3")   # 슬랙 글 — slack 단계에서 실제로 나가는 종류(허용 목록)
-ACK = ("raising_hand", "man-raising-hand", "woman-raising-hand", "person_raising_hand", "hand")
 
 
 def bucket(score: str | None) -> str:
@@ -488,10 +444,9 @@ def _llm(criteria: str, data: str) -> str:
     return claude.run_session(f"{criteria}\n\n{data}", system=judge.SYSTEM, tools="")
 
 
-def judge_rows(con, rows: list[dict], all_rows: list[dict], *, llm=_llm, deck=drive.text, run: str = judgments.LIVE,
-               criteria: str | None = None) -> dict:
+def judge_rows(con, rows: list[dict], all_rows: list[dict], *, llm=_llm, deck=drive.text) -> dict:
     """행마다 덱을 읽고 모델을 한 번 부른다. 호출 자체가 실패하면(인증·차단선) **멈춘다** — 나머지도 같은 이유로 실패한다."""
-    crit = criteria or judge.criteria_text()
+    crit, run = judge.criteria_text(), judgments.LIVE
     sha = judgments.criteria_sha(judge.SYSTEM, crit)
     allowed = notion.allowed_options(notion.writable_id(DB_KEY), "점수")
     by_email = Counter((r.get("이메일") or "").strip().lower() for r in all_rows)
@@ -549,7 +504,6 @@ def label(con, rows: list[dict]) -> int:
 
 # ---------------------------------------------------------------- 행동 (문 뒤) — score · card · draft
 
-slack.register("test",  "C000E8E4F75")     # review_test
 slack.register("bplan", "C0000AEB349")     # #Squad-비플랜 — 봇 초대 필요
 _HANGUL = re.compile(r"[가-힣]")
 _KO_DOMAINS = (".kr", "naver.com", "daum.net", "hanmail.net", "kakao.com", "nate.com")
@@ -582,10 +536,8 @@ def _intake_mail(company: str) -> str | None:
 
 
 def _fields(reason: str, extra: str | None) -> dict:
-    """카드 문안(summary·team·risk)은 extra 열에. 09-26 오전 한때 reason 안에 JSON 으로 넣던 행도 읽는다."""
-    if extra:
-        return {"reason": reason, **json.loads(extra)}
-    return json.loads(reason) if str(reason).startswith("{") else {"reason": reason}
+    """카드 문안(summary·team·risk)은 extra 열에."""
+    return {"reason": reason, **json.loads(extra or "{}")}
 
 
 def _card_text(row: dict, card: dict, verdict: str) -> str:
@@ -602,12 +554,8 @@ def act_all(g: Gate, rows: list[dict]) -> dict:
     by_page = {r["_page_id"]: r for r in rows if r.get(TODO_PROP) == NEW_TODO}
     live = g.con.execute("SELECT key, verdict, reason, page_id, extra FROM judgments WHERE run=? AND ok=1 AND page_id IS NOT NULL", (judgments.LIVE,)).fetchall()
     n = Counter()
-    ch, parent = _cfg("card_channel"), {}
-
-    def head_ts() -> str:
-        if "ts" not in parent:
-            parent["ts"] = slack.post(ch, f"*오늘의 비플랜* — 볼 만한 접수와 애마한 접수입니다. 스레드에서 ⭕ ❌ 🙋 로 알려 주세요").require()
-        return parent["ts"]
+    ch = _cfg("card_channel")
+    head_ts = functools.cache(lambda: slack.post(ch, "*오늘의 비플랜* — 볼 만한 접수와 애마한 접수입니다. 스레드에서 ⭕ ❌ 🙋 로 알려 주세요").require())
 
     for key, verdict, reason, pid, extra in live:
         row = by_page.get(pid)
@@ -663,7 +611,7 @@ def _thread(g: Gate, key: str, kind: str, text: str) -> str:
 
 def followup(g: Gate, rows_fn=None) -> dict:
     """올라간 카드의 스레드 반응을 읽어 잇는다 — ⭕ 미팅요청 · ❌ To Drop + 드랍 초안 · 🙋 맡음. 조용하면 리마인드. 만기 없음(접수는 답을 받아야 한다)."""
-    yes, no = set(constraints.get("slack.reaction_yes")), set(constraints.get("slack.reaction_no"))
+    yes, no, ack = (set(constraints.get(f"slack.reaction_{k}")) for k in ("yes", "no", "ack"))
     n = Counter()
     cards = [(k, json.loads(d), c) for k, d, c in g.con.execute(
         "SELECT a.key, a.detail, a.created FROM actions a WHERE a.kind='card' AND a.status='done'"
@@ -683,7 +631,7 @@ def followup(g: Gate, rows_fn=None) -> dict:
         for k, d, created in items:
             names = {x.get("name") for x in react.get(d["result"]["ts"], [])}
             users = [u for x in react.get(d["result"]["ts"], []) for u in (x.get("users") or [])]
-            decision = "no" if names & no else "yes" if names & yes else "ack" if {x.split("::")[0] for x in names if x} & set(ACK) else None
+            decision = "no" if names & no else "yes" if names & yes else "ack" if {x.split("::")[0] for x in names if x} & ack else None
             if decision in ("yes", "no"):
                 if rows is None:
                     rows = (rows_fn or _notion_rows)()
@@ -732,10 +680,10 @@ def _send(ch: str, text: str) -> str:
 
 def daily_report(g: Gate, acted: dict) -> None:
     """하루 한 번. 첫 줄 = **드랍이라 했는데 심사역이 살린 건** — 이 필터에서 가장 아픈 실수라 맨 위에 둔다."""
-    out = paths.data("bplan", "reports") / f"{ledger.today()}.md"
+    today = ledger.today()
+    out = _reports_dir() / f"{today}.md"
     if out.exists():
         return
-    today = ledger.today()
     gap = g.con.execute("SELECT l.key, l.verdict, h.verdict FROM judgments h JOIN judgments l ON l.key=h.key AND l.run=? WHERE h.run=?",
                         (judgments.LIVE, judgments.HUMAN)).fetchall()
     saved = [k for k, live, human in gap if bucket(live) == "drop" and human == "keep"]
@@ -805,49 +753,6 @@ def status() -> int:
     return 0
 
 
-def selftest() -> int:
-    """망 불호출 자기검사. 순수 함수만 본다."""
-    ok, fail = [], []
-
-    def chk(name, cond, detail=""):
-        (ok if cond else fail).append(name)
-        print(f"  {'✅' if cond else '❌'} {name}" + (f"  ({detail})" if detail else ""))
-
-    hdr = ["타임스탬프", "이메일 주소", "대표님의 성함을 알려주세요.", "대표님의 연락처를 알려주세요.",
-           "1. 팀의 Service/Product를", "2. 문제 정의 : 누구의", "3. 솔루션 : 그", "4. 핵심 비즈니스 모델(e.g.",
-           "5. 핵심 경쟁사들은", "6. 대표님과 핵심 구성원(c-level)", "7. 우리 팀이 이 서비스 & 기술을",
-           "(선택)추가로 공유해", "팀의 사업계획서를 첨부해주세요.", "기업명을 알려주세요."]
-    idx = resolve_columns(hdr)
-    chk("① 헤더 14개를 전부 해석한다", len(idx) == len(_COLS) + 1, f"{len(idx)}개")
-    try:
-        resolve_columns([h for h in hdr if not h.startswith("2. 문제")])
-        chk("② 헤더가 사라지면 fail-loud", False, "조용히 통과함")
-    except RuntimeError as e:
-        chk("② 헤더가 사라지면 fail-loud", "문제정의" in str(e))
-    ts = parse_ts("2026. 8. 13 오후 1:02:03")
-    chk("③ 한국어 로케일 타임스탬프", ts is not None and ts.hour == 13, str(ts))
-    chk("③-2 오전 12시는 0시", parse_ts("2026. 1. 1 오전 12:00:01").hour == 0)
-    chk("③-3 못 읽는 값은 None (추측 안 함)", parse_ts("8/13/2026 13:02") is None)
-    chk("④ 접수키는 이메일·시각만으로 결정된다", submission_key(" A@B.COM ", ts) == f"a@b.com|{ts.isoformat(timespec='seconds')}")
-    chk("⑤ 기업명 정규화", norm_company("(주)차엔차") == norm_company("차엔차") == norm_company("주식회사 차엔차 "))
-    chk("⑥ 제목에서 기업명", company_from_subject("[카카오벤처스]주식회사 플레드 로부터 접수된 사업계획서") == "주식회사 플레드")
-    chk("⑥-2 답장은 안 잡는다", company_from_subject("Re: [카카오벤처스]예시플랫폼 로부터 접수된 사업계획서") == "")
-    chk("⑦ UTC→KST", utc_to_kst_iso("2026-08-30T04:21:00.000Z") == "2026-08-30T13:21:00")
-    pairs = {"a@b.com": "2026-08-30T13:34:00"}
-    old = {"key": "a@b.com|2026-08-29T10:00:00", "ts": "2026-08-29T10:00:00", "email": "a@b.com", "props": {"기업명": "사랑의빛"}}
-    new = {"key": "a@b.com|2026-09-01T15:13:00", "ts": "2026-09-01T15:13:00", "email": "a@b.com", "props": {"기업명": "사랑의빛"}}
-    chk("⑧ 옛 행보다 먼저 온 접수는 그 행과 같은 접수", is_legacy_dup(old, pairs))
-    chk("⑧-1 기업명이 달라도(심사역이 고침) 이메일로 잡는다", is_legacy_dup({**old, "props": {"기업명": "사랑의빛 (EACP)"}}, pairs))
-    chk("⑧-2 옛 행보다 뒤에 온 재접수는 새것", not is_legacy_dup(new, pairs))
-    picked, why = pick_new([old, new, {**new, "key": "k", "ts": "2026-08-01T00:00:00"}], {"k"}, pairs, "2026-08-13T11:12:43")
-    chk("⑨ 바닥선·키·옛 행 셋을 순서대로 거른다", [s["key"] for s in picked] == [new["key"]] and why["바닥선 이전"] == 1
-        and why["옛 행(키 없음)과 같은 접수"] == 1, dict(why))
-    p = _props_for(new)
-    chk("⑩ 빈 칸은 안 싣는다 · 드랍 칸은 안 건드린다", p.get("연락처") is None and "드랍메일" not in p and p[TODO_PROP] == NEW_TODO)
-    print(f"\n{'🎉 selftest PASS' if not fail else '🔴 실패: ' + str(fail)}")
-    return 0 if not fail else 1
-
-
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="bplan")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -858,7 +763,6 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--limit", type=int, default=0, help="이번 실행 최대 생성 건수 (0=전부)")
     s.add_argument("--since", default=None, help="바닥선을 명시한다 (예: 2026-08-13T00:00:00). 과거를 되살릴 때만")
     sub.add_parser("status")
-    sub.add_parser("selftest")
     j = sub.add_parser("judge", help="미판정 접수(to do=Newly Added)를 판정해 저장한다. 노션·슬랙·메일에 쓰지 않는다")
     j.add_argument("--past", type=int, default=0, help="결정 난 옛 행 N건을 판정 — 기준 보정용")
     j.add_argument("--limit", type=int, default=-1)
@@ -879,8 +783,6 @@ def main(argv: list[str] | None = None) -> int:
                 return sync(dry_run=a.dry_run, limit=a.limit, since=a.since)
         if a.cmd == "status":
             return status()
-        if a.cmd == "selftest":
-            return selftest()
         if a.cmd == "judge":
             with lock.hold("bplan-judge"):
                 con = _gate().con
@@ -921,13 +823,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"replay {r['run']}: 판정 {r['judged']} · 누락 {r['missing']}\n  다음: bplan diff --b {r['run']}")
             return 0
         if a.cmd == "diff":
-            rows = judgments.diff(_gate().con, a.a, a.b, bucket=bucket)
-            for r in rows:
-                if r["a"] != r["b"]:
-                    print(f"  {r['raw_a']:5} → {r['raw_b']:5} 정답={r['human'] or '-':5} {r['key'][:50]}")
-            lab = [r for r in rows if r["human"]]
-            print(f"{a.a} ↔ {a.b}: 비교 {len(rows)}건 · 갈림 {sum(r['a'] != r['b'] for r in rows)}건"
-                  + (f" | 정답 {len(lab)}건 중 일치 {a.a}={sum(r['a'] == r['human'] for r in lab)} · {a.b}={sum(r['b'] == r['human'] for r in lab)}" if lab else ""))
+            print(judgments.diff_text(judgments.diff(_gate().con, a.a, a.b, bucket=bucket), a.a, a.b, raw=True))
             return 0
     except lock.Busy as e:
         print(f"🔴 {e}")

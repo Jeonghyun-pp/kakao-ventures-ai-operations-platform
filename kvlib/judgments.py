@@ -92,6 +92,16 @@ def replay(con, judge_lines, criteria: str, sha: str, *, limit: int = -1) -> dic
             "error": None if f.is_measured else f.reason}
 
 
+def diff_text(rows: list[dict], a: str, b: str, *, unit: str = "건", raw: bool = False) -> str:
+    """`diff()` 결과를 사람이 읽는 표로. 갈린 건 한 줄씩 + 요약(정답이 있으면 양쪽 일치 수)."""
+    va, vb = ("raw_a", "raw_b") if raw else ("a", "b")
+    out = [f"  {str(r[va]):8} → {str(r[vb]):8} 정답={r['human'] or '-':6} {r['key'][:50]}" for r in rows if r["a"] != r["b"]]
+    lab = [r for r in rows if r["human"]]
+    out.append(f"{a} ↔ {b}: 비교 {len(rows)}{unit} · 갈림 {sum(r['a'] != r['b'] for r in rows)}{unit}"
+               + (f" | 정답 {len(lab)}{unit} 중 일치 {a}={sum(r['a'] == r['human'] for r in lab)} · {b}={sum(r['b'] == r['human'] for r in lab)}" if lab else ""))
+    return "\n".join(out)
+
+
 def diff(con, a: str, b: str, bucket: Callable[[str], str] = lambda v: v) -> list[dict]:
     """두 run 을 나란히 + 사람 정답. `bucket` 으로 어휘를 정답 어휘에 맞춘다(비플랜: 점수 → drop/keep)."""
     out = []

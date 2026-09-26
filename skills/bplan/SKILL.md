@@ -48,7 +48,7 @@ To Drop                → drop     |  미팅요청 · Mail Fwd · Q&A → keep 
 ```
 매일    review_test 요약 → ~/kv-data/bplan/reports/<날짜>.md 의 🚩 절 → 패턴이 보이면 criteria.md → replay → diff
 기준    skills/bplan/criteria.md — 점수 어휘는 여기 적지 않는다. 노션 `점수` 옵션을 라이브로 읽어 입력에 싣는다(옛 사고: 어휘표에 빠진 라벨로 348건 쏠림)
-덱      🔴 폼 업로드 폴더를 서비스계정에 **읽기 공유**해야 덱이 읽힌다. 안 되면 "덱: 못 읽었다" 를 사실로만 넘긴다. 이메일은 `selftest` 가 보여준다
+덱      🔴 폼 업로드 폴더를 서비스계정에 **읽기 공유**해야 덱이 읽힌다. 안 되면 "덱: 못 읽었다" 를 사실로만 넘긴다. 서비스계정 이메일은 시트 통로가 쓰는 SA 키의 client_email
 ```
 
 ## 명령
@@ -60,7 +60,7 @@ cd ~/kv
 ./.venv/bin/python -m skills.bplan.run judge [--past N] [--limit N]   # 판정만 저장. --past 는 결정 난 옛 행(보정용, 행동 없음)
 ./.venv/bin/python -m skills.bplan.run act [--dry-run]           # 판정 있는 접수에 행동 — 문 뒤
 ./.venv/bin/python -m skills.bplan.run followup [--dry-run]
-./.venv/bin/python -m skills.bplan.run label | replay [--limit N] [--criteria 파일] | diff --b r-<sha> | health | status | selftest
+./.venv/bin/python -m skills.bplan.run label | replay [--limit N] [--criteria 파일] | diff --b r-<sha> | health | status
 ```
 
 ## 스케줄 — 아직 선언하지 않는다 [사용자 결정 대기]

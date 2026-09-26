@@ -42,7 +42,6 @@ notion.register_writable(EARLY, "00000000-0000-0000-0000-72b2b8579963")
 
 # 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.**
 notion.register_writable(DB, "00000000-0000-0000-0000-8702f7cc7f34")
-slack.register("test", "C000E8E4F75")       # review_test
 slack.register("net",  "C000AB261A0")       # 그물망 — 봇 초대 필요
 
 # 스위치·채널·상한은 constraints.yaml `linkedin.*` 에 있다 [2026-09-25]. 승격 게이트·카드 티어·재고 규칙의 근거도 그쪽 주석에.
@@ -936,13 +935,7 @@ def main(argv: list[str] | None = None) -> int:
                   + f"\n  다음: linkedin diff --b {r['run']}")
             return 0
         if a.cmd == "diff":
-            rows = judgments.diff(_gate().con, a.a, a.b)
-            for r in rows:
-                if r["a"] != r["b"]:
-                    print(f"  {r['a']:6} → {r['b']:6} 정답={r['human'] or '-':6} {r['key']}")
-            lab = [r for r in rows if r["human"]]
-            print(f"{a.a} ↔ {a.b}: 비교 {len(rows)}명 · 갈림 {sum(r['a'] != r['b'] for r in rows)}명"
-                  + (f" | 정답 {len(lab)}명 중 일치 {a.a}={sum(r['a'] == r['human'] for r in lab)} · {a.b}={sum(r['b'] == r['human'] for r in lab)}" if lab else ""))
+            print(judgments.diff_text(judgments.diff(_gate().con, a.a, a.b), a.a, a.b, unit="명"))
             return 0
         if a.cmd == "label":
             f = notion.query(notion.writable_id(DB), ["Tier"])

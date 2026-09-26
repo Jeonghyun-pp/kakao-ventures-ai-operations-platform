@@ -26,7 +26,6 @@ from kv_transport import itunes, notion, slack
 
 from . import kr_origin
 
-slack.register("test",  "C000E8E4F75")     # review_test
 
 # 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.** 통로는 명단을 안 들고 있다.
 notion.register_writable("ch_앱스토어", "00000000-0000-0000-0000-30deea8edcc5")
@@ -155,6 +154,7 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
 
     if not found:
         _report()
+        daily_report(g, landed=0, candidates=0, fresh=0, unknowns=[t for t, _ in unknowns], attempts=attempts)
         if unknowns:
             raise Degraded(f"미상 {len(unknowns)}건")
         return 0
@@ -207,6 +207,7 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
                 _, oreason = origins.get(aid, ("", ""))
                 print(f"    ✗ {d['name'][:30]:30} · {oreason}")
         print(f"  (dry-run — 착지하지 않았다. 후보 {len(fresh)}개)")
+        daily_report(g, landed=0, candidates=len(lines), fresh=len(fresh), unknowns=[t for t, _ in unknowns], attempts=attempts)
         return 0
 
     # ---- 착지 → 장부 (순서가 중요하다)
@@ -419,11 +420,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"replay {r['run']}: 판정 {r['judged']} · 누락 {r['missing']}\n  다음: appstore diff --b {r['run']}")
             return 0
         if a.cmd == "diff":
-            rows = judgments.diff(_gate().con, a.a, a.b)
-            for r in rows:
-                if r["a"] != r["b"]:
-                    print(f"  {r['a']:8} → {r['b']:8} 정답={r['human'] or '-':5} {r['key']}")
-            print(f"{a.a} ↔ {a.b}: 비교 {len(rows)}건 · 갈림 {sum(r['a'] != r['b'] for r in rows)}건")
+            print(judgments.diff_text(judgments.diff(_gate().con, a.a, a.b), a.a, a.b))
             return 0
     except lock.Busy as e:
         print(f"🔴 {e}")

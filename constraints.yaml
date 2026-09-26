@@ -136,6 +136,7 @@ slack:
   # 정현님이 심사역 대신 누르는 경우가 있다.
   reaction_no: [x, heavy_multiplication_x, negative_squared_cross_mark, no_entry_sign]
   reaction_yes: [white_check_mark, o, heavy_check_mark, ok_hand, "+1"]
+  reaction_ack: [raising_hand, man-raising-hand, woman-raising-hand, person_raising_hand, hand]   # 🙋 "내가 맡는다" — 메일·비플랜 공용
   # 메일 질문의 무반응 처리는 mail_observe.remind_days / remind_max 다 — 무응답을 거절로 바꾸지 않는다 [2026-09-21].
 
 gmail:
@@ -175,7 +176,6 @@ drive:
   timeout_sec: 60              # 덱은 수 MB — 시트보다 넉넉히
   max_bytes: 40000000          # 이보다 크면 안 받는다(40MB). 이미지 덩어리라 글자도 없다
   min_text_chars: 200          # 이 미만이면 이미지 덱으로 본다 — "덱을 못 읽었다"를 사실로 넘긴다
-  pdftotext_timeout_sec: 60
 
 sheets:
   # 서비스계정 JWT 는 구글이 **최대 1시간**만 받는다. 더 길게 주면 invalid_grant.

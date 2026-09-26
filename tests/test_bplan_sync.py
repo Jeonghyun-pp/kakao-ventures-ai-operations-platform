@@ -1,4 +1,4 @@
-"""bplan sync 의 현재 동작 — 기준선. selftest 의 순수 함수 검사 + sync 흐름(가짜 손)."""
+"""bplan sync 의 현재 동작 — 기준선. 순수 함수 검사(Pure) + sync 흐름(가짜 손)."""
 from __future__ import annotations
 
 import unittest
@@ -20,6 +20,7 @@ class Pure(unittest.TestCase):
         ts = run.parse_ts("2026. 8. 13 오후 1:02:03")
         self.assertEqual(run.submission_key(" A@B.COM ", ts), "a@b.com|2026-08-13T13:02:03")
         self.assertEqual(run.norm_company("(주)차엔차"), run.norm_company("주식회사 차엔차 "))
+        self.assertEqual(run.norm_company("(주)차엔차"), "차엔차")                      # 🔴 긴 패턴 먼저 — 아니면 "주" 가 남는다
         self.assertEqual(run.company_from_subject("[카카오벤처스]주식회사 플레드 로부터 접수된 사업계획서"), "주식회사 플레드")
         self.assertEqual(run.company_from_subject("Re: [카카오벤처스]예시플랫폼 로부터 접수된 사업계획서"), "")   # 답장은 안 잡는다
         self.assertEqual(run.utc_to_kst_iso("2026-08-30T04:21:00.000Z"), "2026-08-30T13:21:00")

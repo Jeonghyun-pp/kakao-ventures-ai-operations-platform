@@ -64,7 +64,7 @@ def _pdf_text(data: bytes) -> str:
         f.write(data); path = f.name
     try:
         r = subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True, text=True,
-                           timeout=constraints.get("drive.pdftotext_timeout_sec"))
+                           timeout=constraints.get("drive.timeout_sec"))
         return r.stdout                                          # rc 가 아니라 출력으로 판정한다(A3)
     finally:
         Path(path).unlink(missing_ok=True)
