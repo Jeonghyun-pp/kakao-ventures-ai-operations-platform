@@ -104,7 +104,7 @@ class Case:
         self.db.executescript(judgments.SCHEMA)
         self._stack.enter_context(mock.patch.object(run, "_gate", lambda dry_run=False: Gate(
             self.db, "linkedin", lambda k: k in run.SLACK_KINDS, force="off" if dry_run else None)))
-        for k, v in self.more.items():                            # "brief.write" → run.brief.write · "PROMOTE_ENABLED" → run.PROMOTE_ENABLED
+        for k, v in self.more.items():                            # "brief.write" → run.brief.write · "_cfg" → run._cfg
             owner, _, attr = k.rpartition(".")
             self._stack.enter_context(mock.patch.object(getattr(run, owner) if owner else run, attr, v))
         self._stack.enter_context(contextlib.redirect_stdout(self.out))

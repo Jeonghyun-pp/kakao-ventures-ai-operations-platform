@@ -7,7 +7,7 @@
    **산 뒤에** 알았다. 천장이 2,500 이라 "전량"이 애초에 불가능한 축이었다.
    티어를 내려갈 때마다 이 프로브를 먼저 돌려라 — 회당 $0.10 이고, 틀리면 $80 이다.
 
-    ~/kv/.venv/bin/python tools/probe_axis.py elite-kr elite-us-kr
+    ~/kv/.venv/bin/python tools/probe_axis.py s-stealth kaist-founder
 """
 from __future__ import annotations
 

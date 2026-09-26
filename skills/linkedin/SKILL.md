@@ -69,7 +69,7 @@ cd ~/kv
 ```
 run.py         collect · card · followup · 보고서 · 진입점
 judge.py       판정 — 줄 단위(judge_lines). collect 와 replay 가 같은 줄을 쓴다. 배치 50(쿼터 결정)
-judgments.py   판정 저장 · label(노션 Tier) · replay · diff
+../../kvlib/judgments.py   판정 저장 · label(노션 Tier) · replay · diff — 네 스킬 공용
 axes.py        수집 축(Apify 질의)과 사후 조건(reject) · 카드 기준(card_reject)
 profile.py     Apify 원본 → 키·경력·신호
 brief.py       카드 두 문장 + 회사명 (claude)     outreach.py  콜드 메시지 초안 (claude)
@@ -97,3 +97,8 @@ criteria.md    Tier 기준 — 사람이 깎는다
 **읽기에 성공한 스레드만 만기시킨다.** 망 오류 한 번에 사람이 조용히 사라지지 않게. 만기 7일 = 결론(카드가 매일 새로 오는 구조라 리마인드 대신) [사용자 결정 2026-09-25 유지].
 
 **장부 ts** — 09-25 전 195줄은 슬랙 메시지 ts 가 `ts` 칸에 들어 있다(결함). 이후는 `slack_ts` 칸. 읽는 쪽은 둘 다 본다.
+
+**학력 축(elite-kr · elite-us-kr · elite-gap)은 2026-09-01 에 은퇴했고 코드는 09-26 에 지웠다** — "학력은 안 건다"(사용자 결정). 1티어 35명 Catch 34% 가 학교 덕인지 스텔스 조건 덕인지 끝내 안 갈렸고, s-* 축이 대신한다. 그 안에 있던 실측은 여기만 남는다:
+- 학교 23곳을 한 축에 넣고 locations 를 [한국, 미국]으로 두면 **한국 연고가 통째로 빠진다** — schools 도 locations 도 OR 라 "미국 학교 + 미국 거주"가 앞을 다 차지했다(50명 중 한국 학교 1명 · 모수 10,038). 축은 쿼리마다 한국 연고를 강제하게 가른다.
+- 액터의 `schools` 필터는 학력 **아무 줄**에나 걸린다(대학원·교환 한 줄로 통과 115명 중 31명). 학교를 조건으로 쓰려면 **학부 줄의 정규화 이름 정확 일치**만 — 부분문자열 함정: `Seoul National University of Science and Technology`(서울과기대) · `Korea National Open University` · `Columbia College Chicago` · `Stanford Continuing Studies` · `UC Berkeley Extension`. 연도 미상은 컷(08-19 결정, 두 번 뒤집힌 끝).
+- 경력단절은 **발굴이 아니라 리텐션 신호**다 — elite-gap 모수 297,197 · 천장 2,500 = 0.8%, 1페이지 25명 중 6개월내 공백 0명($0.20 실측). 액터에 "현 직장 없음" 필터가 없다.

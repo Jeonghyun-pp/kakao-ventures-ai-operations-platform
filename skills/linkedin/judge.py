@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kvlib import Fetched
+from kvlib import Fetched, judgments
 from kv_transport import claude
 
 TIERS = ("Catch", "Trend", "Wait", "Cut")
@@ -38,7 +38,6 @@ def criteria_text() -> str:
 
 
 def sha(criteria: str) -> str:
-    from kvlib import judgments
     return judgments.criteria_sha(_SYSTEM, criteria)
 
 
@@ -48,8 +47,8 @@ def judge_people(people: list[dict], *, criteria: str | None = None) -> Fetched:
 
 
 def judge_lines(lines: list[str], valid, criteria: str) -> Fetched:
-    valid = set(valid)
     """모델이 보는 것은 **줄**이다 — collect 가 만든 줄이든 judgments 에 저장된 줄이든 같다(replay 가 그걸 쓴다)."""
+    valid = set(valid)
     good, bad, drift = [], [], []
 
     for i in range(0, len(lines), BATCH):

@@ -87,6 +87,11 @@ _EXCL_FN = ["6", "12", "25"]        # Consulting · Human Resources · Sales
 _EXCL_SENIOR = ["220", "300"]       # Director · Vice President
 _EXCL = {"excludeFunctionIds": _EXCL_FN, "excludeSeniorityLevelIds": _EXCL_SENIOR}
 
+# 경력단절 축이 쓰는 과거 직함. 🔴 임원 직함으로 걸면 "이미 CEO 를 해본 사람"만 나온다
+#    (유료 프로브 실측: 임원 4/25 전원 휴지기 임원 · 실무 10/25 중 9/12 가 실무자).
+_PRACTITIONER = ["Software Engineer", "Product Manager", "Data Scientist", "Designer"]
+_KAIST = ["KAIST", "Korea Advanced Institute of Science and Technology"]   # 🔴 약칭·정식명 둘 다 — 학교 필터는 이름으로 엔티티를 맞힌다
+
 # 창업자를 분류로 잡는다. 직함 문자열이 놓치는 사람 —
 # "Building something new" 처럼 쓴 사람 — 을 여기서 줍는다.
 _FOUNDER_CLASS = {"seniorityLevelIds": ["320", "310"]}   # Owner/Partner · CXO
@@ -125,9 +130,7 @@ AXES: dict[str, dict] = {
     #    실무 직함으로 걸면 10/25 이고 9/12가 실무자였다(유료 프로브 2회).
     "gap-practitioner": {
         "every_days": 14, "pages": 1, "rewind": False,
-        "payload": {"pastJobTitles": ["Software Engineer", "Product Manager",
-                                      "Data Scientist", "Designer"],
-                    "locations": ["South Korea"]},
+        "payload": {"pastJobTitles": _PRACTITIONER, "locations": ["South Korea"]},
     },
     # 해외에 있는 한국 연고자. schools 서버 필터는 실제로 작동한다(25명 중 24명이 서·연·고·카·포).
     # 한국 거주 축에는 학교를 안 건다 — 효과가 1.27배로 약한데 모수만 크게 준다.
@@ -167,9 +170,7 @@ _AXES_2026_09 = {
     "s-gap": {
         "every_days": 14, "pages": 1, "rewind": False,
         "keep_exclude_titles": False,
-        "payload": {"pastJobTitles": ["Software Engineer", "Product Manager",
-                                      "Data Scientist", "Designer"],
-                    "locations": ["South Korea"]},
+        "payload": {"pastJobTitles": _PRACTITIONER, "locations": ["South Korea"]},
     },
     # 축 C1 — 최근 입사 · 직함으로.
     "s-recent-title": {
@@ -189,83 +190,6 @@ _AXES_2026_09 = {
 AXES.update(_AXES_2026_09)
 
 
-# ================================================================ 임시 축 (2026-08-19, 사용자 지시)
-#
-#     (설카포연고 OR 미국 상위대) AND 학부 시작 ≥ 2010 AND (스텔스 OR 6개월 내 경력단절)
-#
-# 🔴 **셋 중 학교만 서버에서 걸린다.** 액터 파라미터 41개에 학력 연도 필터도,
-#    "현 직장 없음" 필터도 없다(2026-08-19 스키마 실조회). 나머지 둘은 사고 나서 거른다 —
-#    거른 사람 값도 이미 나간 돈이다. 그래서 `reject()` 가 이유별로 세고, run 이 장부에 남긴다.
-#
-# 🔴 `manual: True` — **정기 collect 가 이 축을 안 집는다.** 임시 조건이라 사람이
-#    `--axis` 로 부를 때만 돈다. 안 그러면 임시 실험이 주간 리듬에 조용히 눌러앉는다.
-#
-# 스텔스와 경력단절은 **한 쿼리에 OR 로 못 넣는다** — searchQuery(회사명 검색)와
-# "현 직함 없음"은 검색 모양이 반대다. 그래서 축을 둘로 가르고, 사후 조건은 둘 다 같은 것을 쓴다.
-
-# 🔴 LinkedIn 학교 필터는 **학교 이름으로 엔티티를 맞힌다.** 표기가 어긋나면 그 학교만
-#    조용히 0명이 된다 — 그래서 KAIST·POSTECH 은 약칭과 정식명을 둘 다 넣는다(옛 설정이 그랬다).
-KR_ELITE = ["Seoul National University", "KAIST",
-            "Korea Advanced Institute of Science and Technology",
-            "POSTECH", "Pohang University of Science and Technology",
-            "Yonsei University", "Korea University"]
-
-# 아이비 8 + 미국 상위대 8. **이 목록이 "미국 상위대"의 정의다** — 바꾸려면 여기 한 줄이다.
-US_ELITE = ["Harvard University", "Yale University", "Princeton University",
-            "Columbia University", "University of Pennsylvania", "Brown University",
-            "Dartmouth College", "Cornell University",
-            "Massachusetts Institute of Technology", "Stanford University",
-            "California Institute of Technology", "Carnegie Mellon University",
-            "University of California, Berkeley", "University of Chicago",
-            "Northwestern University", "Duke University"]
-
-ELITE_SCHOOLS = KR_ELITE + US_ELITE
-ELITE_LOCATIONS = ["South Korea", "United States"]
-UNDERGRAD_SINCE = 2010      # 학부 시작연도 하한 (≈ 만 34세 이하)
-GAP_MAX_MONTHS = 6          # 공백 또는 본업공백이 이 안이면 통과
-
-# 경력단절 축이 쓰는 과거 직함. 🔴 임원 직함으로 걸면 "이미 CEO 를 해본 사람"만 나온다
-#    (유료 프로브 실측: 임원 4/25 전원 휴지기 임원 · 실무 10/25 중 9/12 가 실무자).
-_PRACTITIONER = ["Software Engineer", "Product Manager", "Data Scientist", "Designer"]
-
-AXES.update({
-    # 🔴 [2026-08-19 실측으로 갈아엎음] 처음엔 학교 23곳을 한 축에 넣고 locations 를
-    #    [한국, 미국]으로 뒀다. **한국 연고가 통째로 빠졌다** — schools 도 locations 도 OR 라
-    #    실제로 걸린 조합이 "미국 학교 + 미국 거주"였고, 그게 제일 큰 인구라 앞을 다 차지했다.
-    #    산 50명 중 **한국 학교 1명 · 한국 거주 0명** · 모수 10,038(= 미국 스텔스 창업자 전체).
-    #    → 축을 갈라 **각 쿼리가 한국 연고를 강제**하게 한다. 한 축에 합치지 마라.
-    "elite-kr": {
-        "every_days": 7, "pages": 1, "rewind": False, "manual": True, "post": "elite",
-        "parked": "학력은 안 건다 [사용자 결정 2026-09-01]. 1티어 35명 Catch 34% 가 "
-                  "학교 덕인지 스텔스 조건 덕인지 끝내 안 갈렸다 — s-* 축이 대신한다",
-        "payload": {"searchQuery": "Stealth Startup",
-                    "locations": ELITE_LOCATIONS,      # 해외 한국인을 잡으려면 미국을 남긴다
-                    "schools": KR_ELITE},
-    },
-    "elite-us-kr": {
-        "every_days": 7, "pages": 1, "rewind": False, "manual": True, "post": "elite",
-        "parked": "학력은 안 건다 [사용자 결정 2026-09-01] — elite-kr 과 같은 이유",
-        # 🔴 거주지를 **한국으로만** 좁힌다. 안 좁히면 위와 같은 사고가 그대로 재현된다
-        #    (미국 학교 + 미국 거주 = 우리가 볼 수 없는 딜).
-        "payload": {"searchQuery": "Stealth Startup",
-                    "locations": ["South Korea"], "schools": US_ELITE},
-    },
-    # 🔴 **주차했다. 되살리기 전에 이 숫자를 먼저 반박하라** (2026-08-19 유료 실측 $0.20):
-    #      모수 297,197 · 천장 2,500 = **0.8% 밖에 못 본다**
-    #      1페이지 25명 중 6개월내 공백 **0명** (공백이 있기라도 한 사람 2명)
-    #    액터에 "현 직장 없음" 필터가 없어서 발굴로는 바늘 찾기다.
-    #    경력단절은 **발굴이 아니라 리텐션 신호**다 — 이미 아는 사람을 다시 보다가
-    #    '재직 → 공백'으로 바뀌는 순간을 잡아야 잡힌다.
-    "elite-gap": {
-        "every_days": 14, "pages": 1, "rewind": False, "manual": True, "post": "elite",
-        "parked": "모수 297k·천장 0.8%·1페이지 통과 0명 (2026-08-19 실측)",
-        "keep_exclude_titles": False,
-        "payload": {"pastJobTitles": _PRACTITIONER,
-                    "locations": ELITE_LOCATIONS, "schools": ELITE_SCHOOLS},
-    },
-})
-
-
 # ================================================================ KAIST 재학 창업자 (2026-09-15, Reviewer C 요청)
 #
 # 🔴 서버에 "재학중" 필터가 없다. schools 로 KAIST 전원을 사서
@@ -280,7 +204,7 @@ AXES["kaist-founder"] = {
     "post": "kaist-current",
     "payload": {
         "currentJobTitles": _TITLES,
-        "schools": ["KAIST", "Korea Advanced Institute of Science and Technology"],
+        "schools": _KAIST,
         **_EARLY,       # 재직 1년 미만 + 10인 이하 → 모수를 줄인다
     },
 }
@@ -291,7 +215,7 @@ AXES["kaist-founder-class"] = {
     "every_days": 7, "pages": 10, "rewind": True, "manual": True,
     "post": "kaist-current",
     "payload": {
-        "schools": ["KAIST", "Korea Advanced Institute of Science and Technology"],
+        "schools": _KAIST,
         **_EARLY, **_FOUNDER_CLASS,
     },
 }
@@ -302,7 +226,7 @@ AXES["kaist-stealth"] = {
     "post": "kaist-current",
     "payload": {
         "searchQuery": "Stealth Startup",
-        "schools": ["KAIST", "Korea Advanced Institute of Science and Technology"],
+        "schools": _KAIST,
     },
 }
 
@@ -319,27 +243,6 @@ def reject(axis: str, item: dict) -> str:
     loc = str(item.get("location") or item.get("locationName") or "").lower()
     if loc and not profile.korea_signals(item):
         return f"외국인({loc})"
-    if AXES.get(axis, {}).get("post") != "elite":
-        return ""
-    # 🔴 연도를 **모르면 뺀다**(사용자 결정 2026-08-19 최종). 결정이 두 번 뒤집혔으니
-    #    이력을 남긴다 — ①"학부 써있는 사람만"(컷) → ②완전탐색으로 바뀌며 "넘겨"(통과)
-    #    → ③학교를 학부 줄로 조이고 나니 **학교는 엄격·연도는 관대**한 비대칭이 드러나
-    #    다시 컷. 지금 1티어는 "조건이 전원 참"인 집합이다.
-    #    ⚠️ 대가: KAIST 학사인 게 확실한데 재학 기간만 안 적은 사람이 같이 빠진다(19명).
-    #       되돌리려면 이 두 줄을 `if y is not None and y < UNDERGRAD_SINCE` 로 합치면 된다.
-    y = profile.undergrad_start_year(item)
-    if y is None:
-        return "학부-연도미상"
-    if y < UNDERGRAD_SINCE:
-        return "학부-이전"
-    # 🔴 학교는 **학부 줄에서만** 인정한다(사용자 결정 2026-08-19 · 엄격).
-    #    액터의 schools 필터는 학력 아무 줄에나 걸리므로, 대학원·교환으로 지정 학교가
-    #    한 줄 있는 사람이 통과했다(실측: 115명 중 31명 = 27%).
-    #    학위 표기가 아예 없어 학부를 못 가리는 사람(25명)도 여기서 뺀다 — 엄격 기준이다.
-    if not profile.elite_undergrad(item):
-        return "학부-학교아님" if profile.undergrad_schools(item) else "학부-학교미상"
-    if not (profile.stealth_signal(item) or profile.gap_within(item, GAP_MAX_MONTHS)):
-        return "스텔스도-공백도-아님"
     return ""
 
 

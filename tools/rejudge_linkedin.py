@@ -63,8 +63,8 @@ def main(apply: bool) -> int:
             continue
         pid = res.require()
         ledger.append(run.TASK, k, ledger.LANDED, page_id=pid, run=run_id,
-                      axis=item["_axis"], tier=v["tier"], name=run._summary(item)["name"])
-        if v["tier"] == "Catch":
+                      axis=item["_axis"], tier=v["verdict"], name=run._summary(item)["name"])
+        if v["verdict"] == "Catch":
             ledger.append(run.TASK, k, run.MEETING, page_id=pid, axis=item["_axis"])
         ok += 1
     print(f"· 착지 {ok} · 실패 {fail}")

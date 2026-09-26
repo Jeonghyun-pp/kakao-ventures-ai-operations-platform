@@ -10,12 +10,11 @@
     워터마크 마지막 줄의 날짜가 곧 "언제 돌았나"
     관측    오늘 줄 수가 곧 "몇 건 했나". **보고를 claude 기억이 아니라 여기서 만든다**
 
-## 이벤트 2종
+## 공용 이벤트
 
-    landed   노션에 착지했다   ← 멱등의 근거
-    picked   claude 가 골랐다
+    landed   노션에 착지했다   ← 멱등의 근거. 그 밖의 이벤트 이름은 스킬이 정한다
 
-옛 시스템은 상태 전이 5종짜리 상태머신을 뒀는데, 실제로 필요한 건 이 둘이었다.
+옛 시스템은 상태 전이 5종짜리 상태머신을 뒀는데, 실제로 필요한 건 이것이었다.
 상태머신은 관측용이지 정확성용이 아니다.
 
 ## 🔴 찢긴 마지막 줄
@@ -38,7 +37,6 @@ from pathlib import Path
 from . import paths
 
 LANDED = "landed"
-PICKED = "picked"
 
 
 class LedgerCorrupt(RuntimeError):

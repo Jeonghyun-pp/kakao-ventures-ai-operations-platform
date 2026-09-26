@@ -1,10 +1,4 @@
-"""링크드인 스킬 — 진입점 셋.
-
-    collect  월 07:30  6축 중 차례인 것 수집 → 판정 → 전량 노션 착지
-    land     매일 09:00  (수집일 외에는 할 일 없음 — collect 가 전량 착지한다)
-    card     매일 10:00  🔴 노션에서 Tier 를 다시 읽어, 아직 안 나간 사람 좋은 순 5명
-
-앱스토어와 구조가 같다. 다른 건 수집 주기(매일 vs 월요일)와 판정 어휘(2단 vs 4단)뿐이다.
+"""링크드인 스킬 — collect · card · followup · 보고서. 일정·흐름·규율은 SKILL.md(frontmatter 가 스케줄이다).
 
 ## 지키는 규율
 
@@ -32,7 +26,6 @@ from . import axes, brief, judge, outreach, profile
 TASK = "linkedin"
 DB = "ch_링크드인"
 AXIS_EV = "axis"        # 커서·주기 기록
-JUDGED = "judged"
 CARDED = "carded"
 MEETING = "meeting_candidate"
 POSTED = "posted"          # 슬랙 스레드 답글로 올림 (사람별 ts)
@@ -53,7 +46,6 @@ slack.register("test", "C000E8E4F75")       # review_test
 slack.register("net",  "C000AB261A0")       # 그물망 — 봇 초대 필요
 
 # 스위치·채널·상한은 constraints.yaml `linkedin.*` 에 있다 [2026-09-25]. 승격 게이트·카드 티어·재고 규칙의 근거도 그쪽 주석에.
-TIERS = ("Catch", "Trend", "Wait", "Cut")
 PEOPLE = paths.repo_root() / "people.yaml"                      # 심사역 명부 — 메일과 같은 파일
 
 
@@ -73,8 +65,6 @@ def db_path():
 def _gate(dry_run: bool = False) -> Gate:
     """--dry-run 은 이 실행만 문을 내리는 것이다(force="off"). 장부(ledger)는 문 밖 — 한 일의 기록이라 dry 면 쓰지 않는다."""
     con = store.connect(db_path(), judgments.SCHEMA)
-    if "tier" in [r[1] for r in con.execute("PRAGMA table_info(judgments)")]:   # 09-25 하루짜리 열 이름 — kvlib 공용(verdict)으로
-        con.execute("ALTER TABLE judgments RENAME COLUMN tier TO verdict")
     judgments.ensure(con)
     return Gate(con, "linkedin", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
 
@@ -84,7 +74,7 @@ def _reviewers() -> dict[str, str]:
     return {p["slack_id"]: p["names"][0] for p in yaml.safe_load(PEOPLE.read_text(encoding="utf-8")) or [] if p.get("slack_id")}
 
 
-_ORDER = {t: i for i, t in enumerate(TIERS)}      # 좋은 순
+_ORDER = {t: i for i, t in enumerate(judge.TIERS)}      # 좋은 순
 
 
 class Degraded(RuntimeError):
@@ -517,9 +507,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
 def _days_since(day: str) -> int:
     """게시일(KST)에서 오늘까지 며칠. 🔴 만기를 저장하지 않고 매번 센다 —
     절대시각을 저장하면 표준시 실수가 조용히 며칠을 밀어낸다."""
-    y, m, d = (int(x) for x in day.split("-"))
-    t = ledger.today().split("-")
-    return (date(int(t[0]), int(t[1]), int(t[2])) - date(y, m, d)).days
+    return (date.fromisoformat(ledger.today()) - date.fromisoformat(day)).days
 
 
 def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
@@ -690,15 +678,8 @@ def _mark_promoted(page_id: str, title: str) -> None:
     except Exception as e:                                  # noqa: BLE001
         print(f"  ⚠️  Status 옵션을 못 읽었다: {e}")
     if not props:
-        # 옵션이 아직 없으면 **조용히 넘어가지 않는다** — 글로라도 남긴다.
-        g = notion.query(db_id, ["Match Reason"])
-        cur = ""
-        if g.is_measured:
-            cur = str({r["_page_id"]: r for r in g.require()}.get(page_id, {}).get("Match Reason") or "")
-        if "극초기" in cur:
-            return
-        print(f"  ⚠️  Status 에 '{PROMOTED_STATUS}' 옵션이 없다 — Match Reason 에 적는다")
-        props["Match Reason"] = (cur + f" · 극초기 등록 {ledger.today()}").strip(" ·")
+        print(f"  🔴 Status 에 '{PROMOTED_STATUS}' 옵션이 없다 — 표시 못 함 (08-20 결정: 그 옵션이 '극초기에 등록됨'의 뜻)")   # 조용히 넘어가지 않는다
+        return
     res = notion.update(page_id, DB, props)
     if not res.is_measured:
         print(f"  ⚠️  {title} 승격 표시 실패: {res.reason[:80]}")
