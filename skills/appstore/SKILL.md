@@ -3,27 +3,31 @@ name: appstore
 description: 앱스토어 25장르 × 4차트에서 6개월 이내 신규 한국 앱을 모아 노션에 착지시킨다. 국적 판정을 앱마다 저장하고, 심사역의 노션 판정을 정답으로 끌어와 기준을 깎는다. 메일·링크드인·비플랜과 같은 뼈대(문·판정 저장·보고서·health).
 schedule:
   - { cmd: collect, when: "매일 09:10", why: "맥이 확실히 깨어 있는 시각. 자다 깨면 DNS 전에 발화한다" }
+  - { cmd: remind,  when: "매일 10:30", why: "2주 회차인 날만 보낸다(코드가 센다). 매일 돌아야 쉬는 날·잠든 날 몫이 다음 평일에 나간다" }
 ---
 
 # 앱스토어 소싱
 
 2026-09-26 에 메일과 같은 뼈대로 옮겼다(`kvlib` store·gate·report·judgments). **수집·필터·착지 동작은 그대로다** — 골든 dry-run 이 전·후 같은 앱을 고른다.
 
-## 🔴 밖으로 나가는 것은 하나 — 노션 착지. 문은 **열려 있다**
+## 🔴 밖으로 나가는 것은 둘 — 노션 착지 · 격주 리마인드. 문은 **열려 있다**
 
 ```
 constraints.yaml  appstore.outbound: "on"     ← 살아 있는 시스템이다. off 는 시험·중단용
   land    노션 착지                             off 면 계획만 적는다(actions:dry)
+  remind  #그물망 "앱스토어 보세요" (2주마다)      slack 이상이면 나간다. 한 회차 한 번(actions 키 remind:<회차>)
 ```
 `--dry-run` 은 이 실행만 문을 내리는 것. 무엇을 했(을)는지는 `~/kv-data/appstore/db/appstore.sqlite` 의 `actions` 에, **판정은 `judgments` 에** 남는다.
 장부(`~/kv-data/_ledger/appstore.jsonl`)는 그대로 한 일의 기록이고 "처음 보는 앱"의 기준이다.
-슬랙으로 나가는 것은 review_test 요약(저녁 ops digest 로 묶임)뿐(`report_channel: test`). 심사역 카드는 없다 — 심사역은 노션 뷰를 본다(9/22).
+슬랙으로 나가는 것은 review_test 요약(저녁 ops digest 로 묶임)과 #그물망 격주 리마인드 둘. 심사역 카드는 없다 — 심사역은 노션 뷰를 보고, 리마인드가 2주마다 그 뷰를 가리킨다.
 
 ## 하루
 
 ```
 09:10  collect   25장르 × 4차트 → 처음 보는 앱 → 6개월 이내 → 국적 판정(규칙 L1~L7 → 애매하면 모델, criteria.md)
                  · **앱마다 저장**(무엇을 보고 kr/foreign 이라 했나) → 한국·미상 앱만 착지(문 뒤) → 하루 보고서(파일 + review_test 요약)
+10:30  remind    2주 회차(기준일 remind_anchor 부터 14일 간격)인 날만. 쉬는 날이면 다음 평일, 다음 회차는 간격 그대로
+                 · #그물망에 뷰 링크 + 지난 14일 착지 수 [사용자 결정 2026-09-29 회의 — 뷰는 아무도 안 열면 없는 것과 같다]
 12:55  ops health  오늘 보고서 파일이 없으면 review_test 에 한 줄 (skills/ops 가 여섯 스킬을 한 번에)
 
 🔴 왜 9시 이후인가: 맥이 자다 깨면 launchd 가 밀린 작업을 **즉시** 발화하는데, 그때가 DNS 가 아직 안 올라온 순간이다.
@@ -49,6 +53,7 @@ foreign 판정은 노션에 안 간다. **아무도 못 본다.** 그래서 이 
 ```bash
 cd ~/kv
 ./.venv/bin/python -m skills.appstore.run collect [--dry-run] [--limit N] [--genres N]
+./.venv/bin/python -m skills.appstore.run remind [--dry-run]
 ./.venv/bin/python -m skills.appstore.run status | label
 ./.venv/bin/python -m skills.appstore.run replay | diff --b r-<sha>
 ./.venv/bin/python tools/kr_origin_eval.py [--verbose]          # 규칙만 · 고정 정답 199건 건별로
@@ -72,7 +77,7 @@ kr_origin.py   국적 규칙 L1~L7(도메인·법인 표기·문자·한글 비�
 criteria.md    모델이 볼 국적 기준 — 사람이 깎는다
 fixtures/      kr_origin_w34.json 고정 정답 199건
 ```
-`constraints.yaml appstore.*`: outbound · report_channel(test) · report_slack · foreign_sample · backup_keep · 차트 천장. **근거는 그 주석에**.
+`constraints.yaml appstore.*`: outbound · report_channel(test) · report_slack · foreign_sample · backup_keep · 차트 천장 · remind_*. 공휴일은 `calendar.holidays_kr`(kvlib/workday). **근거는 그 주석에**.
 
 ## 지키는 규율
 

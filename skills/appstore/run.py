@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import json
 
-from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, store
+from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, store, workday
 from kvlib.gate import Gate
 from kv_transport import itunes, notion, slack
 
@@ -29,6 +29,7 @@ from . import kr_origin
 # 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.** 통로는 명단을 안 들고 있다.
 notion.register_writable("ch_앱스토어", "00000000-0000-0000-0000-30deea8edcc5")
 notion.register_writable("ch_극초기", "00000000-0000-0000-0000-72b2b8579963")
+slack.register("net", "C000AB261A0")        # #그물망 — 격주 리마인드(링크드인 카드와 같은 방)
 
 TASK = "appstore"
 DB = "ch_앱스토어"
@@ -47,6 +48,9 @@ def _cfg(k: str):
     return constraints.get(f"appstore.{k}")
 
 
+SLACK_KINDS = ("remind",)
+
+
 def db_path():
     return paths.data("appstore", "db") / "appstore.sqlite"
 
@@ -56,10 +60,11 @@ def _reports_dir():
 
 
 def _gate(dry_run: bool = False) -> Gate:
-    """나가는 것은 하나 — 노션 착지(land). 문은 on(살아 있는 시스템). --dry-run 은 이 실행만 내린다."""
+    """나가는 것은 둘 — 노션 착지(land)·격주 리마인드(remind). 문은 on(살아 있는 시스템). --dry-run 은 이 실행만 내린다.
+    `slack` 단계에서 실제로 나가는 종류는 허용 목록(SLACK_KINDS)이다."""
     con = store.connect(db_path(), judgments.SCHEMA)
     judgments.ensure(con)
-    return Gate(con, "appstore", lambda k: False, force="off" if dry_run else None)
+    return Gate(con, "appstore", lambda k: k in SLACK_KINDS, force="off" if dry_run else None)
 
 
 def _send(ch: str, text: str) -> str:
@@ -380,6 +385,42 @@ def _report() -> None:
     print(f"· 장부: 오늘 {s['total_today']}줄 {s['counts']} · 총 {s['ledger_lines']}줄 · 마지막 {s['last_ts']}")
 
 
+# ---------------------------------------------------------------- 격주 리마인드
+
+def remind(*, dry_run: bool = False, gate: Gate | None = None) -> int:
+    """2주마다 #그물망에 "앱스토어 보세요" 한 통 — 노션 뷰 링크와 그동안 들어온 앱 수.
+
+    🔴 회차는 기준일(remind_anchor)부터 N일 간격으로 **센다**(저장하지 않는다). 그날이 쉬는 날이면 다음 평일에 보내되
+       다음 회차는 기준일 간격 그대로 — 공휴일 한 번에 요일이 영영 밀리지 않게.
+    🔴 기한이 지난 회차도 보낸다(`<=`). 맥이 자서 그날을 건너뛰어도 다음 평일에 나간다. 한 회차 한 번(gate 키 = 회차 날짜).
+    """
+    print("▶ remind")
+    today = date.today()
+    anchor, every = date.fromisoformat(_cfg("remind_anchor")), _cfg("remind_every_days")
+    if not workday.is_workday(today) or today < anchor:
+        print("  · 쉬는 날이거나 첫 회차 전")
+        return 0
+    slot = anchor + timedelta(days=every * ((today - anchor).days // every))
+    if workday.next_workday(slot) > today:
+        print(f"  · 이번 회차({slot}) 발송일 전")
+        return 0
+    since = (today - timedelta(days=every)).isoformat()
+    n = sum(1 for r in ledger.rows(TASK, ev=ledger.LANDED)
+            if r.get("src") != "seed" and ledger._local_day(r.get("ts", "")) >= since)
+    text = (f"📱 *앱스토어 격주 리마인드*\n"
+            f"지난 {every}일 새로 들어온 한국 앱 *{n}개* — 한번 훑어봐 주세요\n"
+            f"→ <{_cfg('remind_view')}|[주차] 유입 추이>\n"
+            f"괜찮은 앱은 `DB로 업데이트` 체크하면 극초기 DB 로 올라갑니다")
+    g = gate or _gate(dry_run)
+    if g.level() == "off":
+        print(text)
+        return 0
+    ch = _cfg("remind_channel")
+    st = g.out(f"remind:{slot}", "remind", {"ch": ch, "apps": n}, lambda: slack.post(ch, text).require())
+    print(f"· 회차 {slot} · 앱 {n}개 · {st}")
+    return 0 if st == "done" else 2
+
+
 # ---------------------------------------------------------------- CLI
 
 def main(argv: list[str] | None = None) -> int:
@@ -388,6 +429,8 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("collect", help="수집 → 국적 판정(저장) → 착지(문 뒤) → 보고서"); c.add_argument("--dry-run", action="store_true")
     c.add_argument("--genres", type=int); c.add_argument("--limit", type=int)
     sub.add_parser("port")
+    rm = sub.add_parser("remind", help="2주마다 #그물망에 앱스토어 뷰 리마인드 (주말·공휴일은 다음 평일)")
+    rm.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
     sub.add_parser("label", help="노션 판정(Pass)·DB로 업데이트 → human(pick)")
     rp = sub.add_parser("replay"); rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
@@ -400,6 +443,9 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "port":
             port()
             return 0
+        if a.cmd == "remind":
+            with lock.hold("appstore-remind"):
+                return remind(dry_run=a.dry_run)
         if a.cmd == "status":
             _report()
             return 0

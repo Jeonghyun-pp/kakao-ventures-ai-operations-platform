@@ -7,9 +7,15 @@
 # 근거는 각 키의 주석이다(옛 kv-automation/docs 의 실측 문서는 2026-09-26 정리 때 지웠다 — 남은 기록은 여기와 각 통로의 docstring).
 
 appstore:
-  # 🔴 밖으로 나가는 문(kvlib.gate). 나가는 것은 노션 착지(land) 하나. 살아 있는 시스템이라 on 에서 시작 — off 는 시험·중단용
+  # 🔴 밖으로 나가는 문(kvlib.gate). 나가는 것은 노션 착지(land)와 격주 리마인드(remind, 슬랙 글). 살아 있는 시스템이라 on 에서 시작 — off 는 시험·중단용
   outbound: "on"
   report_channel: "test"       # 하루 보고 요약 · health → review_test. 심사역은 노션 뷰를 본다(9/22) — 슬랙 카드 없음
+  # 🔴 격주 "앱스토어 보세요" [사용자 결정 2026-09-29 회의]. 노션 뷰는 아무도 안 열면 없는 것과 같다 — 2주마다 한 번 민다.
+  #    기준일부터 N일 간격, 그날이 주말·공휴일이면 다음 평일(날짜가 밀려도 다음 회차는 기준일 간격 그대로).
+  remind_channel: "net"        # #그물망
+  remind_every_days: 14
+  remind_anchor: "2026-10-05"  # 첫 회차(월). 10/5 는 개천절 대체라 첫 발송은 10/6(화)
+  remind_view: "https://www.notion.so/0000000000000000000030deea8edcc5?v=000000000000000000002752bd2764ab"   # [주차] 유입 추이
   report_slack: "on"
   foreign_sample: 8            # 보고서에 보여줄 foreign 판정 표본 수 — 노션에 안 가는 앱을 사람이 5초씩 훑는 자리
   backup_keep: 7

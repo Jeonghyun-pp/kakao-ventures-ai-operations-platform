@@ -18,7 +18,7 @@ from urllib.parse import quote
 
 import yaml
 
-from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, store
+from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, store, workday
 from kvlib.gate import Gate
 from kv_transport import apify, notion, slack
 
@@ -765,11 +765,7 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
 def _remind_day(pressed: date) -> date:
     """누른 날 + N일. 주말·공휴일이면 다음 평일 — 목·금에 누른 건 월요일.
     🔴 저장하지 않고 매번 센다(_days_since 와 같은 이유). 공휴일 목록을 고치면 아직 안 보낸 건에 바로 반영된다."""
-    off = set(constraints.get("calendar.holidays_kr"))
-    d = pressed + timedelta(days=_cfg("remind_after_days"))
-    while d.weekday() >= 5 or d.isoformat() in off:
-        d += timedelta(days=1)
-    return d
+    return workday.next_workday(pressed + timedelta(days=_cfg("remind_after_days")))
 
 
 def remind(*, dry_run: bool = False, gate: Gate | None = None) -> int:
@@ -780,11 +776,10 @@ def remind(*, dry_run: bool = False, gate: Gate | None = None) -> int:
     """
     print("▶ remind")
     today = date.today()
-    off = constraints.get("calendar.holidays_kr")
-    if max(off) < (today + timedelta(days=30)).isoformat():
-        _alert("remind", f"공휴일 목록(calendar.holidays_kr)이 {max(off)} 에서 끝난다 — 다음 해를 채워야 한다",
+    if last := workday.list_ends_soon(today):
+        _alert("remind", f"공휴일 목록(calendar.holidays_kr)이 {last} 에서 끝난다 — 다음 해를 채워야 한다",
                key="remind:holidays", head="🟡 *linkedin remind* 공휴일 목록")
-    if today.weekday() >= 5 or today.isoformat() in off:
+    if not workday.is_workday(today):
         print("  · 쉬는 날 — 보내지 않는다")
         return 0
     g = gate or _gate(dry_run)
