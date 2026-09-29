@@ -155,7 +155,7 @@ def _req(method: str, path: str, *, params: dict | None = None,
     """지메일 요청 한 번. 재시도 계층은 노션 통로와 같다.
 
     🔴 method 를 받지만 이 파일이 실제로 쓰는 건 GET · POST 둘뿐이고,
-       POST 가 가는 곳은 `/messages/{id}/modify` 와 `/drafts` 두 곳뿐이다.
+       POST 가 가는 곳은 `/messages/{id}/modify` · `/drafts` · `/labels`(분류 라벨 만들기, 2026-09-29) 세 곳뿐이다.
        발송 엔드포인트는 이 파일 어디에도 없다 — A8 이 그걸 센다.
     """
     net_backoff = constraints.get("http.retry_backoff_sec")
@@ -390,6 +390,23 @@ def archive(msg_id: str) -> Fetched:
     if "INBOX" in (got.get("labelIds") or []):
         return Fetched.unknown(f"readback_mismatch:{msg_id} 가 아직 인박스에 있다")
     return Fetched.measured(True)
+
+
+def create_label(name: str) -> Fetched:
+    """라벨을 만든다(분류 라벨 kv/<카테고리>, 2026-09-29). 사용자 라벨이라 지워도 메일은 안 없어진다.
+
+    🔴 쓴 것은 되읽는다 — labels() 에 그 이름이 있어야 성공이다. 반환 = 라벨 id.
+    """
+    try:
+        _req("POST", "/labels", json_body={"name": name, "labelListVisibility": "labelShow", "messageListVisibility": "show"})
+    except AuthDead as e:
+        return Fetched.unknown(f"auth_dead:{e}")
+    except GmailError as e:
+        return Fetched.unknown(f"gmail:{e}")
+    have = labels()
+    if not have.is_measured or name not in have.require():
+        return Fetched.unknown(f"readback_mismatch:라벨 {name} 이 목록에 없다")
+    return Fetched.measured(have.require()[name])
 
 
 def relabel(msg_id: str, *, add: list[str], remove: list[str]) -> Fetched:

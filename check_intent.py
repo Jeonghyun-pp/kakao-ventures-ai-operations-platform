@@ -268,7 +268,7 @@ def a6_no_magic_constraints() -> None:
 # 🔴 지메일에 **쓰는** 호출은 이 넷뿐이다 — 닫힌 허용 집합. 금지 목록(/send·/trash…)은 DELETE /messages/{id}·/batchModify·
 #    /settings/forwarding 같은 다음 엔드포인트에 조용히 뚫린다. 목록 밖의 비GET `_req` 는 어디서든 실패다.
 GMAIL_ALLOWED_WRITES = {
-    "kv_transport/gmail.py": {("POST", "/messages/{}/modify"), ("POST", "/drafts")},
+    "kv_transport/gmail.py": {("POST", "/messages/{}/modify"), ("POST", "/drafts"), ("POST", "/labels")},   # /labels: 분류 라벨 만들기 [사용자 결정 2026-09-29] — 지워도 메일은 안 없어진다
     "kv_transport/gmail_send.py": {("POST", "/drafts/send")},
 }
 GMAIL_HOST = "gmail.googleapis.com"                                        # 이 문자열이 있을 수 있는 파일 = 위 둘

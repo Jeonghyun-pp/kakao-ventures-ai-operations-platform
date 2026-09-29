@@ -426,6 +426,14 @@ def main(a) -> int:
                   f" | 판단 흐름: 새로 물음 {r['asked']} · 결정 {r['decided']} · 인수 {r['acked']} · 리마인드 {r['reminded']}"
                   f" · 결정 대기 {r['waiting']} · 맡을 사람 대기 {r['unclaimed']} · 답 없음 {r['stale']}"
                   f" | 밖으로 나가는 문 {constraints.get('mail_observe.outbound')}")
+        from . import labels                                     # 분류 라벨 — 붙이고, 사람이 옮긴 것을 정답으로 [2026-09-29]
+        la = labels.apply(con, gmail)
+        ls = labels.sync(con, gmail, save_human=lambda mid, cat, why: (
+            con.execute("DELETE FROM judgments WHERE message_id=? AND run=?", (mid, HUMAN)),
+            _save(con, mid, HUMAN, "", "", "", {"ok": 1, "category": cat, "reason": why, "followup": None})))
+        if any(la.values()) or any(ls.values()):
+            print(f"  · 라벨: 붙임 {la['labeled']} · 붙였을 것 {la['dry']} · 실패 {la['failed']} | 되읽음 {ls['checked']} · 사람이 옮김 → 정답 {ls['changed']}"
+                  f" · 뗌 {ls['removed']} | 문 {constraints.get('mail_labels.outbound')}")
         out = paths.data("mail", "reports") / f"{ledger.today()}.md"
         if not out.exists():                                     # 하루 한 번. 손으로 또 돌려도 슬랙에 다시 안 올린다
             md, summary = report(con, ledger.now(timedelta(hours=26)))
