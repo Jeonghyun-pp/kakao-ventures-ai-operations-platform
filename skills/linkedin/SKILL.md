@@ -5,6 +5,7 @@ schedule:
   - { cmd: collect, when: "월 09:10", why: "이때만 돈이 나간다. 축별로 차례인 것만 돈다" }
   - { cmd: card,    when: "매일 11:00", why: "정현님이 훑은 결과가 반영된 뒤에 나간다. 평일만 — 주말엔 아무것도 안 한다" }
   - { cmd: followup, when: "10분마다", why: "심사역이 언제 누를지 우리가 못 정한다. 누르고 10분 안에 초안이 뜬다" }
+  - { cmd: remind,   when: "매일 10:00", why: "✅ 2일 뒤 누른 분을 핑. 주말·공휴일엔 코드가 쉰다 — 그날 몫은 다음 평일에 나간다" }
 ---
 
 # 링크드인 소싱
@@ -19,6 +20,7 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
   land      노션 착지                    〃 dry
   card      #그물망 카드(헤더+스레드)     slack 이상이면 나간다
   outreach  ✅ 스레드에 콜드 메시지 초안   〃
+  remind    ✅ 2일 뒤 #그물망 본문에 핑     〃
   promote   극초기 DB 승격 + 링크드인 행 표시   on 이어야. linkedin.promote: false 면 "gated"
 ```
 `--dry-run` 은 이 실행만 문을 내리는 것(`Gate(force="off")`)이다. 무엇을 했(을)는지는 `~/kv-data/linkedin/db/linkedin.sqlite` 의 `actions` 에 남는다.
@@ -33,6 +35,8 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
 매일 11:00 card     평일만. 노션 Tier 되읽기(사람이 고친 것 = 정답으로 저장, label) → 아직 안 나간 사람 좋은 순 5명 → 헤더 + 사람별 스레드
                     → 하루 보고서(파일 + review_test 요약)
 10분마다  followup  ✅ → 누른 분 성함으로 콜드 메시지 초안(짧게·길게)을 스레드에 → 극초기 승격 · 7일 무반응은 만기(요일 안 봄)
+매일 10:00 remind   ✅ 누른 날 + 2일(주말·공휴일이면 다음 평일, 목·금 → 월) → #그물망 본문에 "@누른분 김가람(회사) 님께 연락 보내셔야 합니다"
+                    이름은 names.py 가 한글로(`가람 김` 는 규칙, 영문은 claude, 확신 없으면 원문 병기). 한 사람 한 번. [사용자 결정 2026-09-29]
 매일 12:55 ops health  평일에 오늘 보고서 파일이 없으면 review_test 에 한 줄 (skills/ops 가 여섯 스킬을 한 번에)
 ```
 **전량 착지하는 이유**: 심사역이 노션을 직접 열 수 있어야 한다. 슬랙엔 그중 하루 5명만 간다.
@@ -57,6 +61,7 @@ cd ~/kv
 ./.venv/bin/python -m skills.linkedin.run collect [--axis <축>] [--pages N] [--dry-run]
 ./.venv/bin/python -m skills.linkedin.run card [-n 5] [--dry-run]
 ./.venv/bin/python -m skills.linkedin.run followup [--dry-run]
+./.venv/bin/python -m skills.linkedin.run remind [--dry-run]
 ./.venv/bin/python -m skills.linkedin.run status            # 축별 마지막 실행·다음 페이지·커버리지·재고
 ./.venv/bin/python -m skills.linkedin.run label             # 노션 Tier → human (card 가 매일 하지만 손으로도)
 ./.venv/bin/python -m skills.linkedin.run replay | diff --b r-<sha>
@@ -71,6 +76,7 @@ judge.py       판정 — 줄 단위(judge_lines). collect 와 replay 가 같은
 axes.py        수집 축(Apify 질의)과 사후 조건(reject) · 카드 기준(card_reject)
 profile.py     Apify 원본 → 키·경력·신호
 brief.py       카드 두 문장 + 회사명 (claude)     outreach.py  콜드 메시지 초안 (claude)
+names.py       ✅ 리마인드에 쓸 한글 이름 (규칙 → claude)
 criteria.md    Tier 기준 — 사람이 깎는다
 ../../people.yaml   심사역 명부(슬랙 ID → 성함). 메일과 같은 파일
 ```

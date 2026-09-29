@@ -34,6 +34,7 @@ class Followup(unittest.TestCase):
         self.assertEqual([(r["ev"], r.get("by")) for r in c.rows() if r["ev"] != "posted"],
                          [("outreach", "Reviewer A"), ("resolved", "reaction_yes")])
         self.assertEqual(c.rows("resolved")[0]["promoted"], "created")
+        self.assertEqual(c.rows("resolved")[0]["uid"], "U1")      # 리마인드가 핑할 사람
 
     def test_old_rows_with_slack_ts_in_ts_column_still_match(self):
         """09-25 전 장부 195줄은 슬랙 ts 가 `ts` 칸에 있다 — 읽기는 둘 다 본다."""

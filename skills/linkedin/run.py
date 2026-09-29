@@ -1,4 +1,4 @@
-"""링크드인 스킬 — collect · card · followup · 보고서. 일정·흐름·규율은 SKILL.md(frontmatter 가 스케줄이다).
+"""링크드인 스킬 — collect · card · followup · remind · 보고서. 일정·흐름·규율은 SKILL.md(frontmatter 가 스케줄이다).
 
 ## 지키는 규율
 
@@ -14,6 +14,7 @@ import sys
 import uuid
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import quote
 
 import yaml
 
@@ -21,7 +22,7 @@ from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, 
 from kvlib.gate import Gate
 from kv_transport import apify, notion, slack
 
-from . import axes, brief, judge, outreach, profile
+from . import axes, brief, judge, names, outreach, profile
 
 TASK = "linkedin"
 DB = "ch_링크드인"
@@ -31,6 +32,7 @@ MEETING = "meeting_candidate"
 POSTED = "posted"          # 슬랙 스레드 답글로 올림 (사람별 ts)
 RESOLVED = "resolved"      # ✅ 를 받아 결론남
 OUTREACH = "outreach"      # 콜드 메시지 초안을 스레드에 올림
+REMINDED = "reminded"      # ✅ N일 뒤 누른 분에게 "연락하세요" 핑
 PROMOTED = "promoted"      # 극초기 DB 로 승격
 SCREENED = "screened"      # 문안 단계 창업 판정 (brief.VERDICTS) — 카드·재고가 같이 본다
 
@@ -55,7 +57,7 @@ def _cfg(k: str):
 
 # 🔴 밖으로 나가는 다섯(buy·land·card·outreach·promote)은 전부 `Gate.out` 을 지난다 (constraints.yaml linkedin.outbound).
 #    `slack` 단계에서 실제로 나가는 종류 — **허용 목록**. 카드·초안은 슬랙 글이고, 구매·착지·승격은 아니다.
-SLACK_KINDS = ("card", "outreach")
+SLACK_KINDS = ("card", "outreach", "remind")
 
 
 def db_path():
@@ -716,6 +718,12 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
         who = _reviewers()
         return next((who[u] for u in users if u in who), "")
 
+    def _uid(users: list) -> str:
+        # _sender 와 같은 사람(명단 안의 먼저 누른 분). 명단 밖이면 먼저 누른 분 — 핑은 명단 없이도 된다.
+        who = _reviewers()
+        return next((u for u in users if u in who), users[0] if users else "")
+
+    uids = {k: _uid(us) for k, _, us in picked}
     groups: dict[str, list] = {}
     for k, r, us in picked:
         groups.setdefault(_sender(us), []).append((k, r))
@@ -753,13 +761,83 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
             ledger.append(TASK, k, OUTREACH, slack_ts=g.row(k, "outreach")["result"], by=who, name=r.get("name"))
             pr = _promote(k, r, g)
             ledger.append(TASK, k, RESOLVED, by="reaction_yes", who=who, name=r.get("name"),
-                          promoted=pr)
+                          promoted=pr, uid=uids.get(k))     # uid: 리마인드가 핑할 사람
             done += 1
 
     print(f"· 초안 {done}/{len(picked)}명 올림")
     for f in fails:
         print(f"  🔴 {f}")
     return 2 if (fails or done < len(picked)) else 0
+
+
+def _remind_day(pressed: date) -> date:
+    """누른 날 + N일. 주말·공휴일이면 다음 평일 — 목·금에 누른 건 월요일.
+    🔴 저장하지 않고 매번 센다(_days_since 와 같은 이유). 공휴일 목록을 고치면 아직 안 보낸 건에 바로 반영된다."""
+    off = set(constraints.get("calendar.holidays_kr"))
+    d = pressed + timedelta(days=_cfg("remind_after_days"))
+    while d.weekday() >= 5 or d.isoformat() in off:
+        d += timedelta(days=1)
+    return d
+
+
+def remind(*, dry_run: bool = False, gate: Gate | None = None) -> int:
+    """✅ N일 뒤, 누른 분을 채널에서 핑한다 — "김가람(Aco) 님께 연락 보내셔야 합니다".
+
+    🔴 연락은 심사역 개인 계정으로 나가서 우리는 보냈는지 모른다. 그래서 한 번만, 짧게 민다.
+    🔴 기한이 지난 건도 보낸다(`<=`). 맥이 자서 하루를 건너뛰어도 다음 평일에 나간다.
+    """
+    print("▶ remind")
+    today = date.today()
+    off = constraints.get("calendar.holidays_kr")
+    if max(off) < (today + timedelta(days=30)).isoformat():
+        _alert("remind", f"공휴일 목록(calendar.holidays_kr)이 {max(off)} 에서 끝난다 — 다음 해를 채워야 한다",
+               key="remind:holidays", head="🟡 *linkedin remind* 공휴일 목록")
+    if today.weekday() >= 5 or today.isoformat() in off:
+        print("  · 쉬는 날 — 보내지 않는다")
+        return 0
+    g = gate or _gate(dry_run)
+    dry = g.level() == "off"
+    sent_keys = ledger.keys(TASK, REMINDED)
+    posts = {r["key"]: r for r in ledger.rows(TASK, ev=POSTED)}
+    due = []
+    for r in ledger.rows(TASK, ev=RESOLVED):
+        if r.get("by") != "reaction_yes" or r["key"] in sent_keys:
+            continue
+        pressed = date.fromisoformat(ledger._local_day(r["ts"]))
+        if pressed.isoformat() < _cfg("remind_since") or _remind_day(pressed) > today:
+            continue
+        due.append((r, posts.get(r["key"], {})))
+    if not due:
+        print("  · 오늘 보낼 사람 없음")
+        return 0
+
+    ko = names.to_korean([{"key": r["key"], "name": r.get("name"), "headline": p.get("brief")} for r, p in due])
+    by_name = {v: k for k, v in _reviewers().items()}           # 09-29 전 ✅ 행엔 uid 가 없다 — 성함으로 찾는다
+    ch, fails, sent = _cfg("remind_channel"), [], 0
+    for r, p in due:
+        k, orig = r["key"], r.get("name") or ""
+        name, sure = ko[k]
+        uid = r.get("uid") or by_name.get(r.get("who") or "")
+        co = p.get("company")
+        co = "스텔스" if not co or co == brief.NO_COMPANY else co
+        ping = f"<@{uid}>" if uid else "✅ 누르신 분"
+        who = f"<{quote(p['url'], safe=':/?=&%#')}|{name}>" if p.get("url") else name    # 한글 주소(/in/김가람)는 인코딩해야 슬랙 링크가 안 깨진다
+        text = (f"{ping} {who}({co}) 님께 연락 보내셔야 합니다 :excited:"
+                + ("" if sure or name == orig else f"  _(원문 {orig} — 이름 확인)_"))
+        if dry:
+            print(f"  {text}")
+            continue
+        st = g.out(k, "remind", {"uid": uid, "name": name, "ch": ch},
+                   lambda text=text: slack.post(ch, text).require())
+        if st != "done":
+            fails.append(f"remind {orig}: {(g.row(k, 'remind') or {}).get('error', st)}")
+            continue
+        ledger.append(TASK, k, REMINDED, slack_ts=g.row(k, "remind")["result"], uid=uid, name=orig, name_ko=name)
+        sent += 1
+    print(f"· 리마인드 {sent}/{len(due)}명" + (" (dry)" if dry else ""))
+    for f in fails:
+        print(f"  🔴 {f}")
+    return 2 if fails else 0
 
 
 # 🔴 회사 홈페이지가 아닌 값. Apify 가 스텔스 창업자에게 붙이는 플레이스홀더다.
@@ -1038,6 +1116,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("screen", help="재고 전체를 창업 판정해 장부에 남긴다 (슬랙 0 · 노션 0) — 재고 수가 정확해진다")
     fu = sub.add_parser("followup", help="✅ 를 걷어 콜드 메시지 초안을 스레드에 올린다")
     fu.add_argument("--dry-run", action="store_true")
+    rm = sub.add_parser("remind", help="✅ N일 뒤 누른 분을 채널에서 핑한다 (주말·공휴일은 다음 평일)")
+    rm.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
     rp = sub.add_parser("replay", help="고친 기준으로 저장된 사람을 다시 판정 (돈 0 · 노션 0)")
     rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
@@ -1062,6 +1142,12 @@ def main(argv: list[str] | None = None) -> int:
                 rc = followup(dry_run=a.dry_run)
             if rc and not a.dry_run:
                 _alert("followup", f"종료코드 {rc} — ✅ 를 걷거나 초안을 올리지 못했다")
+            return rc
+        if a.cmd == "remind":
+            with lock.hold("linkedin-remind"):
+                rc = remind(dry_run=a.dry_run)
+            if rc and not a.dry_run:
+                _alert("remind", f"종료코드 {rc} — 리마인드가 다 못 나갔다")
             return rc
         if a.cmd == "replay":
             crit = Path(a.criteria).read_text(encoding="utf-8") if a.criteria else judge.criteria_text()
