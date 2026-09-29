@@ -28,7 +28,7 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
 ## 하루
 
 ```
-월 09:10  collect   축별로 차례인 것만 → 재고(backlog_cap) 확인 → Apify → 원본 아카이브 → 장부로 중복 제거 → 사후 조건
+월 09:10  collect   축별로 차례인 것만(주차 축 제외) → Apify → 원본 아카이브 → 장부로 중복 제거 → 사후 조건
                     → claude 50명 배치 판정 · **사람별 저장**(judgments: 모델이 본 줄·낸 줄·기준 해시) → 전량 노션 착지
 매일 11:00 card     평일만. 노션 Tier 되읽기(사람이 고친 것 = 정답으로 저장, label) → 아직 안 나간 사람 좋은 순 5명 → 헤더 + 사람별 스레드
                     → 하루 보고서(파일 + review_test 요약)
@@ -74,11 +74,13 @@ brief.py       카드 두 문장 + 회사명 (claude)     outreach.py  콜드 �
 criteria.md    Tier 기준 — 사람이 깎는다
 ../../people.yaml   심사역 명부(슬랙 ID → 성함). 메일과 같은 파일
 ```
-`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · backlog_cap · followup_days · stock_warn_days · connect_note_chars · outreach_batch. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
+`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · followup_days · stock_warn_days · connect_note_chars · outreach_batch. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
 
 ## 알아둘 것 (지우지 않은 결정)
 
-**재고가 스스로 구매를 조절한다.** 아직 안 나간 사람이 `backlog_cap`(100) 이상이면 사지 않는다. 첫 실행에 590명(117일치)이 쌓인 뒤 정했다. 재고는 **노션 기준**으로 센다 — 장부로 세면 card 와 다른 창고를 보게 된다(09-01: 닷새간 카드 0건).
+**재고가 많다고 안 사지 않는다** [사용자 결정 2026-09-29]. 전에는 안 나간 사람이 `backlog_cap`(100) 이상이면 안 샀다 — 08-24~09-28 매주 건너뛰는 사이 카드는 08-17 재고와 옛 시드만 돌았고, 산 날에 멈춘 재직·창업 개월로 걸러져 품질이 떨어졌다. 지출 상한은 축의 주기·페이지 수가 맡고, 카드는 같은 등급 안에서 **최근에 산 사람부터** 올린다. 옛 축 6개(posted-early·early-kr·stealth-kr·flow-new-founder·gap-practitioner·stealth-us-krschool)는 `parked` — s-* 가 대신한다. 재고는 **노션 기준**으로 센다 — 장부로 세면 card 와 다른 창고를 보게 된다(09-01: 닷새간 카드 0건).
+
+**Legacy** [사용자 결정 2026-09-29] — 국적·나이(`axes.legacy_reason`)·비창업(문안 판정)에 걸린 사람은 노션 `Status=Legacy`. 재고에 안 들고, 장부 landed 라 다시 처리되지 않는다. collect 는 외국인·40세 이상을 Tier 판정 없이 Legacy 로 착지하고, card 는 기존 행을 만나면 Legacy 로 바꾼다. card 는 카드 기준(`card_reject`)에 안 맞는 행도 전부 Legacy 로 보낸다 — 노션 행의 재직·공백·창업 개월은 산 날 값이고 아무도 다시 안 재며(옛 재검토 시스템 09-26 제거), 장부에 landed 라 다시 사지도 않으니 지금 안 맞으면 영영 안 맞는다. 사람이 손댄 행(타깃·DB로 업데이트·극초기 DB·Status 가 New 아님)은 건드리지 않는다. 사람이 Status 를 New 로 바꾸면 다시 재고가 된다(단 기준에 안 맞으면 다음 card 에서 다시 Legacy).
 
 **후보는 노션 행에서, 정답도 노션에서.** 장부 landed 1,234행은 옛 시스템 시드라 `page_id` 가 없다. 장부로 후보를 뽑으면 그 사람들이 카드에 영원히 안 나온다.
 
@@ -95,6 +97,12 @@ criteria.md    Tier 기준 — 사람이 깎는다
 **읽기에 성공한 스레드만 만기시킨다.** 망 오류 한 번에 사람이 조용히 사라지지 않게. 만기 7일 = 결론(카드가 매일 새로 오는 구조라 리마인드 대신) [사용자 결정 2026-09-25 유지].
 
 **장부 ts** — 09-25 전 195줄은 슬랙 메시지 ts 가 `ts` 칸에 들어 있다(결함). 이후는 `slack_ts` 칸. 읽는 쪽은 둘 다 본다.
+
+**추정 40세 이상은 안 올린다** [사용자 결정 2026-09-29 "나이가 많다"]. 생년이 없어 `profile.estimated_age` 가 학부 입학 연도(+19) 또는 첫 경력 연도(+23)로 역산해 노션 `추정 나이` 칸에 남기고 `card_reject` 가 본다(`axes.MAX_AGE`). 추정 불가는 통과. 첫 경력 역산은 나이를 **낮게** 잡는 쪽으로 틀린다(재학 중 인턴 · 잘린 경력) — 새는 쪽이지 버리는 쪽이 아니다. 옛 재고는 `tools/linkedin_age_backfill.py` 가 채웠다(122명 중 23명 제외 → 99명).
+
+**창업자가 아니면 안 올린다** [사용자 결정 2026-09-29]. 판정은 카드 문안을 쓰는 claude 가 같은 호출에서 낸다 — `창업 · 준비 · 비창업`(brief.md). `비창업`만 뺀다(`준비`는 축 B 경력단절의 대상이다). 직함 OR 목록으로 안 한 이유: 다음 표현에서 새고, "기존 회사 대표 승계"(Founder B)는 직함으로 원리상 안 갈린다. 판정은 장부 `screened` 에 남아 card·`_backlog` 가 같이 보고, 통과자의 문안은 올릴 때 재사용한다. 판정 못 받은 사람은 그날 안 나가고 다음에 재판정. `./kv linkedin screen` = 재고 전체 판정(슬랙·노션 0). 발단: 09-29 미리보기 5명 중 4명이 합류자·승계 대표. 첫 screen: 156명 → 창업 107 · 준비 15 · 비창업 34.
+
+**외국인은 안 올린다 — 국적 기준, 거주지 아님** [사용자 결정 2026-09-28]. 해외 거주 한국인은 남기고 한국 거주 외국인은 뺀다. 액터에 국적 필터가 없어 사는 것은 못 막는다 — collect 가 산 뒤 판정 전에 `judge.nationality`(claude)로 가르고 뺀 수를 `post_filtered` 에 `<축>/외국인(판정)` 으로 남긴다. 옛 재고는 `tools/linkedin_nationality_backfill.py` 가 노션 `Korea Signal` 에 `외국인` 태그를 달았고 `card_reject` 가 그 태그를 본다(사람이 지우면 다시 나간다). 모르면 한국인 쪽. **KAIST 축은 예외**(유학생도 대상 — Reviewer C 요청 09-15, 09-28 재확인). 발단: 09-28 카드에 옛 시드 재고 외국인 2명이 나갔다 — 수집 때 거르는 `reject()` 는 시드 재고를 안 거쳤고, 카드 필터엔 국적 조건이 없었다. 재고 193명 중 37명이 외국인이었다(서울 거주 ~20 · 교환학생 한 줄로 `KR-학교` 받은 해외 거주자 ~10).
 
 **학력 축(elite-kr · elite-us-kr · elite-gap)은 2026-09-01 에 은퇴했고 코드는 09-26 에 지웠다** — "학력은 안 건다"(사용자 결정). 1티어 35명 Catch 34% 가 학교 덕인지 스텔스 조건 덕인지 끝내 안 갈렸고, s-* 축이 대신한다. 그 안에 있던 실측은 여기만 남는다:
 - 학교 23곳을 한 축에 넣고 locations 를 [한국, 미국]으로 두면 **한국 연고가 통째로 빠진다** — schools 도 locations 도 OR 라 "미국 학교 + 미국 거주"가 앞을 다 차지했다(50명 중 한국 학교 1명 · 모수 10,038). 축은 쿼리마다 한국 연고를 강제하게 가른다.

@@ -56,7 +56,7 @@ Catch 가 낮은 게 당연하고, Trend 가 49%다. 3~6개월 뒤 창업했는�
 """
 from __future__ import annotations
 
-from . import profile
+from . import judge, profile
 
 SLUG = "harvestapi~linkedin-profile-search"
 
@@ -189,6 +189,12 @@ _AXES_2026_09 = {
 }
 AXES.update(_AXES_2026_09)
 
+# 🔴 [사용자 결정 2026-09-29] 09-01 시니어 기준(s-*)이 대신하는 옛 축은 주차한다 — 정기 수집이 안 집는다.
+#    재고 기준선(100명)에 막혀 08-17 뒤로 안 돌았을 뿐 꺼진 적이 없었다. 기준선을 없애자 24페이지 중
+#    20페이지($4.00)가 이 축들로 잡혔다(flow-new-founder 10p·stealth-us-krschool 6p 는 매번 전량 재구매).
+for _a in ("posted-early", "early-kr", "stealth-kr", "flow-new-founder", "gap-practitioner", "stealth-us-krschool"):
+    AXES[_a]["parked"] = "09-01 s-* 축이 대신한다(시니어 기준). 되살리려면 s-* 와 무엇이 다른지부터 보여라"
+
 
 # ================================================================ KAIST 재학 창업자 (2026-09-15, Reviewer C 요청)
 #
@@ -231,6 +237,11 @@ AXES["kaist-stealth"] = {
 }
 
 
+def nationality_exempt(axis: str) -> bool:
+    """외국인을 빼지 않는 축. [Reviewer C 요청 2026-09-15 · 사용자 재확인 2026-09-28] KAIST 유학생도 대상이다."""
+    return AXES.get(axis, {}).get("post") == "kaist-current"
+
+
 def reject(axis: str, item: dict) -> str:
     """사후 조건에 걸리면 **이유**를, 통과하면 빈 문자열을 준다.
 
@@ -238,7 +249,7 @@ def reject(axis: str, item: dict) -> str:
        "몇 명이 왜 빠졌는지"가 사라지고, 그건 조용한 삭제다.
     """
     # 🔴 kaist-current 는 외국인 필터를 안 건다 — KAIST 유학생도 대상이다.
-    if AXES.get(axis, {}).get("post") == "kaist-current":
+    if nationality_exempt(axis):
         return profile.kaist_currently_enrolled(item)
     loc = str(item.get("location") or item.get("locationName") or "").lower()
     if loc and not profile.korea_signals(item):
@@ -287,6 +298,7 @@ RECENT_MONTHS = 3        # 창업자 직함 + 현 직장 재직 3개월 이내 (
 GAP_MONTHS = 3           # 최근 3개월 내 경력단절 — 체크박스에도 같은 상한
 MAX_TENURE = 36          # 현 직장 재직 3년 초과 제외 (60 이었을 때 실측 Catch 0/105)
 STEALTH_MAX_MONTHS = 12  # 스텔스라도 재직 1년 초과면 제외 (2년차 스텔스는 극초기가 아니다)
+MAX_AGE = 39             # [사용자 결정 2026-09-29] 추정 40세 이상 제외. 추정 불가는 통과(모르는 건 감점이 아니다)
 
 
 def _f(v):
@@ -294,6 +306,22 @@ def _f(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def legacy_reason(live: dict) -> str:
+    """사람 자체가 대상이 아닌 이유(국적·나이). collect 가 **착지 전에** 이걸로 Tier 판정을 건너뛰고 Legacy 로 보낸다.
+
+    card 에서는 이것·비창업·card_reject 전부가 Legacy 사유다 — 노션 값은 착지 후 안 바뀌기 때문이다(run.card 주석).
+    여기를 따로 두는 이유는 collect 가 판정 호출을 아끼는 자리라서다.
+    """
+    # 🔴 [사용자 결정 2026-09-28] 외국인 — 국적 기준(거주지 아님). 태그는 judge.nationality 가 단다.
+    #    KAIST 축은 태그 자체를 안 달아 여기서 통과한다. 사람이 노션에서 태그를 지우면 다시 올라간다.
+    if judge.FOREIGN in (live.get("Korea Signal") or []):
+        return "외국인"
+    age = _f(live.get("추정 나이"))
+    if age is not None and age > MAX_AGE:
+        return f"추정 {MAX_AGE + 1}세 이상"
+    return ""
 
 
 def card_reject(live: dict) -> str:
@@ -307,6 +335,9 @@ def card_reject(live: dict) -> str:
                     ("Author Headline", "Raw Text", "회사", "서비스명", "One Liner")).lower()
     tenure = _f(live.get("Tenure Months"))
 
+    lr = legacy_reason(live)
+    if lr:
+        return lr
     if tenure is not None and tenure > MAX_TENURE:
         return f"재직 {MAX_TENURE}개월 초과"
     if any(w in blob for w in _CARD_RECRUIT):

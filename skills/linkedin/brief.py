@@ -33,6 +33,11 @@ _SYSTEM = (
 # 회사를 못 찾았을 때 쓰는 표시. 빈칸으로 두면 "못 찾았다"와 "안 찾아봤다"가 구별이 안 된다.
 NO_COMPANY = "(미상)"
 
+# 창업 판정 (2026-09-29 · 사용자 결정). 비창업만 카드에서 뺀다 — 준비는 축 B(경력단절)의 대상이다.
+PASS = ("창업", "준비")
+NOT_FOUNDER = "비창업"
+VERDICTS = PASS + (NOT_FOUNDER,)
+
 
 def _line(p: dict) -> str:
     def flat(s, cap):
@@ -46,7 +51,7 @@ def _line(p: dict) -> str:
 
 
 def write(people: list[dict]) -> Fetched:
-    """반환 [{key, company, brief}]. brief 는 두 문장."""
+    """반환 [{key, verdict, company, brief}]. verdict 는 VERDICTS 중 하나, brief 는 두 문장."""
     if not people:
         return Fetched.measured([], got=0, dlq=0)
 
@@ -62,7 +67,7 @@ def write(people: list[dict]) -> Fetched:
             f"# 대상 {len(chunk)}명\n"
             "형식: key⇥이름⇥회사칸⇥한줄소개⇥헤드라인⇥소개글⇥판정이유⇥창업개월\n"
             + "\n".join(_line(p) for p in chunk)
-            + f"\n\n# 출력\n정확히 {len(chunk)}줄. `key<TAB>회사명<TAB>두 문장`.\n"
+            + f"\n\n# 출력\n정확히 {len(chunk)}줄. `key<TAB>판정<TAB>회사명<TAB>두 문장`. 판정은 {'·'.join(VERDICTS)} 중 하나.\n"
               f"회사명을 못 찾으면 정확히 `{NO_COMPANY}` 라고 쓴다.\n"
         )
         try:
@@ -85,8 +90,14 @@ def write(people: list[dict]) -> Fetched:
             if key not in valid:
                 bad.append({"line": line[:300], "why": "목록에 없는 key"})
                 continue
-            good.append({"key": key, "company": parts[1],
-                         "brief": " ".join(parts[2:]).strip()})
+            # 🔴 판정은 위치가 아니라 **값**으로 찾는다 — judge.judge_lines 와 같은 이유(열이 흔들린다)
+            vi = next((i for i, x in enumerate(parts[1:3], 1) if x in VERDICTS), None)
+            rest = [x for i, x in enumerate(parts[1:], 1) if i != vi]
+            if vi is None or len(rest) < 2:
+                bad.append({"line": line[:300], "why": "판정 어휘가 없거나 필드 부족"})
+                continue
+            good.append({"key": key, "verdict": parts[vi], "company": rest[0],
+                         "brief": " ".join(rest[1:]).strip()})
 
     if bad:
         claude.dlq("linkedin", "brief_dlq", bad)

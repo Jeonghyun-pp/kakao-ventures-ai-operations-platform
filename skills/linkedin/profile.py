@@ -321,6 +321,18 @@ def fulltime_gap_months(item: dict) -> int | None:
     return (_today_m() - max(ends)) if ends else None
 
 
+def nationality_input(item: dict) -> tuple[str, str, str, str]:
+    """국적 판정(judge.nationality)에 넣을 (이름, 거주지, 학력, 경력·헤드라인). 원본 아이템에서."""
+    s = summarize(item)
+    loc = item.get("location") or item.get("locationName") or ""
+    if isinstance(loc, dict):
+        loc = loc.get("linkedinText") or ""
+    schools = " / ".join(str(e.get("schoolName") or e.get("school") or e.get("title") or "")
+                         for e in (item.get("education") or []) if isinstance(e, dict))
+    work = " · ".join(x for x in [s["headline"]] + [f"{p['title']}@{p['company']}" for p in s["positions"][:4]] if x)
+    return s["name"], str(loc), schools, work
+
+
 def korea_signals(item: dict) -> list[str]:
     """노션 `Korea Signal` multi_select 값. 거주·학교만 판별한다."""
     out = []
@@ -393,6 +405,27 @@ def undergrad_start_year(item: dict) -> int | None:
         if y:
             years.append(int(y))
     return min(years) if years else None
+
+
+# 나이 추정 (2026-09-29 · 사용자 결정 "나이가 많다"). 생년은 링크드인에 없다 — 연도에서 역산한다.
+UNDERGRAD_AGE = 19      # 학부 입학
+FIRST_JOB_AGE = 23      # 첫 경력 시작 (학부 연도가 없을 때만)
+
+
+def estimated_age(item: dict) -> int | None:
+    """추정 나이. 학부 입학 연도가 있으면 그걸로, 없으면 가장 이른 경력 시작 연도로.
+
+    🔴 `None` 은 "젊다"가 아니라 **판정 불가**다 — 버릴지는 부르는 쪽이 정한다.
+    ⚠️ 첫 경력은 **나이를 낮게** 잡는 쪽으로 틀린다(재학 중 인턴 · 액터가 경력을 잘라 준 경우).
+       즉 이 값으로 자르면 나이 많은 사람이 새는 쪽이지, 젊은 사람을 버리는 쪽이 아니다.
+    """
+    y = date.today().year
+    u = undergrad_start_year(item)
+    if u:
+        return y - u + UNDERGRAD_AGE
+    starts = [int(e["startDate"]["year"]) for e in (item.get("experience") or [])
+              if isinstance(e, dict) and isinstance(e.get("startDate"), dict) and e["startDate"].get("year")]
+    return y - min(starts) + FIRST_JOB_AGE if starts else None
 
 
 def _norm_school(name: str) -> str:

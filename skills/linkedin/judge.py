@@ -106,3 +106,50 @@ def judge_lines(lines: list[str], valid, criteria: str) -> Fetched:
         if g["key"] not in seen:
             seen.add(g["key"]); uniq.append(g)
     return Fetched.measured(uniq, got=len(uniq), dlq=len(bad))
+
+
+# ================================================================ 국적 (2026-09-28 · 사용자 결정)
+#
+# 🔴 **거주지가 아니라 국적이다.** 한국에 사는 외국인은 빼고, 해외에 사는 한국인은 남긴다.
+#    거주지·학교 문자열로는 못 가른다(09-28 재고 192명 실측: 서울 거주 외국인 ~20명이
+#    `KR-거주` 로, 교환학생 한 줄뿐인 외국인이 `KR-학교` 로 통과했다). 그래서 claude 가 본다.
+# 🔴 모르면 한국인 쪽이다 — 판정이 비거나 흔들린 사람은 태그를 안 단다(모르는 건 감점이 아니다).
+FOREIGN = "외국인"
+_NAT_SYSTEM = "너는 벤처캐피털 소싱 담당자를 돕는다. 설명이나 인사말을 쓰지 말고 요구된 형식만 출력한다."
+_NAT = ("한국인", FOREIGN)
+_NAT_RULES = """# 국적 판정
+각 사람이 한국인인지 외국인인지 가른다. **거주지가 아니라 국적·뿌리다.**
+- 해외에 사는 한국인, 한국계 교포(예: Minsu Kim, Minsoo Kim)는 **한국인**이다.
+- 한국에 사는 외국인(예: 서울 거주 Enrique Cubero, KAIST 유학생 Arslan Kenbayev)은 **외국인**이다.
+- 한국 학교가 교환·연수·여름학기·단기과정 한 줄뿐이면 한국인 근거가 아니다.
+- 근거: 이름(한국식 이름·한글 병기), 한국 학부, 한국 회사 경력, 소개 글의 언어.
+- 확신이 없으면 **한국인**으로 둔다 — 한국인을 버리는 비용이 외국인 한 명 더 보는 비용보다 크다."""
+
+
+def nationality_line(key: str, name: str, location: str, schools: str, work: str) -> str:
+    return "\t".join(str(x or "").replace("\t", " ").replace("\n", " ")[:200]
+                     for x in (key, name, location, schools, work))
+
+
+def nationality(lines: dict[str, str]) -> Fetched:
+    """{key: 줄} → {key: "한국인"|"외국인"}. 판정 못 받은 key 는 **빠진다** — 호출부가 한국인으로 취급한다."""
+    out: dict[str, str] = {}
+    keys = list(lines)
+    for i in range(0, len(keys), BATCH):
+        chunk = keys[i:i + BATCH]
+        prompt = (f"{_NAT_RULES}\n\n# 대상 {len(chunk)}명\n형식: key⇥이름⇥거주지⇥학력⇥경력·헤드라인\n"
+                  + "\n".join(lines[k] for k in chunk)
+                  + f"\n\n# 출력\n정확히 {len(chunk)}줄. `key<TAB>한국인` 또는 `key<TAB>외국인`. 다른 말 없이.\n")
+        try:
+            raw = claude.run_session(prompt, system=_NAT_SYSTEM, tools="")
+        except claude.SessionError as e:
+            if not out:
+                return Fetched.unknown(f"claude:{e}")
+            print(f"  ⚠️  국적 배치 {i // BATCH + 1} 실패({e}) — 앞 배치 결과는 살린다")
+            break
+        for line in raw.splitlines():
+            parts = [x.strip() for x in line.strip().split("\t")]
+            v = next((x for x in parts[1:] if x in _NAT), None)       # 위치가 아니라 값으로 — judge_lines 와 같은 이유
+            if parts and parts[0] in lines and v and parts[0] not in out:
+                out[parts[0]] = v
+    return Fetched.measured(out, got=len(out))

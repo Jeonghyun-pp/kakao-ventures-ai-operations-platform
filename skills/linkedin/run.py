@@ -32,6 +32,7 @@ POSTED = "posted"          # 슬랙 스레드 답글로 올림 (사람별 ts)
 RESOLVED = "resolved"      # ✅ 를 받아 결론남
 OUTREACH = "outreach"      # 콜드 메시지 초안을 스레드에 올림
 PROMOTED = "promoted"      # 극초기 DB 로 승격
+SCREENED = "screened"      # 문안 단계 창업 판정 (brief.VERDICTS) — 카드·재고가 같이 본다
 
 # 🔴 극초기 DB — 쓰기 등록. **✅ 를 받은 사람만** 올라간다.
 #    노션 자동화는 체크 즉시 사람 이름을 `법인(서비스)` 칸에 복사했다(08-18 실측 24건).
@@ -112,11 +113,10 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
     today = ledger.today()
     print(f"▶ collect run={run_id}")
 
-    backlog = _backlog()
-    if not only_axis and backlog >= _cfg("backlog_cap"):
-        print(f"· 아직 안 나간 사람이 {backlog}명 (임계 {_cfg('backlog_cap')}) — 더 사지 않는다")
-        print(f"  하루 5명이면 {backlog // 5}일치다. 재고가 줄면 그때 산다")
-        return 0
+    # 🔴 [사용자 결정 2026-09-29] 재고가 많다고 안 사지 않는다. 08-24~09-28 매주 "재고 충분"으로 건너뛰는 사이
+    #    카드는 08-17 에 산 사람과 옛 시드만 돌렸고, 재직·창업 개월이 산 날에 멈춘 채 늙어 품질이 떨어졌다.
+    #    지출 상한은 축의 주기·페이지 수가 맡는다. 재고 수는 알려주기만 한다.
+    print(f"· 카드 재고 {_backlog()}명")
 
     # 🔴 `manual` 축은 정기 수집이 안 집는다 — 임시 조건이라 사람이 --axis 로 부를 때만 돈다.
     if only_axis and axes.AXES.get(only_axis, {}).get("parked"):
@@ -125,7 +125,8 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
         print("   되살리려면 axes.py 의 `parked` 를 지워라. 지우기 전에 저 숫자를 반박하라")
         return 2
     targets = ([only_axis] if only_axis else
-               [a for a in axes.AXES if not axes.AXES[a].get("manual") and _due(a, today)])
+               [a for a in axes.AXES if not axes.AXES[a].get("manual") and not axes.AXES[a].get("parked")
+                and _due(a, today)])
     if not targets:
         print("· 이번 주 차례인 축이 없다")
         return 0
@@ -163,6 +164,7 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
     unknowns: list[tuple[str, str]] = []
     for a, n, start in plan:
         total = None                       # 이 축의 모수 (첫 페이지가 알려준다)
+        reached = start                    # 실제로 산(또는 오늘 이미 산) 마지막 페이지 다음
         for i in range(n):
             page, got = start + i, {}
 
@@ -174,10 +176,13 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
             if "f" not in got:                                      # dry(문이 slack 이하) 또는 오늘 이미 산 페이지
                 if st == "dry":
                     print(f"  · {a}/p{page} 구매 dry — 문이 {g.level()} 이다")
+                else:
+                    reached = page + 1
                 continue
             if st != "done":
                 unknowns.append((f"{a}/p{page}", got["f"].reason))
                 break                       # 이 축은 중단, 다음 축으로
+            reached = page + 1
             items = got["f"].require()
             # 🔴 모수는 **이미 산 페이지에 실려 온다**(`_meta.pagination`). 이걸 안 남기면
             #    "이 티어를 다 봤나"를 셀 수 없다 — next_page 만으론 분모가 없다.
@@ -198,24 +203,54 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
                     continue
                 fresh[ks[0]] = {**it, "_axis": a, "_keys": ks}
                 seen.update(ks)          # 같은 실행 안에서도 두 번 안 잡히게
-        # 커서 전진 — 착지 성공 여부와 무관하게 "여기까지 샀다"는 사실이다
+        # 커서 전진 — 착지 성공 여부와 무관하게 "여기까지 샀다"는 사실이다.
+        # 🔴 **실제로 산 데까지만** 민다. 09-29 s-stealth 15페이지 중 7번째에서 502 로 멈췄는데
+        #    커서가 start+n 으로 넘어가 못 산 9페이지(모수의 절반)를 영영 건너뛸 뻔했다.
         ledger.append(TASK, a, AXIS_EV, ran_on=today,
-                      next_page=(1 if axes.AXES[a]["rewind"] else start + n), run=run_id,
-                      total=total, seen_pages=start + n - 1)
+                      next_page=(1 if axes.AXES[a]["rewind"] else reached), run=run_id,
+                      total=total, seen_pages=reached - 1)
 
     if unknowns:
         print(f"🔴 미상 {len(unknowns)}건")
         for t, why in unknowns[:5]:
             print(f"    {t}: {why[:80]}")
+    # ---- Legacy (2026-09-28·29 · 사용자 결정): 국적·나이로 대상이 아닌 사람은 Tier 판정 없이
+    #      Status=Legacy 로 착지한다 — 재고엔 안 들어가고, 장부에 landed 로 남아 다시 처리되지 않는다.
+    # 🔴 액터에 국적·나이 필터가 없다 — 사는 것까지는 못 막는다. 대신 판정 호출과 카드로는 안 흘린다.
+    legacy: dict[str, tuple[dict, str]] = {}
+    for k, v in fresh.items():
+        age = profile.estimated_age(v)
+        if age is not None and age > axes.MAX_AGE:
+            legacy[k] = (v, f"추정 {axes.MAX_AGE + 1}세 이상")
+    ask = {k: v for k, v in fresh.items() if k not in legacy and not axes.nationality_exempt(v["_axis"])}
+    if ask:
+        nf = judge.nationality({k: judge.nationality_line(k, *profile.nationality_input(v)) for k, v in ask.items()})
+        nat = nf.require() if nf.is_measured else {}
+        if not nf.is_measured:
+            print(f"  ⚠️  국적 판정 실패({nf.reason}) — 아무도 안 뺀다. card 에서 걸리지도 않는다(태그가 없다)")
+        elif len(nat) < len(ask):
+            print(f"  ⚠️  국적 판정 누락 {len(ask) - len(nat)}명 — 한국인으로 둔다")
+        for k, v in ask.items():
+            if nat.get(k) == judge.FOREIGN:
+                legacy[k] = (v, judge.FOREIGN)
+    for k, (v, why) in legacy.items():
+        fresh.pop(k)
+        tag = f"{v['_axis']}/Legacy:{why}"
+        rejected[tag] = rejected.get(tag, 0) + 1
+
     if rejected:
         n_rej = sum(rejected.values())
         print(f"· 사후 조건에 걸린 사람 {n_rej}명 — **이미 낸 돈이다**")
         for k, c in sorted(rejected.items(), key=lambda x: -x[1]):
             print(f"    {k:34} {c}")
         ledger.append(TASK, "-", "post_filtered", n=n_rej, by_reason=rejected, run=run_id)
-    print(f"· 산 사람 {bought}명 · 처음 보는 사람 {len(fresh)}명 (오늘 지출 ${apify.spent_today():.2f})")
+    print(f"· 산 사람 {bought}명 · 처음 보는 사람 {len(fresh) + len(legacy)}명 · 그중 Legacy {len(legacy)} "
+          f"(오늘 지출 ${apify.spent_today():.2f})")
+    n_legacy, legacy_failed = _land_legacy(g, legacy, run_id)
     if not fresh:
         _report()
+        if legacy_failed:
+            raise Degraded(f"Legacy 착지실패 {legacy_failed}")
         return 2 if unknowns else 0
 
     # ---- 판정 (배치 1회)
@@ -260,11 +295,30 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
             ledger.append(TASK, k, MEETING, page_id=page_id, axis=item["_axis"])
         landed += 1
 
-    print(f"· 착지 {landed} · 실패 {failed}")
+    print(f"· 착지 {landed} · 실패 {failed} · Legacy {n_legacy}")
     _report()
-    if unknowns or failed or unjudged:
-        raise Degraded(f"미상 {len(unknowns)} · 착지실패 {failed} · 판정누락 {len(unjudged)}")
+    if unknowns or failed or unjudged or legacy_failed:
+        raise Degraded(f"미상 {len(unknowns)} · 착지실패 {failed + legacy_failed} · 판정누락 {len(unjudged)}")
     return 0
+
+
+LEGACY = "Legacy"       # 노션 Status — 재고가 아니다. 사람이 Status 를 바꾸면 다시 재고가 된다
+
+
+def _land_legacy(g: Gate, legacy: dict[str, tuple[dict, str]], run_id: str) -> tuple[int, int]:
+    """Tier 판정 없이 Status=Legacy 로 착지 → 장부 landed. (착지 수, 실패 수)."""
+    ok = bad = 0
+    for k, (item, why) in legacy.items():
+        props = {**_props(item, {"verdict": None, "reason": f"Legacy: {why}"}, run_id), "Status": LEGACY}
+        st = g.out(k, "land", {"tier": None, "axis": item["_axis"], "legacy": why},
+                   lambda props=props: notion.create(DB, props).require())
+        if st != "done":
+            bad += st == "failed"
+            continue
+        ledger.append(TASK, k, ledger.LANDED, page_id=g.row(k, "land")["result"], run=run_id,
+                      keys=item.get("_keys") or [k], axis=item["_axis"], legacy=why, name=_summary(item)["name"])
+        ok += 1
+    return ok, bad
 
 
 def _summary(item: dict) -> dict:
@@ -276,6 +330,7 @@ def _summary(item: dict) -> dict:
         "gap": profile.gap_months(item),
         "undergrad": profile.undergrad_start_year(item),
         "ft_gap": profile.fulltime_gap_months(item),
+        "age": profile.estimated_age(item),
         "kr": profile.korea_signals(item),
         "company_url": profile.company_url(item),
         "company": " · ".join(dict.fromkeys(p["company"] for p in s["positions"] if p["company"])),
@@ -309,6 +364,7 @@ def _props(item: dict, v: dict, run_id: str) -> dict:
         # 🔴 본업 공백은 공백 개월과 **다른 값**이다. 파트타임 자문만 걸어둔 사람은
         #    공백 0 인데 본업 공백 6 이 나온다 — EIR 처럼 창업 준비 중인 사람이 그 모양이다
         "본업 공백": s["ft_gap"],
+        "추정 나이": s["age"],
         "Korea Signal": [x for x in s["kr"] if x in notion.allowed_options(
             notion.writable_id(DB), "Korea Signal")],
         "Homepage": s["company_url"] or None,      # 노션 `회사` formula 가 이걸 파싱한다
@@ -327,7 +383,62 @@ def _props(item: dict, v: dict, run_id: str) -> dict:
 
 # ---------------------------------------------------------------- card
 
-def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
+def _to_legacy(items: list[tuple[dict, str]], already: int, *, record: bool) -> None:
+    """노션 Status=Legacy 로 바꾼다. dry 면 세기만. 실패한 행은 다음 실행에서 다시 걸린다(같은 판정이라)."""
+    by: dict[str, int] = {}
+    for _, why in items:
+        by[why] = by.get(why, 0) + 1
+    print(f"· Legacy 기존 {already}명 · 이번에 보냄 {len(items)}명"
+          + (" — " + " · ".join(f"{w} {c}" for w, c in sorted(by.items(), key=lambda x: -x[1])) if by else "")
+          + ("" if record or not items else " (dry — 노션 안 씀)"))
+    if not record:
+        return
+    for live, why in items:
+        f = notion.update(live["_page_id"], DB, {"Status": LEGACY})
+        if not f.is_measured:
+            print(f"  🔴 {live.get('서비스명')} Legacy 전환 실패: {f.reason}")
+
+
+def _screened() -> dict[str, dict]:
+    """page_id → 마지막 창업 판정 {verdict, company, brief}."""
+    return {r["page_id"]: r for r in ledger.rows(TASK, ev=SCREENED) if r.get("page_id")}
+
+
+def _card_input(k: str, live: dict) -> dict:
+    # 🔴 One Liner 를 그대로 안 쓴다. 실측 2~95자에 '--'·'CEO' 같은 것도 있었고,
+    #    사람이 매번 다시 썼다. claude 가 두 문장과 회사명을 한 번에 만든다.
+    return {"key": k, "name": live.get("서비스명"), "company": live.get("회사"),
+            "one_liner": live.get("One Liner"), "headline": live.get("Author Headline"),
+            "about": live.get("Raw Text"), "reason": live.get("AI Reason"),
+            "founding": live.get("창업 개월")}
+
+
+def _screen(pool: list, need: int, screened: dict, *, record: bool) -> str:
+    """판정 없는 사람을 풀 앞에서부터 문안에 넣는다 — 통과자가 `need` 명 모이거나 풀이 끝날 때까지.
+    `screened` 를 제자리에서 채운다. `record` 면 장부에도(dry 면 안 쓴다). 실패하면 이유를, 아니면 "".
+
+    🔴 판정과 문안을 한 호출로 받는다 — 통과자의 문안은 장부에 있어 올릴 때 다시 부르지 않는다.
+    """
+    ok = sum(1 for t in pool if screened.get(t[2]["_page_id"], {}).get("verdict") in brief.PASS)
+    todo = [t for t in pool if t[2]["_page_id"] not in screened]
+    step = max(need * 2, 10)
+    while ok < need and todo:
+        chunk, todo = todo[:step], todo[step:]
+        b = brief.write([_card_input(k, live) for _, k, live in chunk])
+        if not b.is_measured:
+            return b.reason
+        by_key = {k: live for _, k, live in chunk}
+        for x in b.require():
+            pid = by_key[x["key"]]["_page_id"]
+            rec = {"verdict": x["verdict"], "company": x["company"], "brief": x["brief"]}
+            screened[pid] = rec
+            if record:
+                ledger.append(TASK, x["key"], SCREENED, page_id=pid, **rec)
+            ok += x["verdict"] in brief.PASS
+    return ""
+
+
+def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_only: bool = False) -> int:
     """🔴 노션에서 Tier 를 다시 읽는다 — 사람이 고친 게 여기서 반영된다.
 
     🔴 후보는 **노션 행**에서 뽑는다(장부가 아니라). 장부 landed 1,857행 중 1,234행은
@@ -335,7 +446,8 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
        **카드에 영원히 안 나온다**(2026-08-19 실측: 1티어 115명 중 96명이 그 상태였다).
        Tier 도 어차피 노션에서 다시 읽으므로, 후보의 정본도 노션인 게 맞다.
     """
-    g = gate or _gate(dry_run)
+    # screen_only: 판정만 장부에 남기고 올리지 않는다 — 문은 off(슬랙·알림 0), 장부는 쓴다
+    g = gate or _gate(dry_run or screen_only)
     if g.level() != "off" and date.today().weekday() >= 5:        # ponytail: 요일은 닫힌 집합(월~금) — 설정으로 빼지 않는다 [사용자 결정 2026-09-25]
         print("· 주말이라 카드를 쏘지 않는다")
         return 0
@@ -347,7 +459,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
                       "회사", "창업 개월", "Raw Text", "AI Reason", "Homepage", "Axis",
                       "Match Reason", "타깃", "DB로 업데이트",
                       # 카드 필터가 쓰는 칸 — 없으면 조용히 빈칸이라 전원이 통과한다
-                      "Tenure Months", "공백 개월", "본업 공백"])
+                      "Tenure Months", "공백 개월", "본업 공백", "Korea Signal", "추정 나이", "Status", "Captured At"])
     if not f.is_measured:
         print(f"🔴 노션을 못 읽었다: {f.reason}")
         return 1
@@ -378,28 +490,40 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
     key_of_page = {r["page_id"]: r["key"] for r in ledger.rows(TASK, ev=ledger.LANDED)
                    if r.get("page_id")}
 
+    screened = _screened()
     pool = []
     seen_before: dict[str, int] = {}     # 이미 본 사람 (중복 방지)
     filtered: dict[str, int] = {}        # 기준에 안 맞는 사람 (판정)
+    to_legacy: list[tuple[dict, str]] = []   # 이번에 Legacy 로 보낼 사람 (record 일 때만 노션에 쓴다)
+    n_legacy = 0
     for live in rows:
         pid = live["_page_id"]
         if pid in posted_pages:
             continue
-        if live.get("Tier") not in _cfg("card_tiers"):
+        if live.get("Status") == LEGACY:
+            n_legacy += 1
             continue
-        # 🔴 [사용자 결정 2026-09-01 · 시니어 기준] 수집 축과 같은 기준을 여기서도 건다.
-        #    안 걸면 옛 기준으로 사온 사람이 새 기준인 척 나간다.
-        bad = axes.card_reject(live)
-        if bad:
-            filtered[bad] = filtered.get(bad, 0) + 1
-            continue
+        # 사람이 이미 손댄 행은 재고도 Legacy 도 아니다 — 건드리지 않고 센다
         url_key = profile.normalize_url(str(live.get("LinkedIn URL") or ""))
         why = ("극초기 DB 에 이미 있음" if url_key and url_key in early else
                "DB로 업데이트 ✅" if live.get("DB로 업데이트") else
-               "타깃 ✅" if live.get("타깃") else "")
+               "타깃 ✅" if live.get("타깃") else
+               f"Status {live.get('Status')}" if live.get("Status") not in (None, "New") else "")
         if why:
             # 조용히 빼지 않는다 — 몇 명이 왜 빠졌는지 화면에 남긴다
             seen_before[why] = seen_before.get(why, 0) + 1
+            continue
+        if live.get("Tier") not in _cfg("card_tiers"):
+            continue
+        # 🔴 [사용자 결정 2026-09-29] 카드 기준에 안 맞으면 **전부** Legacy 다.
+        #    노션 행의 재직·공백·창업 개월은 산 날 값이고 아무도 다시 안 잰다(옛 재검토 시스템은 09-26 제거).
+        #    장부에 landed 라 다시 사지도 않는다 → 지금 안 맞으면 영영 안 맞는다. 재고로 세면 거짓 재고다.
+        #    기준 자체는 [2026-09-01 시니어 기준] — 수집 축과 같은 기준을 여기서도 건다.
+        why = axes.legacy_reason(live) or (
+            "비창업(문안 판정)" if screened.get(pid, {}).get("verdict") == brief.NOT_FOUNDER else "") or axes.card_reject(live)
+        if why:
+            to_legacy.append((live, why))
+            filtered[why] = filtered.get(why, 0) + 1
             continue
         k = key_of_page.get(pid) or url_key
         if not k or k in carded_keys:
@@ -409,8 +533,30 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
         print(f"· 기준에 안 맞아 뺐다 — {why}: {cnt}명")
     for why, cnt in sorted(seen_before.items(), key=lambda x: -x[1]):
         print(f"· 이미 본 사람이라 뺐다 — {why}: {cnt}명")
-    pool.sort()
+    # 등급 순, 같은 등급 안에서는 **최근에 산 사람부터** — 재직·창업 개월은 산 날 값이라 오래될수록 틀린다
+    pool.sort(key=lambda t: str(t[2].get("Captured At") or ""), reverse=True)
+    pool.sort(key=lambda t: t[0])
     warn_d = constraints.get("linkedin.stock_warn_days")
+    record = screen_only or g.level() != "off"
+    # 🔴 [사용자 결정 2026-09-29] 창업자가 아니면 안 올린다. 판정은 문안을 쓰는 claude 가 한다 —
+    #    직함 목록(Founder OR "Building something new" OR …)은 다음 표현에서 새고,
+    #    "기존 회사 대표 승계"처럼 직함으로는 원리상 안 갈리는 경우가 있다(09-29 Founder B).
+    if pool:
+        why = _screen(pool, n, screened, record=record)
+        if why:
+            print(f"🔴 문안 생성 실패: {why}")
+            return 1
+        drop = [t for t in pool if screened.get(t[2]["_page_id"], {}).get("verdict") == brief.NOT_FOUNDER]
+        if drop:
+            print(f"· 오늘 판정에서 창업자 아님 {len(drop)}명 — 뺐다")
+            for _, _, live in drop:
+                print(f"    {live.get('서비스명')}: {screened[live['_page_id']]['brief'][:70]}")
+                to_legacy.append((live, "비창업(문안 판정)"))
+            pool = [t for t in pool if t not in drop]
+    _to_legacy(to_legacy, n_legacy, record=record)
+    if screen_only:
+        print(f"· 판정 끝 — 창업·준비 {len(pool)}명이 재고다")
+        return 0
     if not pool:
         print("· 올릴 수 있는 사람이 없다")
         # 🔴 재고 소진은 **정상 완료가 아니다.** 전에는 여기서 return 0 이라 크론엔
@@ -423,7 +569,11 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
         #    card() 가 이미 정확한 문구로 알렸으니 바깥에서 또 보내면 두 번이 된다.
         daily_report(g, pool=0, picked=0)
         return 4
-    pick = pool[:n]
+    # 판정을 못 받은 사람은 오늘 안 올린다 — 다음 실행에서 다시 판정한다
+    pick = [t for t in pool if t[2]["_page_id"] in screened][:n]
+    if not pick:
+        print("  ⚠️  문안을 받은 사람이 없다 (다음 실행에서 재시도)")
+        return 2
     left_n = len(pool) - len(pick)
     left_d = (left_n + n - 1) // n
     print(f"▶ card — 올릴 수 있는 것 {len(pool)} · 오늘 {len(pick)} "
@@ -431,26 +581,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None) -> int:
     if left_d <= warn_d and g.level() != "off":
         _alert("card", f"남은 사람 {left_n}명 — {left_d}일치다. 바닥나기 전에 기준을 손봐야 한다.",
                key="card:low", head="🟡 *linkedin card* 재고 부족")
-
-    # 🔴 One Liner 를 그대로 안 쓴다. 실측 2~95자에 '--'·'CEO' 같은 것도 있었고,
-    #    사람이 매번 다시 썼다. claude 가 두 문장과 회사명을 한 번에 만든다.
-    cards = [{"key": k, "name": live.get("서비스명"), "company": live.get("회사"),
-              "one_liner": live.get("One Liner"), "headline": live.get("Author Headline"),
-              "about": live.get("Raw Text"), "reason": live.get("AI Reason"),
-              "founding": live.get("창업 개월")}
-             for _, k, live in pick]
-    b = brief.write(cards)
-    if not b.is_measured:
-        print(f"🔴 문안 생성 실패: {b.reason}")
-        return 1
-    bmap = {x["key"]: x for x in b.require()}
-    missing = [k for _, k, _ in pick if k not in bmap]
-    if missing:
-        # 조용히 빼지 않는다. 문안을 못 받은 사람은 이번에 안 올리고 다음에 다시 시도한다.
-        print(f"  ⚠️  문안을 못 받은 {len(missing)}명은 이번에 안 올린다 (다음 실행에서 재시도)")
-        pick = [t for t in pick if t[1] in bmap]
-        if not pick:
-            return 2
+    bmap = {k: screened[live["_page_id"]] for _, k, live in pick}
 
     lines = [f"*오늘의 링크드인 {len(pick)}명*"]
     for _, k, live in pick:
@@ -790,11 +921,12 @@ def _backlog() -> int:
     f = notion.query(notion.writable_id(DB),
                      ["LinkedIn URL", "Tier", "Author Headline", "회사", "One Liner",
                       "Raw Text", "서비스명", "타깃", "DB로 업데이트",
-                      "Tenure Months", "공백 개월", "본업 공백"])
+                      "Tenure Months", "공백 개월", "본업 공백", "Korea Signal", "추정 나이", "Status", "Captured At"])
     if not f.is_measured:
         print(f"  ⚠️  재고를 노션으로 못 셌다({f.reason}) — 장부로 센다")
         return _backlog_from_ledger()
     posted_pages = {r["page_id"] for r in ledger.rows(TASK, ev=POSTED) if r.get("page_id")}
+    screened = _screened()
     n = 0
     for live in f.require():
         if live["_page_id"] in posted_pages:
@@ -803,7 +935,9 @@ def _backlog() -> int:
             continue
         if live.get("Tier") not in _cfg("card_tiers"):
             continue
-        if axes.card_reject(live):
+        if live.get("Status") not in (None, "New") or axes.card_reject(live):      # Legacy · 사람이 손댄 Status 는 재고가 아니다
+            continue
+        if screened.get(live["_page_id"], {}).get("verdict") == brief.NOT_FOUNDER:
             continue
         n += 1
     return n
@@ -901,6 +1035,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--dry-run", action="store_true")
     d = sub.add_parser("card"); d.add_argument("-n", type=int, default=5)
     d.add_argument("--dry-run", action="store_true")
+    sub.add_parser("screen", help="재고 전체를 창업 판정해 장부에 남긴다 (슬랙 0 · 노션 0) — 재고 수가 정확해진다")
     fu = sub.add_parser("followup", help="✅ 를 걷어 콜드 메시지 초안을 스레드에 올린다")
     fu.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
@@ -919,6 +1054,9 @@ def main(argv: list[str] | None = None) -> int:
             if rc and rc != 4 and not a.dry_run:
                 _alert("card", f"종료코드 {rc} — 카드가 다 못 나갔다")
             return rc
+        if a.cmd == "screen":
+            # card 의 거르기를 그대로 쓰고 올리지만 않는다: n = 재고 전부, 문은 off, 장부는 쓴다
+            return card(n=10_000, screen_only=True)
         if a.cmd == "followup":
             with lock.hold("linkedin-followup"):
                 rc = followup(dry_run=a.dry_run)
@@ -943,7 +1081,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if a.cmd == "status":
             print(ledger.summary(TASK))
-            print(f"  재고(아직 안 나간 사람) {_backlog()}명 / 임계 {_cfg('backlog_cap')}")
+            print(f"  재고(아직 안 나간 사람) {_backlog()}명")
             for ax in axes.AXES:
                 st = _axis_state(ax)
                 line = f"  {ax:22} 마지막 {st.get('ran_on', '-'):10} · 다음 p{_next_page(ax)}"
