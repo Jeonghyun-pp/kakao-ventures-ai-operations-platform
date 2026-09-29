@@ -51,7 +51,7 @@ class GateLevels(unittest.TestCase):
     def test_promote_is_dry_below_on(self):
         with Case(notion=Notion({run.DB: [row("p1")], run.EARLY: []}), slack=Slack({"par": [{"ts": "m1", "reactions": [YES]}]}),
                   cfg={"linkedin.outbound": "slack"},
-                  **{"outreach.write": lambda cards, who: Fetched.measured([{"key": c["key"], "short": "짧", "long": "길"} for c in cards])}) as c:
+                  **{"names.to_korean": lambda people: {p["key"]: ("김가람", "가람", True) for p in people}}) as c:
             posted()
             run.followup()
         self.assertEqual((c.acts()[("in/a", "outreach")], c.acts()[("in/a", "promote")]), ("done", "dry"))

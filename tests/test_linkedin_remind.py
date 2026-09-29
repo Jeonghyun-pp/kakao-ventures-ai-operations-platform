@@ -11,16 +11,16 @@ from tests._linkedin_fakes import Case, Slack
 TUE, THU = date.fromisoformat("2026-09-29"), date.fromisoformat("2026-10-01")
 
 
-def pressed(key="in/a", *, ts="2026-09-29T02:11:15Z", name="가람 김", who="Reviewer A", uid="U1", url="https://www.linkedin.com/in/a"):
+def pressed(key="in/a", *, ts="2026-09-29T02:11:15Z", name="가람 김", who="Reviewer A", uid="U1", url="https://www.linkedin.com/in/a", **more):
     ledger.append("linkedin", key, run.POSTED, ch="net", slack_ts="m1", parent="par", day="2026-09-28",
                   page_id="p1", name=name, company="Aco", brief="b", url=url)
-    extra = {"uid": uid} if uid else {}
+    extra = {**({"uid": uid} if uid else {}), **more}
     ledger.append("linkedin", key, run.RESOLVED, ts=ts, by="reaction_yes", who=who, name=name, **extra)
 
 
 def case(today, ko=None):
     return Case(slack=Slack(), today=today,
-                **{"names.to_korean": lambda people: {p["key"]: (ko or {}).get(p["key"], ("김가람", True)) for p in people}})
+                **{"names.to_korean": lambda people: {p["key"]: (ko or {}).get(p["key"], ("김가람", "가람", True)) for p in people}})
 
 
 class Due(unittest.TestCase):
@@ -77,7 +77,7 @@ class Remind(unittest.TestCase):
         self.assertTrue(c.slack.posts[0][1].startswith("<@U1> "))
 
     def test_unsure_name_shows_original(self):
-        with case(THU, ko={"in/a": ("한상훈", False)}) as c:
+        with case(THU, ko={"in/a": ("한상훈", "상훈", False)}) as c:
             pressed(name="Minsoo Kim")
             run.remind()
         self.assertIn("한상훈", c.slack.posts[0][1])
@@ -97,19 +97,41 @@ class Remind(unittest.TestCase):
         self.assertIn("님께 연락 보내셔야 합니다", c.out.getvalue())
 
 
+class Template(unittest.TestCase):
+    def test_fills_both_slots_from_outreach_md(self):
+        from skills.linkedin import outreach
+        t = outreach.write("민수", "Reviewer B")
+        self.assertTrue(t.startswith("안녕하세요 민수님, 처음 인사드립니다.\n카카오벤처스 Reviewer B 심사역입니다."))
+        self.assertTrue(t.endswith("카카오벤처스 Reviewer B 드림"))
+
+    def test_broken_template_fails_loudly(self):
+        from unittest import mock
+        from skills.linkedin import outreach
+        with mock.patch.object(outreach, "_MD", mock.Mock(read_text=lambda **k: "```\n안녕하세요\n```")):
+            with self.assertRaises(ValueError):
+                outreach.write("a", "b")
+
+    def test_remind_reuses_name_chosen_at_press(self):
+        with case(THU, ko={"in/a": ("다른이름", "이름", True)}) as c:
+            pressed(name_ko="김가람", name_sure=True)
+            run.remind()
+        self.assertIn("|김가람>", c.slack.posts[0][1])
+
+
 class Names(unittest.TestCase):
     def test_rule_handles_hangul_without_model(self):
-        self.assertEqual(names._rule("가람 김"), ("김가람", True))
-        self.assertEqual(names._rule("최 가람"), ("최가람", True))
-        self.assertEqual(names._rule("김가람"), ("김가람", True))
-        self.assertEqual(names._rule("민수 남궁")[1], False)
+        self.assertEqual(names._rule("가람 김"), ("김가람", "가람", True))
+        self.assertEqual(names._rule("최 가람"), ("최가람", "가람", True))
+        self.assertEqual(names._rule("김가람"), ("김가람", "가람", True))
+        self.assertEqual(names._rule("남궁민수"), ("남궁민수", "민수", True))
+        self.assertEqual(names._rule("민수 남궁")[2], False)
         self.assertIsNone(names._rule("Minsoo Kim"))
 
     def test_model_failure_falls_back_to_original(self):
         from unittest import mock
         with mock.patch.object(names.claude, "run_session", side_effect=names.claude.SessionError("x")):
             got = names.to_korean([{"key": "a", "name": "Minsoo Kim"}, {"key": "b", "name": "가람 김"}])
-        self.assertEqual(got, {"a": ("Minsoo Kim", False), "b": ("김가람", True)})
+        self.assertEqual(got, {"a": ("Minsoo Kim", "Minsoo", False), "b": ("김가람", "가람", True)})
 
 
 if __name__ == "__main__":

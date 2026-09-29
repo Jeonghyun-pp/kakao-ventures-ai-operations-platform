@@ -1,4 +1,4 @@
-"""followup() 의 현재 동작 — ✅ 를 걷어 초안을 스레드에 올리고, 7일 무반응은 만기."""
+"""followup() 의 현재 동작 — ✅ 를 걷어 연락 문안(outreach.md)을 스레드에 올리고, 7일 무반응은 만기."""
 from __future__ import annotations
 
 import unittest
@@ -18,7 +18,7 @@ def posted(key="in/a", *, day="2026-09-23", page="p1", old=False):
 def case(replies, **more):
     return Case(notion=Notion({run.DB: [row("p1")]}), slack=Slack(replies),
                 **{"_promote": lambda k, r, g=None: "created",
-                   "outreach.write": lambda cards, who: Fetched.measured([{"key": c["key"], "short": "짧", "long": "길"} for c in cards]),
+                   "names.to_korean": lambda people: {p["key"]: ("김가람", "가람", True) for p in people},
                    **more})
 
 
@@ -31,10 +31,14 @@ class Followup(unittest.TestCase):
         draft = [p for p in c.slack.posts if p[2] == "par"]
         self.assertEqual(len(draft), 1)
         self.assertIn("Reviewer A 심사역 이름", draft[0][1])
+        self.assertIn("안녕하세요 가람님, 처음 인사드립니다.", draft[0][1])      # 성 뺀 이름
+        self.assertIn("카카오벤처스 Reviewer A 드림", draft[0][1])                     # 누른 분 실명
+        self.assertNotIn("{", draft[0][1])                                        # 빈 칸이 남지 않는다
         self.assertEqual([(r["ev"], r.get("by")) for r in c.rows() if r["ev"] != "posted"],
                          [("outreach", "Reviewer A"), ("resolved", "reaction_yes")])
         self.assertEqual(c.rows("resolved")[0]["promoted"], "created")
         self.assertEqual(c.rows("resolved")[0]["uid"], "U1")      # 리마인드가 핑할 사람
+        self.assertEqual(c.rows("resolved")[0]["name_ko"], "김가람")  # 리마인드가 같은 이름을 쓴다
 
     def test_old_rows_with_slack_ts_in_ts_column_still_match(self):
         """09-25 전 장부 195줄은 슬랙 ts 가 `ts` 칸에 있다 — 읽기는 둘 다 본다."""

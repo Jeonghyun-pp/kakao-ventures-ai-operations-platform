@@ -1,10 +1,10 @@
 ---
 name: linkedin
-description: 링크드인에서 극초기 창업자를 주 1회 사서 Tier 를 판정하고 노션에 전량 착지, 평일마다 5명을 #그물망 카드로 올린다. ✅ 면 콜드 메시지 초안 + 극초기 승격. 메일과 같은 뼈대(문·판정 저장·보고서·health).
+description: 링크드인에서 극초기 창업자를 주 1회 사서 Tier 를 판정하고 노션에 전량 착지, 평일마다 5명을 #그물망 카드로 올린다. ✅ 면 연락 문안(Reviewer C 심사역 실무 문안) + 극초기 승격 + 2일 뒤 리마인드. 메일과 같은 뼈대(문·판정 저장·보고서·health).
 schedule:
   - { cmd: collect, when: "월 09:10", why: "이때만 돈이 나간다. 축별로 차례인 것만 돈다" }
   - { cmd: card,    when: "매일 11:00", why: "정현님이 훑은 결과가 반영된 뒤에 나간다. 평일만 — 주말엔 아무것도 안 한다" }
-  - { cmd: followup, when: "10분마다", why: "심사역이 언제 누를지 우리가 못 정한다. 누르고 10분 안에 초안이 뜬다" }
+  - { cmd: followup, when: "10분마다", why: "심사역이 언제 누를지 우리가 못 정한다. 누르고 10분 안에 문안이 뜬다" }
   - { cmd: remind,   when: "매일 10:00", why: "✅ 2일 뒤 누른 분을 핑. 주말·공휴일엔 코드가 쉰다 — 그날 몫은 다음 평일에 나간다" }
 ---
 
@@ -19,7 +19,7 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
   buy       Apify 구매(돈)               off·slack 이면 안 산다. 계획만 찍는다
   land      노션 착지                    〃 dry
   card      #그물망 카드(헤더+스레드)     slack 이상이면 나간다
-  outreach  ✅ 스레드에 콜드 메시지 초안   〃
+  outreach  ✅ 스레드에 연락 문안          〃
   remind    ✅ 2일 뒤 #그물망 본문에 핑     〃
   promote   극초기 DB 승격 + 링크드인 행 표시   on 이어야. linkedin.promote: false 면 "gated"
 ```
@@ -34,7 +34,7 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
                     → claude 50명 배치 판정 · **사람별 저장**(judgments: 모델이 본 줄·낸 줄·기준 해시) → 전량 노션 착지
 매일 11:00 card     평일만. 노션 Tier 되읽기(사람이 고친 것 = 정답으로 저장, label) → 아직 안 나간 사람 좋은 순 5명 → 헤더 + 사람별 스레드
                     → 하루 보고서(파일 + review_test 요약)
-10분마다  followup  ✅ → 누른 분 성함으로 콜드 메시지 초안(짧게·길게)을 스레드에 → 극초기 승격 · 7일 무반응은 만기(요일 안 봄)
+10분마다  followup  ✅ → outreach.md 문안에 {이름}(성 뺀 한글 이름)·{발신자}(누른 분) 채워 스레드에 → 극초기 승격 · 7일 무반응은 만기(요일 안 봄)
 매일 10:00 remind   ✅ 누른 날 + 2일(주말·공휴일이면 다음 평일, 목·금 → 월) → #그물망 본문에 "@누른분 김가람(회사) 님께 연락 보내셔야 합니다"
                     이름은 names.py 가 한글로(`가람 김` 는 규칙, 영문은 claude, 확신 없으면 원문 병기). 한 사람 한 번. [사용자 결정 2026-09-29]
 매일 12:55 ops health  평일에 오늘 보고서 파일이 없으면 review_test 에 한 줄 (skills/ops 가 여섯 스킬을 한 번에)
@@ -75,12 +75,12 @@ judge.py       판정 — 줄 단위(judge_lines). collect 와 replay 가 같은
 ../../kvlib/judgments.py   판정 저장 · label(노션 Tier) · replay · diff — 네 스킬 공용
 axes.py        수집 축(Apify 질의)과 사후 조건(reject) · 카드 기준(card_reject)
 profile.py     Apify 원본 → 키·경력·신호
-brief.py       카드 두 문장 + 회사명 (claude)     outreach.py  콜드 메시지 초안 (claude)
+brief.py       카드 두 문장 + 회사명 (claude)     outreach.py  연락 문안 채우기 (모델 없음, 원문 outreach.md)
 names.py       ✅ 리마인드에 쓸 한글 이름 (규칙 → claude)
 criteria.md    Tier 기준 — 사람이 깎는다
 ../../people.yaml   심사역 명부(슬랙 ID → 성함). 메일과 같은 파일
 ```
-`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · followup_days · stock_warn_days · connect_note_chars · outreach_batch. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
+`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · followup_days · stock_warn_days · outreach_batch · remind_*. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
 
 ## 알아둘 것 (지우지 않은 결정)
 

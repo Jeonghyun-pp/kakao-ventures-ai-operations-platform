@@ -615,7 +615,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
     posted = 0
     for (_, k, live), body in zip(pick, lines[1:]):
         st = g.out(k, "card", {"name": live.get("서비스명"), "tier": live.get("Tier"), "ch": ch},
-                   lambda body=body: slack.post(ch, body.strip() + "\n\n_✅ 를 누르면 콜드 메시지 초안을 만들어 올립니다_",
+                   lambda body=body: slack.post(ch, body.strip() + "\n\n_✅ 를 누르면 연락 문안을 올리고 2일 뒤 리마인드합니다_",
                                                 thread_ts=head_ts()).require())
         if st != "done" or "ts" not in parent:
             if st == "failed":
@@ -643,7 +643,7 @@ def _days_since(day: str) -> int:
 
 
 def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
-    """✅ 를 걷어 콜드 메시지 초안을 만들어 그 스레드에 올린다.
+    """✅ 를 걷어 연락 문안(outreach.md, Reviewer C 심사역 실무 문안)을 그 스레드에 올린다.
 
     🔴 사람이 보낸다. 심사역 개인 링크드인 계정으로 나가는 메시지라 우리가 못 보낸다 —
        글만 써서 올리고 복사해서 쓰시게 한다.
@@ -676,10 +676,10 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
         react = {m["ts"]: m.get("reactions") or [] for m in got.require()}
         for k, r in rows:
             mine = react.get(r.get("slack_ts") or r.get("ts"), [])     # 09-25 전 행은 슬랙 ts 가 `ts` 칸에 있다(기록 시각을 덮었다)
-            names = {x.get("name") for x in mine}
+            emojis = {x.get("name") for x in mine}
             users = [u for x in mine if x.get("name") in yes
                      for u in x.get("users", [])]
-            if names & yes:
+            if emojis & yes:
                 picked.append((k, r, users))
 
     # 🔴 만기. 없으면 ✅ 를 못 받은 사람이 **영원히** 대기줄에 남는다 —
@@ -730,26 +730,17 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
     print(f"  · ✅ {len(picked)}명 · 발신자 "
           + " · ".join(f"{w or '🔴 명단 밖'}({len(v)})" for w, v in groups.items()))
 
+    # 한글 이름 — 문안 인사(성 뺀 이름)와 리마인드(전체)가 같은 값을 쓴다. 장부에 남겨 리마인드가 다시 묻지 않는다
+    ko = names.to_korean([{"key": k, "name": r.get("name"), "headline": r.get("brief")} for k, r, _ in picked])
     done = 0
     for who, members in groups.items():
-        cards = _outreach_cards([r for _, r in members])
-        if not cards.is_measured:
-            fails.append(f"노션 읽기({who or '미상'}): {cards.reason}")
-            continue
-        msgs = outreach.write(cards.require(), who or "OOO")
-        if not msgs.is_measured:
-            fails.append(f"초안({who or '미상'}): {msgs.reason}")
-            continue
-        mmap = {m["key"]: m for m in msgs.require()}
         for k, r in members:
-            m = mmap.get(k)
-            if not m:
-                print(f"  ⚠️  {r.get('name')} 초안을 못 받았다 — 다음에 다시 시도한다")
-                continue
-            text = (f"*{r.get('name')}* 콜드 메시지 초안"
+            full, given, sure = ko[k]
+            orig = r.get("name") or ""
+            text = (f"*{full}* 연락 문안"
                     + (f" — {who} 심사역 이름" if who else " — 🔴 발신자 이름을 채워주세요")
-                    + f"\n\n*짧게 (연결 요청용)*\n{m['short']}"
-                    f"\n\n*길게 (이미 연결된 경우)*\n{m['long']}")
+                    + ("" if sure or full == orig else f"  _(원문 {orig} — 이름 확인)_")
+                    + f"\n```{outreach.write(given, who or 'OOO')}```")
             if dry:
                 print(f"\n--- {r.get('name')} ({who or '발신자 미상'}) ---\n{text}")
                 continue
@@ -761,10 +752,11 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
             ledger.append(TASK, k, OUTREACH, slack_ts=g.row(k, "outreach")["result"], by=who, name=r.get("name"))
             pr = _promote(k, r, g)
             ledger.append(TASK, k, RESOLVED, by="reaction_yes", who=who, name=r.get("name"),
-                          promoted=pr, uid=uids.get(k))     # uid: 리마인드가 핑할 사람
+                          promoted=pr, uid=uids.get(k),     # uid: 리마인드가 핑할 사람
+                          name_ko=full, name_sure=sure)
             done += 1
 
-    print(f"· 초안 {done}/{len(picked)}명 올림")
+    print(f"· 문안 {done}/{len(picked)}명 올림")
     for f in fails:
         print(f"  🔴 {f}")
     return 2 if (fails or done < len(picked)) else 0
@@ -811,12 +803,17 @@ def remind(*, dry_run: bool = False, gate: Gate | None = None) -> int:
         print("  · 오늘 보낼 사람 없음")
         return 0
 
-    ko = names.to_korean([{"key": r["key"], "name": r.get("name"), "headline": p.get("brief")} for r, p in due])
+    # 문안을 올릴 때 정한 이름을 그대로 쓴다(09-29 이후 행). 없으면 여기서 정한다
+    ko = names.to_korean([{"key": r["key"], "name": r.get("name"), "headline": p.get("brief")}
+                          for r, p in due if not r.get("name_ko")])
     by_name = {v: k for k, v in _reviewers().items()}           # 09-29 전 ✅ 행엔 uid 가 없다 — 성함으로 찾는다
     ch, fails, sent = _cfg("remind_channel"), [], 0
     for r, p in due:
         k, orig = r["key"], r.get("name") or ""
-        name, sure = ko[k]
+        if r.get("name_ko"):
+            name, sure = r["name_ko"], r.get("name_sure", False)
+        else:
+            name, _, sure = ko[k]
         uid = r.get("uid") or by_name.get(r.get("who") or "")
         co = p.get("company")
         co = "스텔스" if not co or co == brief.NO_COMPANY else co
@@ -965,23 +962,6 @@ def _promote(key: str, row: dict, gate: Gate | None = None) -> str:
     ledger.append(TASK, key, PROMOTED, result="created", page_id=gate.row(key, "promote")["result"], title=title)
     print(f"  · 극초기 승격: {title}")
     return "created"
-
-
-def _outreach_cards(rows: list[dict]) -> Fetched:
-    """초안에 쓸 재료를 노션에서 다시 읽는다 — 사람이 고쳤을 수 있다."""
-    f = notion.query(notion.writable_id(DB),
-                     ["서비스명", "One Liner", "Author Headline", "AI Reason", "판단 이유"])
-    if not f.is_measured:
-        return f
-    by_page = {r["_page_id"]: r for r in f.require()}
-    out = []
-    for r in rows:
-        live = by_page.get(r.get("page_id")) or {}
-        out.append({"key": r["key"], "name": live.get("서비스명") or r.get("name"),
-                    "one_liner": live.get("One Liner"),
-                    "headline": live.get("Author Headline"),
-                    "reason": live.get("AI Reason") or live.get("판단 이유")})
-    return Fetched.measured(out)
 
 
 def _backlog() -> int:
