@@ -21,7 +21,7 @@ import json
 
 from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, store, workday
 from kvlib.gate import Gate
-from kv_transport import itunes, notion, slack
+from kv_transport import claude, itunes, notion, slack
 
 from . import kr_origin
 
@@ -218,10 +218,12 @@ def collect(*, dry_run: bool = False, limit_genres: int | None = None,
     if limit:
         fresh = dict(list(fresh.items())[:limit])
         print(f"  (--limit {limit} — 앞의 {len(fresh)}개만 착지한다)")
+    liners = one_liners({aid: details[aid] for aid in fresh})
+    print(f"· 한 줄 요약 {len(liners)}/{len(fresh)} (나머지는 설명 원문 앞부분)")
     landed = failed = 0
     for aid, v in fresh.items():
         origin = origins.get(aid, ("unknown", ""))
-        props = _props(aid, v, details[aid], run_id, origin=origin)
+        props = _props(aid, v, details[aid], run_id, origin=origin, liner=liners.get(aid))
         st = g.out(aid, "land", {"name": details[aid]["name"], "origin": origin[0]}, lambda props=props: notion.create(DB, props).require())
         if st != "done":
             if st == "failed":
@@ -254,7 +256,51 @@ def _d(s: str) -> date:
     return datetime.strptime(s[:10], "%Y-%m-%d").date()
 
 
-def _props(aid: str, v: dict, d: dict, run_id: str, origin: tuple[str, str]) -> dict:
+# ---------------------------------------------------------------- 한 줄 요약
+
+_ONELINER_SYSTEM = (
+    "너는 벤처캐피털 심사역을 위해 앱스토어 앱을 한 줄로 소개한다. "
+    "앱 설명을 보고 '누구를 위해 무엇을 하는 서비스인지'를 40자 안팎 한 문장으로 쓴다. "
+    "설명에 없는 사실(팀·투자·지표)을 지어내지 말고, 홍보 문구·이모지·감탄을 옮기지 않는다. "
+    "요구된 형식만 출력한다."
+)
+_ONELINER_BATCH = 40          # claude 한 번에 넘기는 앱 수 — 출력 줄이 길어져 잘리는 것을 막는 선
+
+
+def one_liners(details: dict[str, dict]) -> dict[str, str]:
+    """앱스토어 설명 → '뭐하는 서비스인지' 한 줄(claude). 실패한 앱은 빠진다 — 호출부가 원문 앞부분으로 채운다.
+
+    심사역 피드백(9/30): 설명 앞 120자를 자른 것은 홍보 문구라 뭐하는 회사인지 안 보인다.
+    """
+    out: dict[str, str] = {}
+    ids = list(details)
+    for i in range(0, len(ids), _ONELINER_BATCH):
+        chunk = ids[i:i + _ONELINER_BATCH]
+        lines = []
+        for aid in chunk:
+            d = details[aid]
+            desc = " ".join((d.get("description") or "").split())[:600]
+            lines.append(f"{aid}\t{(d.get('name') or '').replace(chr(9), ' ')}\t{desc.replace(chr(9), ' ')}")
+        prompt = ("# 입력 (app_id · 앱 이름 · 설명[:600])\n" + "\n".join(lines)
+                  + f"\n\n# 출력 형식\n정확히 {len(chunk)}줄. 각 줄은 `app_id<TAB>한 줄 소개`. 머리말·꼬리말·코드펜스 금지.\n")
+        try:
+            raw = claude.run_session(prompt, system=_ONELINER_SYSTEM, tools="")      # 바깥 사람이 쓴 글을 읽힌다 — 도구 전부 끔
+        except claude.SessionError as e:
+            print(f"  ⚠️  한 줄 요약 실패({len(chunk)}개, 원문으로 채움): {e}")
+            continue
+        for line in raw.splitlines():
+            aid, _, text = line.strip().partition("\t")
+            if aid in chunk and text.strip():
+                out[aid] = text.strip()[:120]
+    return out
+
+
+def _fallback_liner(d: dict) -> str:
+    """요약이 없을 때 — 부제목, 없으면 설명 앞부분(줄바꿈은 공백으로)."""
+    return d.get("subtitle") or " ".join((d.get("description") or "").split())[:120]
+
+
+def _props(aid: str, v: dict, d: dict, run_id: str, origin: tuple[str, str], liner: str | None = None) -> dict:
     genre_name = itunes.GENRE_NAMES.get(v.get("genre"), "전체")
     chart_label = itunes.CHART_LABEL.get(v["chart"], v["chart"])
     entry = "new_release" if v["chart"] == "new" else "chart_new"
@@ -263,7 +309,7 @@ def _props(aid: str, v: dict, d: dict, run_id: str, origin: tuple[str, str]) -> 
         "서비스명": d["name"] or aid,
         "App ID": aid,
         "Developer": d["developer"],
-        "One Liner": d.get("subtitle") or (d.get("description") or "")[:120],
+        "One Liner": liner or _fallback_liner(d),
         "Raw Text": d.get("description") or "",
         "Release Date": d["released_at"],
         "Chart": chart_label,

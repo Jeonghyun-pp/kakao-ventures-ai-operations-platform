@@ -56,9 +56,10 @@ class Notion:
 
 
 class Case:
-    def __init__(self, apps, *, notion_rows=(), fail_charts=(), llm=None, dry=False):
+    def __init__(self, apps, *, notion_rows=(), fail_charts=(), llm=None, liners=None, dry=False):
         self.itunes, self.notion = Itunes(apps, fail_charts), Notion(notion_rows)
         self.llm = llm or (lambda unknowns, criteria=None: Fetched.measured([]))
+        self.liners = liners or (lambda details: {})
         self.out, self.posts, self.dry = io.StringIO(), [], dry
 
     def __enter__(self):
@@ -68,6 +69,7 @@ class Case:
         self._stack.enter_context(mock.patch.object(run, "itunes", self.itunes))
         self._stack.enter_context(mock.patch.object(run, "notion", self.notion))
         self._stack.enter_context(mock.patch.object(kr_origin, "llm_judge_origin", self.llm))
+        self._stack.enter_context(mock.patch.object(run, "one_liners", self.liners))
         self._stack.enter_context(mock.patch.object(run, "_GENRES", [6014]))                    # 장르 하나만 — 차트 4번
         self.db = sqlite3.connect(":memory:", isolation_level=None); self.db.executescript(judgments.SCHEMA)     # 자동 커밋 — store.connect 와 같게(열린 트랜잭션이 있으면 backup 이 멈춘다)
         self.gate = Gate(self.db, "appstore", force="off" if self.dry else None)

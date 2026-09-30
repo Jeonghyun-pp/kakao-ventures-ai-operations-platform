@@ -55,6 +55,13 @@ class Collect(unittest.TestCase):
             run.collect()
         self.assertEqual((seen, c.notion.created), ([["9"]], []))
 
+    def test_one_liner_is_summary_or_falls_back_to_description(self):
+        with Case([app("1"), app("2", desc="첫 줄\n둘째 줄 " * 30)], liners=lambda details: {"1": "요약된 한 줄"}) as c:
+            run.collect()
+        got = {p["App ID"]: p["One Liner"] for p in c.notion.created}
+        self.assertEqual(got["1"], "요약된 한 줄")
+        self.assertTrue(got["2"].startswith("첫 줄 둘째 줄") and "\n" not in got["2"])                # 요약 실패분은 원문(줄바꿈 없이)
+
     def test_dry_run_writes_nothing(self):
         with Case([app("1")], dry=True) as c:
             run.collect(dry_run=True)
