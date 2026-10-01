@@ -62,7 +62,7 @@ class Followup(unittest.TestCase):
 
     def test_recent_post_without_reaction_keeps_waiting(self):
         with case({"par": [{"ts": "m1", "reactions": []}]}) as c:
-            posted(day="2026-09-23")
+            posted(day=ledger.today())                      # 날짜를 박으면 followup_days 가 지난 날 시험이 거짓으로 깨진다(10/1 실측)
             self.assertEqual(run.followup(), 0)
         self.assertEqual([r["ev"] for r in c.rows()], ["posted"])
 

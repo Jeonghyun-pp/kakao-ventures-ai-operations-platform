@@ -356,6 +356,22 @@ def search_ids(q: str, *, limit: int = 500) -> Fetched:
     return Fetched.measured(ids[:limit], partial=truncated, truncated=truncated, limit=limit, q=q)
 
 
+def thread_tail(thread_id: str, msg_id: str) -> Fetched:
+    """그 메시지 **뒤에** 스레드에 붙은 메시지들 `[{id, labels}]`(초안 제외). 사람이 답장·전달했는지는 SENT 라벨로 본다(reconcile, 2026-10-01)."""
+    try:
+        res = _get(f"/threads/{thread_id}", params={"format": "minimal"})
+    except AuthDead as e:
+        return Fetched.unknown(f"auth_dead:{e}")
+    except GmailError as e:
+        return Fetched.unknown(f"gmail:{e}")
+    msgs = res.get("messages") or []
+    order = [m["id"] for m in msgs]
+    if msg_id not in order:
+        return Fetched.unknown(f"스레드에 그 메시지가 없다: {msg_id}")
+    return Fetched.measured([{"id": m["id"], "labels": m.get("labelIds") or []} for m in msgs[order.index(msg_id) + 1:]
+                             if "DRAFT" not in (m.get("labelIds") or [])])
+
+
 def headers_of(msg_id: str, names: list[str]) -> Fetched:
     """헤더 몇 개만(metadata). 본문을 안 받는다 — 제목만 필요할 때 full 은 낭비다."""
     try:

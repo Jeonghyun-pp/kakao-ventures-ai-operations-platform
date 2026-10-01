@@ -381,6 +381,18 @@ def main(a) -> int:
               + (f" | 정답 {len(lab)}통 중 일치 {a.a}={sum(r['a'] == r['human'] for r in lab)}"
                  f" · {a.b}={sum(r['b'] == r['human'] for r in lab)}" if lab else ""))
         return 0
+    if a.op == "reconcile":                                      # 사람이 메일함에서 한 일 → 정답. 메일함엔 안 쓴다
+        from . import reconcile
+        rows = reconcile.scan(con, gmail)
+        n = reconcile.apply(con, rows, lambda mid, cat, why: (con.execute("DELETE FROM judgments WHERE message_id=? AND run=?", (mid, HUMAN)),
+                                                               _save(con, mid, HUMAN, "", "", "", {"ok": 1, "category": cat, "reason": why, "followup": None}))) if a.apply else 0
+        out = paths.data("mail", "reports") / f"{ledger.today()}-reconcile.md"
+        out.write_text(reconcile.report(rows), encoding="utf-8")
+        print(reconcile.report(rows).split("\n")[0] + f"\n  정답으로 적음 {n}{'' if a.apply else ' (--apply 없음: 보고만)'} · 전체 {out}")
+        for r in rows:
+            if r["verdict"] == "ask":
+                print(f"  ❓ {r['subject'][:55]:55} | 모델 {r['category']:13} | 사람 {r['human']} ({r['why']})")
+        return 0
     if a.op == "label":
         if a.category not in rules.JUDGE_CATEGORIES:
             print(f"🔴 카테고리 어휘에 없다: {a.category}  ({', '.join(rules.JUDGE_CATEGORIES)})")
