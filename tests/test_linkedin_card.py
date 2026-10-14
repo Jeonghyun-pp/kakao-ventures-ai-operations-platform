@@ -29,7 +29,9 @@ class Card(unittest.TestCase):
         net = [p for p in c.slack.posts if p[0] == "net"]
         self.assertEqual([p[2] for p in net], [None, net[0] and "ts-2", "ts-2"])          # 헤더 + 스레드 답글 2 (앞의 test 채널 글은 재고 경고)
         self.assertIn("이름p2", net[1][1])                                                 # Catch 먼저
-        self.assertIn("이름p3", net[2][1])
+        self.assertIn("이름p1", net[2][1])                                                 # 마지막 1장은 탐색 — 판정 하위(Wait)에서
+        self.assertEqual([r.get("explore") for r in c.rows("posted")], [None, True])        # 장부에만 표시
+        self.assertIn("❌ 이번엔 관심 없음", net[1][1])
         self.assertEqual([r["ev"] for r in c.rows()], ["screened"] * 3 + ["alerted", "carded", "posted", "carded", "posted"])   # 판정이 먼저 장부에
         self.assertEqual(c.rows("posted")[0]["slack_ts"], "ts-3")                           # 슬랙 ts 는 제 칸에 — 장부 ts 는 기록 시각
         self.assertTrue(c.rows("posted")[0]["ts"].endswith("Z"))
@@ -160,6 +162,40 @@ class Founder(unittest.TestCase):
             run.card(n=1)
         names = [p[1] for p in c.slack.posts if p[0] == "net" and p[2]]
         self.assertIn("이름p2", names[0])
+
+    def test_no_explore_without_low_tiers(self):
+        rows = [row("p1", "https://www.linkedin.com/in/a"), row("p2", "https://www.linkedin.com/in/b", "Trend")]
+        with case(rows) as c:
+            run.card(n=2)
+        self.assertEqual([r.get("explore") for r in c.rows("posted")], [None, None])
+
+    def test_resurfaced_person_comes_back_with_change_line(self):
+        """❌·무반응으로 끝난 사람도 recheck 가 회사·직함 변화를 찾으면 다시 후보 — 창업 판정도 다시 받는다."""
+        rows = [row("p1", "https://www.linkedin.com/in/a", "Wait")]
+        with case(rows) as c:
+            ledger.append("linkedin", "in/a", run.SCREENED, ts="2026-09-01T00:00:00Z", page_id="p1", verdict="비창업", company="X", brief="old")
+            ledger.append("linkedin", "in/a", run.CARDED, ts="2026-09-01T02:00:00Z")
+            ledger.append("linkedin", "in/a", run.POSTED, ts="2026-09-01T02:00:00Z", page_id="p1", parent="x", slack_ts="t", ch="net", day="2026-09-01")
+            ledger.append("linkedin", "in/a", run.RESOLVED, ts="2026-09-08T02:00:00Z", by="reaction_no")
+            ledger.append("linkedin", "in/a", run.RESURFACED, ts="2026-10-12T01:00:00Z", page_id="p1", old="Stealth · CEO", new="Aco · CEO")
+            run.card(n=1)
+        body = [p[1] for p in c.slack.posts if p[0] == "net" and p[2]]
+        self.assertEqual(len(body), 1)
+        self.assertIn("🔄 다시 올림 · Stealth · CEO → Aco · CEO", body[0])
+        self.assertIn("소개 이름p1", body[0])                                              # 새 판정의 문안(옛 '비창업' 판정은 무효)
+        self.assertEqual(c.rows("posted")[-1]["gk"], "in/a@2026-10-12")
+
+    def test_labels_are_reactions_not_notion_tier(self):
+        rows = [row("p1", "https://www.linkedin.com/in/a", "Catch"), row("p2", "https://www.linkedin.com/in/b")]
+        with case(rows) as c:
+            c.db.execute("INSERT INTO judgments(key,run,verdict,ok,page_id,input_text) VALUES('in/a','live','Catch',1,'p1','line')")
+            ledger.append("linkedin", "in/a", run.POSTED, page_id="p1", parent="x", slack_ts="t", ch="net", day="2026-09-01", name="에이")
+            ledger.append("linkedin", "in/a", run.RESOLVED, by="reaction_no")
+            run.card(n=1)
+            rep = (c.data / "linkedin" / "reports" / f"{ledger.today()}.md").read_text()
+        self.assertEqual(c.db.execute("SELECT verdict, reason FROM judgments WHERE run='human'").fetchall(), [("no", "슬랙 반응")])
+        self.assertIn("에이 — 판정 Catch · 반응 **❌**", rep)
+        self.assertNotIn("노션에서 사람이 고친 Tier", rep)
 
     def test_dry_run_does_not_record(self):
         with case(self.rows()) as c:

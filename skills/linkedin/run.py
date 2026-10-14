@@ -30,11 +30,15 @@ AXIS_EV = "axis"        # 커서·주기 기록
 CARDED = "carded"
 MEETING = "meeting_candidate"
 POSTED = "posted"          # 슬랙 스레드 답글로 올림 (사람별 ts)
-RESOLVED = "resolved"      # ✅ 를 받아 결론남
+RESOLVED = "resolved"      # 카드의 결론. by = reaction_yes(✅) · reaction_no(❌ 만) · expiry(무반응)
 OUTREACH = "outreach"      # 콜드 메시지 초안을 스레드에 올림
 REMINDED = "reminded"      # ✅ N일 뒤 누른 분에게 "연락하세요" 핑
 PROMOTED = "promoted"      # 극초기 DB 로 승격
 SCREENED = "screened"      # 문안 단계 창업 판정 (brief.VERDICTS) — 카드·재고가 같이 본다
+SNAPSHOT = "reaction_snapshot"   # 결론과 별도로 다시 읽은 반응(소급·learn). 정답 접기가 본다
+SWEPT = "late_swept"       # 늦은 반응 훑기를 한 날 — 하루 한 번
+CHECKED = "checked"        # recheck 가 프로필을 다시 긁음 (지문·변화 여부)
+RESURFACED = "resurfaced"  # recheck 에서 회사·직함이 바뀌어 다시 재고로 — 이 뒤로는 다시 카드에 오를 수 있다
 
 # 🔴 극초기 DB — 쓰기 등록. **✅ 를 받은 사람만** 올라간다.
 #    노션 자동화는 체크 즉시 사람 이름을 `법인(서비스)` 칸에 복사했다(08-18 실측 24건).
@@ -77,6 +81,72 @@ def _reviewers() -> dict[str, str]:
 
 
 _ORDER = {t: i for i, t in enumerate(judge.TIERS)}      # 좋은 순
+EXPLORE_FROM = _ORDER["Wait"]
+# 카드 안내. ❌ 는 영구가 아니다 — 프로필이 바뀌면 recheck 가 다시 올린다 [사용자 결정 2026-10-14]
+CARD_FOOTER = "_✅ 연락하겠다 → 연락 문안 + 2일 뒤 리마인드 · ❌ 이번엔 관심 없음 (프로필이 바뀌면 다시 올라옵니다)_"                            # 탐색 카드는 이 등급부터 아래에서 — 판정 하위가 맞는지 재는 유일한 길
+
+
+# ---------------------------------------------------------------- 카드의 생애 (장부를 접는다)
+
+def _last(ev: str, field: str = "key") -> dict[str, dict]:
+    """field(key·page_id) → 그 이벤트의 마지막 줄."""
+    out: dict[str, dict] = {}
+    for r in ledger.rows(TASK, ev=ev):
+        if r.get(field):
+            out[r[field]] = r
+    return out
+
+
+def _resurfaced_open() -> dict[str, dict]:
+    """다시 올라와 아직 안 나간 page_id → 그 resurfaced 줄. 마지막 resurfaced 가 마지막 posted 보다 뒤인 것.
+    🔴 ❌ 는 영구가 아니다 [사용자 결정 2026-10-14]. 프로필이 바뀌면(recheck) 한 번 나간 사람도 다시 후보다."""
+    posted = _last(POSTED, "page_id")
+    return {pid: r for pid, r in _last(RESURFACED, "page_id").items()
+            if r["ts"] > posted.get(pid, {}).get("ts", "")}
+
+
+def _open_posts() -> dict[str, dict]:
+    """결론이 안 난 카드 — 키마다 마지막 posted 가 마지막 resolved 보다 뒤.
+    🔴 키 차집합(posted − resolved)이면 한 번 결론 난 사람은 다시 올려도 반응을 영영 못 읽는다.
+       09-25 전 행은 `ts` 칸에 슬랙 ts(숫자)가 있어 ISO 시각보다 작게 비교된다 — 결론이 있으면 닫힌 쪽으로 간다."""
+    res = _last(RESOLVED)
+    return {k: r for k, r in _last(POSTED).items() if r["ts"] > res.get(k, {}).get("ts", "")}
+
+
+def _pressers(reactions: list[dict], vocab: str) -> list[str]:
+    """그 어휘(slack.reaction_yes·reaction_no)로 누른 사람들 — 슬랙이 준 순서(먼저 누른 분 먼저)."""
+    names_ = set(constraints.get(f"slack.{vocab}"))
+    return [u for x in reactions if x.get("name") in names_ for u in x.get("users", [])]
+
+
+def _reaction_labels() -> dict[str, dict]:
+    """키 → {label: yes|no, page_id, ts, explore}. **정답은 심사역의 반응이다** [사용자 결정 2026-10-14].
+    노션 Tier 는 AI 가 쓴 값이라 정답이 아니다(판정끼리 맞대면 437/437 일치 — 10/13 보고서).
+    결론(resolved)과 따로 다시 읽은 반응(snapshot)을 시간순으로 접는다. 나중 값이 이긴다 — 단 '반응 없음'은 덮지 않는다.
+    무반응(expiry)은 정답이 아니다 — 안 본 것과 보고 거른 것은 다르다."""
+    posted = _last(POSTED)
+    evs = sorted(ledger.rows(TASK, ev=RESOLVED) + ledger.rows(TASK, ev=SNAPSHOT), key=lambda r: r["ts"])
+    out: dict[str, dict] = {}
+    for r in evs:
+        if r["ev"] == RESOLVED:
+            lab = {"reaction_yes": "yes", "reaction_no": "no"}.get(r.get("by"))
+        else:
+            lab = "yes" if r.get("yes_by") else "no" if r.get("no_by") else None
+        p = posted.get(r["key"])
+        if lab and p:
+            out[r["key"]] = {"label": lab, "page_id": p.get("page_id"), "ts": r["ts"], "explore": bool(p.get("explore"))}
+    return out
+
+
+def _bucket(tier: str | None) -> str:
+    """판정 → 정답 어휘. Catch = 올림(yes), 나머지 = 아님(no). criteria.md 가 Catch 를 "✅ 받을 사람"으로 정의한다."""
+    return "yes" if tier == "Catch" else "no"
+
+
+def _sync_labels(con) -> int:
+    """반응 정답 → judgments(human). card 가 매일 부른다. 돌려주는 값 = 판정과 갈린 수."""
+    rows = [{"_page_id": v["page_id"], "반응": v["label"]} for v in _reaction_labels().values() if v["page_id"]]
+    return judgments.label(con, rows, "반응", source="슬랙 반응", same=lambda live, human: _bucket(live) == human)
 
 
 class Degraded(RuntimeError):
@@ -402,8 +472,15 @@ def _to_legacy(items: list[tuple[dict, str]], already: int, *, record: bool) -> 
 
 
 def _screened() -> dict[str, dict]:
-    """page_id → 마지막 창업 판정 {verdict, company, brief}."""
-    return {r["page_id"]: r for r in ledger.rows(TASK, ev=SCREENED) if r.get("page_id")}
+    """page_id → 마지막 창업 판정 {verdict, company, brief}.
+    🔴 다시 올라온(resurfaced) 사람은 그 뒤의 판정만 — 회사·직함이 바뀌었으니 창업 여부도 문안도 다시 쓴다."""
+    resurf = _last(RESURFACED, "page_id")
+    return {pid: r for pid, r in _last(SCREENED, "page_id").items() if r["ts"] > resurf.get(pid, {}).get("ts", "")}
+
+
+def _fresh(live: dict) -> str:
+    """정렬 날짜 = 값을 마지막으로 잰 날. 산 날(Captured At)이거나 recheck 로 다시 긁은 날(Last Checked) 중 늦은 쪽."""
+    return max(str(live.get("Captured At") or ""), str(live.get("Last Checked") or ""))
 
 
 def _card_input(k: str, live: dict) -> dict:
@@ -461,14 +538,16 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
                       "회사", "창업 개월", "Raw Text", "AI Reason", "Homepage", "Axis",
                       "Match Reason", "타깃", "DB로 업데이트",
                       # 카드 필터가 쓰는 칸 — 없으면 조용히 빈칸이라 전원이 통과한다
-                      "Tenure Months", "공백 개월", "본업 공백", "Korea Signal", "추정 나이", "Status", "Captured At"])
+                      "Tenure Months", "공백 개월", "본업 공백", "Korea Signal", "추정 나이", "Status", "Captured At",
+                      "Last Checked"])
     if not f.is_measured:
         print(f"🔴 노션을 못 읽었다: {f.reason}")
         return 1
     rows = f.require()
-    n_human = judgments.label(g.con, rows, "Tier")                           # 노션에서 고쳐진 Tier 가 곧 정답 — 매일 여기서 동기화
-    if n_human:
-        print(f"· 사람이 노션에서 고친 Tier {n_human}명 — judgments(human) 에 반영")
+    if not screen_only:
+        n_off = _sync_labels(g.con)                                          # 정답 = 슬랙 반응 — 매일 여기서 동기화
+        if n_off:
+            print(f"· 판정과 반응이 갈린 사람 {n_off}명 — judgments(human) 에 반영")
 
     # 🔴 **이미 본 사람은 안 쏜다.** 카드는 "새로 볼 사람"을 올리는 자리다.
     #    ① 극초기 DB 에 이미 있는 사람 — `링크` 칸이 링크드인 프로필 URL 이다(803/1,303행)
@@ -487,7 +566,9 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
     # 이미 나간 사람 — page_id(POSTED 가 남긴다)와 키(CARDED) 둘 다로 막는다.
     # 🔴 하나만 쓰면 안 된다: 같은 사람이 URN 키로 카드가 나갔는데 이번엔 URL 키로
     #    잡히면 **두 번 나간다**. 두 키 공간은 원래 안 만난다.
-    posted_pages = {r["page_id"] for r in ledger.rows(TASK, ev=POSTED) if r.get("page_id")}
+    # 🔴 다시 올라온 사람(recheck — 회사·직함이 바뀜)은 한 번 나갔어도 다시 후보다. 그 카드의 문 키는 따로 둔다(gk).
+    reopen = _resurfaced_open()
+    posted_pages = {r["page_id"] for r in ledger.rows(TASK, ev=POSTED) if r.get("page_id")} - set(reopen)
     carded_keys = ledger.keys(TASK, CARDED)
     key_of_page = {r["page_id"]: r["key"] for r in ledger.rows(TASK, ev=ledger.LANDED)
                    if r.get("page_id")}
@@ -528,23 +609,29 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
             filtered[why] = filtered.get(why, 0) + 1
             continue
         k = key_of_page.get(pid) or url_key
-        if not k or k in carded_keys:
+        if not k or (k in carded_keys and pid not in reopen):
             continue
         pool.append((_ORDER.get(live.get("Tier"), 9), k, live))
     for why, cnt in sorted(filtered.items(), key=lambda x: -x[1]):
         print(f"· 기준에 안 맞아 뺐다 — {why}: {cnt}명")
     for why, cnt in sorted(seen_before.items(), key=lambda x: -x[1]):
         print(f"· 이미 본 사람이라 뺐다 — {why}: {cnt}명")
-    # 등급 순, 같은 등급 안에서는 **최근에 산 사람부터** — 재직·창업 개월은 산 날 값이라 오래될수록 틀린다
-    pool.sort(key=lambda t: str(t[2].get("Captured At") or ""), reverse=True)
+    # 등급 순, 같은 등급 안에서는 **최근에 잰 사람부터** — 재직·창업 개월은 잰 날 값이라 오래될수록 틀린다
+    pool.sort(key=lambda t: _fresh(t[2]), reverse=True)
     pool.sort(key=lambda t: t[0])
     warn_d = constraints.get("linkedin.stock_warn_days")
     record = screen_only or g.level() != "off"
     # 🔴 [사용자 결정 2026-09-29] 창업자가 아니면 안 올린다. 판정은 문안을 쓰는 claude 가 한다 —
     #    직함 목록(Founder OR "Building something new" OR …)은 다음 표현에서 새고,
     #    "기존 회사 대표 승계"처럼 직함으로는 원리상 안 갈리는 경우가 있다(09-29 Founder B).
+    # 🔴 탐색 카드 [사용자 결정 2026-10-14] — 하루 n장 중 1장은 판정 하위(Wait·Cut)에서. 위만 올리면 위만 정답을 받아
+    #    "하위 판정이 맞았나"를 영영 모른다. 카드 모양은 같다 — 표시하면 반응이 치우친다. 장부 posted 에만 explore.
+    explore = n > 1 and not screen_only and any(t[0] >= EXPLORE_FROM for t in pool)
     if pool:
-        why = _screen(pool, n, screened, record=record)
+        why = _screen(pool, n - 1 if explore else n, screened, record=record)
+        if not why and explore:
+            why = _screen(sorted((t for t in pool if t[0] >= EXPLORE_FROM), key=lambda t: _fresh(t[2]), reverse=True),
+                          1, screened, record=record)
         if why:
             print(f"🔴 문안 생성 실패: {why}")
             return 1
@@ -572,7 +659,11 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
         daily_report(g, pool=0, picked=0)
         return 4
     # 판정을 못 받은 사람은 오늘 안 올린다 — 다음 실행에서 다시 판정한다
-    pick = [t for t in pool if t[2]["_page_id"] in screened][:n]
+    ready = [t for t in pool if t[2]["_page_id"] in screened]
+    pick = ready[:n - 1] if explore else ready[:n]
+    low = sorted((t for t in ready if t[0] >= EXPLORE_FROM and t not in pick), key=lambda t: _fresh(t[2]), reverse=True)
+    probe = low[0][1] if explore and low else None
+    pick = pick + low[:1] if probe else ready[:n]
     if not pick:
         print("  ⚠️  문안을 받은 사람이 없다 (다음 실행에서 재시도)")
         return 2
@@ -589,9 +680,11 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
     for _, k, live in pick:
         m = bmap[k]
         co = m["company"] if m["company"] != brief.NO_COMPANY else "스텔스"
+        rs = reopen.get(live["_page_id"])
         lines.append(
             f"\n*{live.get('서비스명')}*  {co}  ·  창업 {live.get('창업 개월') or '?'}개월차\n"
-            f"{m['brief']}\n"
+            + (f"🔄 다시 올림 · {rs.get('old') or '?'} → {rs.get('new') or '?'}\n" if rs else "")
+            + f"{m['brief']}\n"
             f"<{live.get('LinkedIn URL')}|링크드인> · "
             f"<https://www.notion.so/{str(live['_page_id']).replace('-', '')}|노션>"
         )
@@ -614,16 +707,19 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
 
     posted = 0
     for (_, k, live), body in zip(pick, lines[1:]):
-        st = g.out(k, "card", {"name": live.get("서비스명"), "tier": live.get("Tier"), "ch": ch},
-                   lambda body=body: slack.post(ch, body.strip() + "\n\n_✅ 를 누르면 연락 문안을 올리고 2일 뒤 리마인드합니다_",
-                                                thread_ts=head_ts()).require())
+        # 문(gate)은 (키, 종류)마다 한 번이다 — 다시 올린 카드는 resurfaced 날짜를 붙인 키로 한 번 더 열린다
+        rs = reopen.get(live["_page_id"])
+        gk = f"{k}@{rs['ts'][:10]}" if rs else k
+        st = g.out(gk, "card", {"name": live.get("서비스명"), "tier": live.get("Tier"), "ch": ch},
+                   lambda body=body: slack.post(ch, body.strip() + "\n\n" + CARD_FOOTER, thread_ts=head_ts()).require())
         if st != "done" or "ts" not in parent:
             if st == "failed":
-                print(f"  🔴 {live.get('서비스명')} 답글 실패: {g.row(k, 'card')['error']}")
+                print(f"  🔴 {live.get('서비스명')} 답글 실패: {g.row(gk, 'card')['error']}")
             continue
         # 착지 먼저, 장부 나중. ts 를 못 남기면 반응을 영영 못 찾는다.
         ledger.append(TASK, k, CARDED)
-        ledger.append(TASK, k, POSTED, ch=ch, slack_ts=g.row(k, "card")["result"], parent=parent["ts"],
+        ledger.append(TASK, k, POSTED, ch=ch, slack_ts=g.row(gk, "card")["result"], parent=parent["ts"],
+                      **({"gk": gk} if rs else {}), **({"explore": True} if k == probe else {}),
                       day=ledger.today(), page_id=live["_page_id"],
                       name=live.get("서비스명"),
                       # 🔴 claude 가 찾은 회사명. 극초기 승격의 title 이 된다 —
@@ -642,6 +738,19 @@ def _days_since(day: str) -> int:
     return (date.fromisoformat(ledger.today()) - date.fromisoformat(day)).days
 
 
+def _swept_today() -> bool:
+    return any(r.get("day") == ledger.today() for r in ledger.rows(TASK, ev=SWEPT))
+
+
+def _late_posts(open_posts: dict) -> dict[str, dict]:
+    """결론이 ❌·무반응인데 최근 `learn_weeks` 주 안에 올린 카드 — 늦게 붙은 반응을 찾을 대상. ✅ 로 끝난 건 이미 답이 났다."""
+    since = (date.fromisoformat(ledger.today()) - timedelta(weeks=_cfg("learn_weeks"))).isoformat()
+    res = _last(RESOLVED)
+    return {k: {**r, "_res": res[k]} for k, r in _last(POSTED).items()
+            if k not in open_posts and k in res and res[k].get("by") in ("expiry", "reaction_no")
+            and (r.get("day") or "") >= since and r.get("parent")}
+
+
 def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
     """✅ 를 걷어 연락 문안(outreach.md, Reviewer C 심사역 실무 문안)을 그 스레드에 올린다.
 
@@ -651,22 +760,21 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
     print("▶ followup")
     g = gate or _gate(dry_run)
     dry = g.level() == "off"
-    open_posts = {r["key"]: r for r in ledger.rows(TASK, ev=POSTED)}
-    for r in ledger.rows(TASK, ev=RESOLVED):
-        open_posts.pop(r["key"], None)
-    if not open_posts:
+    open_posts = _open_posts()
+    # 🔴 늦은 반응 [사용자 결정 2026-10-14] — 심사역이 바빠 7일 뒤에 누르기도 한다. 만기된 카드도 최근 N주는
+    #    하루 한 번 다시 읽는다. 늦은 ✅ 는 제때 ✅ 와 똑같이 문안·승격·리마인드, 늦은 ❌ 는 정답만 고친다.
+    late = {} if dry or _swept_today() else _late_posts(open_posts)
+    if not open_posts and not late:
         print("  · 기다리는 건이 없다")
         return 0
-    print(f"  · 반응을 기다리는 사람 {len(open_posts)}명")
-
-    yes = set(constraints.get("slack.reaction_yes"))
+    print(f"  · 반응을 기다리는 사람 {len(open_posts)}명" + (f" · 늦은 반응 훑기 {len(late)}명" if late else ""))
 
     # 🔴 스레드별로 한 번만 부른다. 사람마다 부르면 5명이면 5번이다.
     by_parent: dict[str, list] = {}
-    for k, r in open_posts.items():
+    for k, r in [*open_posts.items(), *late.items()]:
         by_parent.setdefault(r["parent"], []).append((k, r))
 
-    picked, fails, read_ok = [], [], set()
+    picked, fails, read_ok, no_of = [], [], set(), {}
     for parent, rows in by_parent.items():
         got = slack.replies(rows[0][1]["ch"], parent)
         if not got.is_measured:
@@ -676,11 +784,10 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
         react = {m["ts"]: m.get("reactions") or [] for m in got.require()}
         for k, r in rows:
             mine = react.get(r.get("slack_ts") or r.get("ts"), [])     # 09-25 전 행은 슬랙 ts 가 `ts` 칸에 있다(기록 시각을 덮었다)
-            emojis = {x.get("name") for x in mine}
-            users = [u for x in mine if x.get("name") in yes
-                     for u in x.get("users", [])]
-            if emojis & yes:
-                picked.append((k, r, users))
+            yes_by, no_of[k] = _pressers(mine, "reaction_yes"), _pressers(mine, "reaction_no")
+            # ✅ 와 ❌ 가 같이 있으면 ✅ — 연락은 누른 분 개인 계정으로 나가고, 관심 있는 사람을 놓치는 쪽이 더 비싸다
+            if yes_by:
+                picked.append((k, r, yes_by))
 
     # 🔴 만기. 없으면 ✅ 를 못 받은 사람이 **영원히** 대기줄에 남는다 —
     #    실측 08-31: 31명이 그렇게 쌓여 followup 로그가 83KB 가 됐고, 10분마다
@@ -688,23 +795,34 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
     #    10명이 3일 안이라, 7일이면 사실상 답이 나온 것이다.
     #    🔴 **읽기에 성공한 스레드만** 만기시킨다. 못 읽은 걸 만기시키면 망 오류
     #       한 번에 사람이 조용히 사라진다 — 메일에서 이미 겪은 자리다.
+    #    ❌ 만 있으면 닫지 않고 기다린다(다른 분이 ✅ 를 누를 수 있다). 7일째 결론은 ❌ 가 있으면 reaction_no — 보고 거른 것,
+    #    없으면 expiry — 안 본 것. 둘은 다르다: 앞의 것만 정답이다.
     due_d = constraints.get("linkedin.followup_days")
     picked_keys = {k for k, _, _ in picked}
-    expired = 0
+    expired = refused = 0
     for k, r in open_posts.items():
         if k in picked_keys or r.get("parent") not in read_ok:
             continue
         if _days_since(r.get("day") or ledger.today()) < due_d:
             continue
+        by = "reaction_no" if no_of.get(k) else "expiry"
         if not dry:
-            ledger.append(TASK, k, RESOLVED, by="expiry", name=r.get("name"),
+            ledger.append(TASK, k, RESOLVED, by=by, no_by=no_of.get(k) or [], name=r.get("name"),
                           slack_ts=r.get("slack_ts") or r.get("ts"), ch=r.get("ch"))
-        expired += 1
-    if expired:
-        print(f"  · ⏰ {due_d}일 무반응 {expired}명 대기 해제 (노션·인박스는 그대로)")
+        refused += by == "reaction_no"
+        expired += by == "expiry"
+    if expired or refused:
+        print(f"  · ⏰ {due_d}일 결론 — ❌ {refused}명 · 무반응 {expired}명 (노션·인박스는 그대로)")
+    # 늦은 ❌ — 무반응으로 닫힌 카드에 나중에 ❌ 가 붙었다. 정답만 고친다(보고 거른 것)
+    for k, r in late.items():
+        if k not in picked_keys and no_of.get(k) and r["_res"].get("by") == "expiry" and r.get("parent") in read_ok:
+            ledger.append(TASK, k, RESOLVED, by="reaction_no", no_by=no_of[k], late=True, name=r.get("name"),
+                          slack_ts=r.get("slack_ts") or r.get("ts"), ch=r.get("ch"))
+    if late and all(r.get("parent") in read_ok for r in late.values()):
+        ledger.append(TASK, "-", SWEPT, day=ledger.today(), n=len(late))
 
     if not picked:
-        print(f"  · ✅ 없음 (대기 {len(open_posts) - expired}명)")
+        print(f"  · ✅ 없음 (대기 {len(open_posts) - expired - refused}명)")
         return 1 if fails else 0
 
     # 🔴 발신자는 **사람마다** 정한다. 한 배치에 한 명으로 정하면, 같은 10분 안에 두 분이
@@ -744,16 +862,17 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
             if dry:
                 print(f"\n--- {r.get('name')} ({who or '발신자 미상'}) ---\n{text}")
                 continue
-            st = g.out(k, "outreach", {"who": who, "name": r.get("name")},
+            gk = r.get("gk") or k                                   # 다시 올린 카드는 문 키가 다르다(card 와 같은 값)
+            st = g.out(gk, "outreach", {"who": who, "name": r.get("name")},
                        lambda r=r, text=text: slack.post(r["ch"], text, thread_ts=r["parent"]).require())
             if st != "done":
-                fails.append(f"post {k}: {(g.row(k, 'outreach') or {}).get('error', st)}")
+                fails.append(f"post {k}: {(g.row(gk, 'outreach') or {}).get('error', st)}")
                 continue
-            ledger.append(TASK, k, OUTREACH, slack_ts=g.row(k, "outreach")["result"], by=who, name=r.get("name"))
+            ledger.append(TASK, k, OUTREACH, slack_ts=g.row(gk, "outreach")["result"], by=who, name=r.get("name"))
             pr = _promote(k, r, g)
             ledger.append(TASK, k, RESOLVED, by="reaction_yes", who=who, name=r.get("name"),
                           promoted=pr, uid=uids.get(k),     # uid: 리마인드가 핑할 사람
-                          name_ko=full, name_sure=sure)
+                          name_ko=full, name_sure=sure, no_by=no_of.get(k) or [], late=k in late)
             done += 1
 
     print(f"· 문안 {done}/{len(picked)}명 올림")
@@ -978,7 +1097,7 @@ def _backlog() -> int:
     if not f.is_measured:
         print(f"  ⚠️  재고를 노션으로 못 셌다({f.reason}) — 장부로 센다")
         return _backlog_from_ledger()
-    posted_pages = {r["page_id"] for r in ledger.rows(TASK, ev=POSTED) if r.get("page_id")}
+    posted_pages = {r["page_id"] for r in ledger.rows(TASK, ev=POSTED) if r.get("page_id")} - set(_resurfaced_open())
     screened = _screened()
     n = 0
     for live in f.require():
@@ -1050,8 +1169,22 @@ def _send(ch: str, text: str) -> str:
     return slack.post(ch, text).require()
 
 
+def _reaction_week() -> dict:
+    """지난 7일에 결론 난 카드 — ✅·❌·무반응·본 비율, 탐색 카드, 판정↔반응 갈림. 보고서가 쓴다."""
+    since = ledger.now(timedelta(days=7))
+    posted = _last(POSTED)
+    res = [r for r in _last(RESOLVED).values() if r["ts"] >= since]
+    by = {b: sum(1 for r in res if r.get("by") == b) for b in ("reaction_yes", "reaction_no", "expiry")}
+    seen = by["reaction_yes"] + by["reaction_no"]
+    exp = [r for r in res if posted.get(r["key"], {}).get("explore")]
+    return {**by, "n": len(res), "seen_rate": seen / len(res) if res else None,
+            "explore": (sum(r.get("by") == "reaction_yes" for r in exp), len(exp)),
+            "late": sum(1 for r in res if r.get("late"))}
+
+
 def daily_report(g: Gate, *, pool: int, picked: int) -> None:
-    """하루 한 번(평일 · card 뒤) 파일 + 슬랙 요약. 먼저 볼 것 = **노션에서 사람이 고친 Tier**(정답 ↔ 판정 갈림) — 기준을 깎을 재료다."""
+    """하루 한 번(평일 · card 뒤) 파일 + 슬랙 요약. 먼저 볼 것 = **심사역 반응**(정답)과 판정이 갈린 사람 — 기준을 깎을 재료다.
+    🔴 노션 Tier 를 정답으로 대던 절(🚩)은 지웠다 — AI 가 쓴 값을 AI 판정과 맞대 437/437 일치만 찍었다(10/13)."""
     out = paths.data("linkedin", "reports") / f"{ledger.today()}.md"
     if out.exists():
         return
@@ -1060,23 +1193,32 @@ def daily_report(g: Gate, *, pool: int, picked: int) -> None:
            for ev in ("landed", "carded", "outreach", "resolved", "promoted")}
     week = ledger.now(timedelta(days=7))
     dist = dict(g.con.execute("SELECT verdict, count(*) FROM judgments WHERE run='live' AND ok=1 AND created>=? GROUP BY verdict", (week,)))
-    human = g.con.execute("SELECT h.key, l.verdict, h.verdict FROM judgments h JOIN judgments l ON l.key=h.key AND l.run='live'"
-                          " WHERE h.run='human' ORDER BY h.created DESC").fetchall()
+    rw = _reaction_week()
+    names_ = {r["key"]: r.get("name") or r["key"] for r in ledger.rows(TASK, ev=POSTED)}
+    off = [(k, a, b) for k, a, b in g.con.execute(
+        "SELECT h.key, l.verdict, h.verdict FROM judgments h JOIN judgments l ON l.key=h.key AND l.run='live'"
+        " WHERE h.run='human' AND h.reason='슬랙 반응' AND h.created>=? ORDER BY h.created DESC", (week,)) if _bucket(a) != b]
     acts = dict(g.con.execute("SELECT kind||':'||status, count(*) FROM actions WHERE created>=? GROUP BY 1", (today,)))
-    head = (f"카드 {picked}명 · 재고 {pool}명({pool // 5}일치) · ✅ 초안 {day['outreach']} · 승격 {day['promoted']} · 만기/결론 {day['resolved']}"
+    seen = f"{rw['seen_rate']:.0%}" if rw["seen_rate"] is not None else "-"
+    head = (f"카드 {picked}명 · 재고 {pool}명({pool // 5}일치) · ✅ 초안 {day['outreach']} · 승격 {day['promoted']}"
+            + f" · 지난 7일 결론 {rw['n']}명(✅ {rw['reaction_yes']} · ❌ {rw['reaction_no']} · 무반응 {rw['expiry']} · 본 비율 {seen})"
             + (f" · 이번 주 판정 {sum(dist.values())}명" if dist else ""))
     md = [f"# 링크드인 하루 보고 — {today}", "", head, "",
-          "## 🚩 노션에서 사람이 고친 Tier (정답 ↔ 판정)", ""]
-    md += [f"- `{k}` 판정 {a} → 정답 **{b}**" for k, a, b in human] or ["없음 — 갈린 게 없으면 기준이 맞거나 아직 안 봤다"]
-    md += ["", "## 이번 주 판정 분포", "", " · ".join(f"{t} {n}" for t, n in sorted(dist.items(), key=lambda x: -x[1])) or "없음",
+          "## 🚩 판정과 반응이 갈린 사람 (지난 7일)", "",
+          "판정 Catch 인데 ❌ · 판정 Catch 아닌데 ✅ — 기준이 틀린 자리다. 무반응은 정답이 아니라 여기 없다.", ""]
+    md += [f"- {names_.get(k, k)} — 판정 {a} · 반응 **{'✅' if b == 'yes' else '❌'}**" for k, a, b in off] or ["없음"]
+    md += ["", "## 반응", "",
+           f"- 탐색 카드(판정 하위에서 1장): ✅ {rw['explore'][0]} / 결론 {rw['explore'][1]} — 하위 판정이 놓친 비율",
+           f"- 7일 뒤 늦게 누른 반응: {rw['late']}건 (늦은 ✅ 는 문안·리마인드가 자동으로 나갔다)",
+           "", "## 이번 주 판정 분포", "", " · ".join(f"{t} {n}" for t, n in sorted(dist.items(), key=lambda x: -x[1])) or "없음",
            "", "## 오늘 문(actions)", "", " · ".join(f"{k} {v}" for k, v in sorted(acts.items())) or "없음",
            "", "## 고치는 법", "", "```bash", "cd ~/kv",
-           "# 기준을 고친다: skills/linkedin/criteria.md → 저장된 사람으로 다시 판정 → 무엇이 달라졌나",
+           "# 기준을 고친다: skills/linkedin/criteria.md → 저장된 사람으로 다시 판정 → 반응(정답)과 맞대기",
            "./.venv/bin/python -m skills.linkedin.run replay [--limit 50]",
            "./.venv/bin/python -m skills.linkedin.run diff --b r-<sha>",
-           "# 정답은 노션 Tier 칸을 고치면 된다 — 다음 card 가 human 으로 가져간다", "```", ""]
+           "# 정답은 심사역의 ✅·❌ 다 — 사람이 따로 달 것이 없다", "```", ""]
     out.write_text("\n".join(md), encoding="utf-8")
-    summary = f"*링크드인 하루* — {head}" + (f"\n🚩 노션에서 고친 Tier {len(human)}명" if human else "") + f"\n전체: `{out}`"
+    summary = f"*링크드인 하루* — {head}" + (f"\n🚩 판정과 반응이 갈린 사람 {len(off)}명" if off else "") + f"\n전체: `{out}`"
     print(f"· 보고서 {out} | 슬랙 {report.daily('linkedin', summary, _send)}")
 
 
@@ -1097,7 +1239,7 @@ def main(argv: list[str] | None = None) -> int:
     rp = sub.add_parser("replay", help="고친 기준으로 저장된 사람을 다시 판정 (돈 0 · 노션 0)")
     rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
     df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
-    sub.add_parser("label", help="노션 Tier 를 읽어 live 와 다른 사람을 human 으로")
+    sub.add_parser("label", help="슬랙 반응(✅·❌)을 정답(human)으로 — card 가 매일 하지만 손으로도")
     a = p.parse_args(argv)
     try:
         if a.cmd == "collect":
@@ -1131,14 +1273,11 @@ def main(argv: list[str] | None = None) -> int:
                   + f"\n  다음: linkedin diff --b {r['run']}")
             return 0
         if a.cmd == "diff":
-            print(judgments.diff_text(judgments.diff(_gate().con, a.a, a.b), a.a, a.b, unit="명"))
+            # 정답(반응) 어휘에 맞춰 Tier 를 yes/no 로 묶는다 — 갈림·일치는 그 기준. 원래 Tier 는 raw 로
+            print(judgments.diff_text(judgments.diff(_gate().con, a.a, a.b, bucket=_bucket), a.a, a.b, unit="명"))
             return 0
         if a.cmd == "label":
-            f = notion.query(notion.writable_id(DB), ["Tier"])
-            if not f.is_measured:
-                print(f"🔴 노션을 못 읽었다: {f.reason}")
-                return 1
-            print(f"· 노션 Tier 가 live 와 다른 사람 {judgments.label(_gate().con, f.require(), "Tier")}명 → human")
+            print(f"· 판정과 반응이 갈린 사람 {_sync_labels(_gate().con)}명 → human (정답 = 슬랙 ✅·❌)")
             return 0
         if a.cmd == "status":
             print(ledger.summary(TASK))

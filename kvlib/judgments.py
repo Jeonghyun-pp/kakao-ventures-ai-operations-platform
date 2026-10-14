@@ -1,7 +1,7 @@
 """판정 저장 — 한 건 한 번, 모델이 본 글과 낸 값을 그대로. 기준을 고치면 replay → diff 로 잰다.
 
     live      운영이 실제로 쓴 판정
-    human     사람의 결정 — 노션 칸에서 읽어 온다 (label). 사람이 정답을 따로 달지 않는다
+    human     사람의 결정 — 사람이 이미 하는 일(노션 칸·슬랙 반응)에서 읽어 온다 (label). 사람이 정답을 따로 달지 않는다
     r-<sha>   고친 기준으로 다시 판정한 것. 저장된 입력만 다시 쓴다 — 바깥 호출 0
 
 스킬마다 `verdict` 의 어휘가 다르다(링크드인 Tier · 비플랜 점수). 표는 하나다.
@@ -53,10 +53,10 @@ def set_page(con, key: str, page_id: str) -> None:
 
 
 def label(con, rows: list[dict], prop: str, to_label: Callable[[str], str | None] = lambda v: v,
-          same: Callable[[str, str], bool] = lambda live, human: live == human) -> int:
-    """노션 행의 `prop` 값이 사람의 결정이다 — 결정이 있는 행은 **전부** human 으로 적는다(같아도). 일치율의 분모가 그것이다.
+          same: Callable[[str, str], bool] = lambda live, human: live == human, source: str | None = None) -> int:
+    """행(page_id 로 live 와 잇는다)의 `prop` 값이 사람의 결정이다 — 결정이 있는 행은 **전부** human 으로 적는다(같아도). 일치율의 분모가 그것이다.
     `to_label` 은 칸 값을 정답 어휘로(None 이면 미결 — 건드리지 않는다). `same` 은 live 판정과 정답이 같은가.
-    돌려주는 값 = 지금 갈린 건수."""
+    `source` 는 정답의 출처(reason 칸) — 기본 "노션 <prop>". 돌려주는 값 = 지금 갈린 건수."""
     live = {pid: (key, verdict) for key, verdict, pid in con.execute(
         "SELECT key, verdict, page_id FROM judgments WHERE run=? AND ok=1 AND page_id IS NOT NULL", (LIVE,))}
     n = 0
@@ -69,7 +69,7 @@ def label(con, rows: list[dict], prop: str, to_label: Callable[[str], str | None
             continue
         key, verdict = hit
         con.execute(f"INSERT OR REPLACE INTO judgments({_COLS}) VALUES(?,?,'','','',?,?,1,NULL,?,?,NULL)",
-                    (key, HUMAN, human, f"노션 {prop}", row["_page_id"], ledger.now()))
+                    (key, HUMAN, human, source or f"노션 {prop}", row["_page_id"], ledger.now()))
         n += int(not same(verdict, human))
     return n
 

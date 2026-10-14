@@ -85,5 +85,86 @@ class Followup(unittest.TestCase):
         self.assertIn("기다리는 건이 없다", c.out.getvalue())
 
 
+NO = {"name": "x", "users": ["U2"]}
+
+
+class Reactions(unittest.TestCase):
+    """❌ 와 늦은 반응 [사용자 결정 2026-10-14] — ❌ 는 '이번엔 관심 없음', 무반응은 '안 봄'. 정답은 앞의 것만."""
+
+    def test_only_no_keeps_waiting_before_due(self):
+        """❌ 만으로 닫지 않는다 — 다른 분이 ✅ 를 누를 수 있다."""
+        with case({"par": [{"ts": "m1", "reactions": [NO]}]}) as c:
+            posted(day=ledger.today())
+            run.followup()
+        self.assertEqual([r["ev"] for r in c.rows()], ["posted"])
+
+    def test_only_no_at_due_is_reaction_no_not_expiry(self):
+        with case({"par": [{"ts": "m1", "reactions": [NO]}]}) as c:
+            posted(day="2026-09-10")
+            run.followup()
+            labels = run._reaction_labels()
+        r = c.rows("resolved")[0]
+        self.assertEqual((r["by"], r["no_by"]), ("reaction_no", ["U2"]))
+        self.assertEqual(labels["in/a"]["label"], "no")
+
+    def test_yes_and_no_together_yes_wins(self):
+        with case({"par": [{"ts": "m1", "reactions": [NO, YES]}]}) as c:
+            posted()
+            run.followup()
+            labels = run._reaction_labels()
+        r = c.rows("resolved")[0]
+        self.assertEqual((r["by"], r["no_by"]), ("reaction_yes", ["U2"]))
+        self.assertEqual(len(c.rows("outreach")), 1)
+        self.assertEqual(labels["in/a"]["label"], "yes")
+
+    def test_reposted_card_is_read_again(self):
+        """한 번 결론 난 사람도 다시 올리면(resurfaced) 대기줄에 다시 선다 — 키 차집합이면 영영 못 읽는다."""
+        with case({"par2": [{"ts": "m2", "reactions": [YES]}]}) as c:
+            ledger.append("linkedin", "in/a", run.POSTED, ts="2026-09-01T02:00:00Z", ch="net", slack_ts="m1", parent="par",
+                          day="2026-09-01", page_id="p1", name="A", company="Aco", brief="b", url="https://www.linkedin.com/in/a")
+            ledger.append("linkedin", "in/a", run.RESOLVED, ts="2026-09-08T02:00:00Z", by="expiry")
+            ledger.append("linkedin", "in/a", run.POSTED, ts="2026-10-13T02:00:00Z", ch="net", slack_ts="m2", parent="par2",
+                          day=ledger.today(), page_id="p1", name="A", company="Aco", brief="b", gk="in/a@2026-10-12",
+                          url="https://www.linkedin.com/in/a")
+            run.followup()
+        self.assertEqual([r["by"] for r in c.rows("resolved")], ["expiry", "reaction_yes"])
+        self.assertIn(("in/a@2026-10-12", "outreach"), c.acts())             # 다시 올린 카드는 문 키가 다르다
+
+    def expired(self, day):
+        posted(day=day)
+        ledger.append("linkedin", "in/a", run.RESOLVED, by="expiry")
+
+    def test_late_yes_gets_draft_and_label_once_a_day(self):
+        """만기 뒤에 누른 ✅ — 문안·승격·리마인드가 자동으로(사람이 챙기지 않는다). 훑기는 하루 한 번."""
+        with case({"par": [{"ts": "m1", "reactions": [YES]}]}) as c:
+            self.expired(day=ledger.today())
+            run.followup()
+            run.followup()
+        rs = c.rows("resolved")
+        self.assertEqual([(r["by"], r.get("late")) for r in rs], [("expiry", None), ("reaction_yes", True)])
+        self.assertEqual(len(c.rows("outreach")), 1)
+        self.assertEqual(len(c.rows(run.SWEPT)), 1)
+
+    def test_late_no_fixes_label_only(self):
+        with case({"par": [{"ts": "m1", "reactions": [NO]}]}) as c:
+            self.expired(day=ledger.today())
+            run.followup()
+            labels = run._reaction_labels()
+        self.assertEqual([r["by"] for r in c.rows("resolved")], ["expiry", "reaction_no"])
+        self.assertEqual((labels["in/a"]["label"], c.rows("outreach")), ("no", []))
+
+    def test_old_cards_are_not_swept(self):
+        with case({"par": [{"ts": "m1", "reactions": [YES]}]}) as c:
+            self.expired(day="2026-08-01")
+            run.followup()
+        self.assertEqual(c.rows("outreach"), [])
+
+    def test_no_reaction_is_not_a_label(self):
+        with case({"par": [{"ts": "m1", "reactions": []}]}):
+            posted(day="2026-09-10")
+            run.followup()
+            self.assertEqual(run._reaction_labels(), {})
+
+
 if __name__ == "__main__":
     unittest.main()
