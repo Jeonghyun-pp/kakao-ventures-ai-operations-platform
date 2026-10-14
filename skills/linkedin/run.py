@@ -1235,6 +1235,8 @@ def main(argv: list[str] | None = None) -> int:
     fu.add_argument("--dry-run", action="store_true")
     rm = sub.add_parser("remind", help="✅ N일 뒤 누른 분을 채널에서 핑한다 (주말·공휴일은 다음 평일)")
     rm.add_argument("--dry-run", action="store_true")
+    rc_ = sub.add_parser("recheck", help="감시 목록 중 30일 된 사람의 프로필을 다시 긁어 회사·직함이 바뀌면 다시 재고로 (돈 · 노션)")
+    rc_.add_argument("--dry-run", action="store_true"); rc_.add_argument("--limit", type=int)
     sub.add_parser("status")
     rp = sub.add_parser("replay", help="고친 기준으로 저장된 사람을 다시 판정 (돈 0 · 노션 0)")
     rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
@@ -1266,6 +1268,10 @@ def main(argv: list[str] | None = None) -> int:
             if rc and not a.dry_run:
                 _alert("remind", f"종료코드 {rc} — 리마인드가 다 못 나갔다")
             return rc
+        if a.cmd == "recheck":
+            from . import recheck
+            with lock.hold("linkedin-recheck"):
+                return recheck.run(dry_run=a.dry_run, limit=a.limit)
         if a.cmd == "replay":
             crit = Path(a.criteria).read_text(encoding="utf-8") if a.criteria else judge.criteria_text()
             r = judgments.replay(_gate().con, judge.judge_lines, crit, judge.sha(crit), limit=a.limit)

@@ -12,27 +12,11 @@
 """
 from __future__ import annotations
 
-import glob
-import json
 import sys
 
-from kvlib import judgments, ledger, paths
+from kvlib import judgments, ledger
 from kv_transport import notion, slack
-from skills.linkedin import judge, profile, run
-
-
-def _raw_by_key() -> dict[str, dict]:
-    """사람 키(URN·URL 전부) → 산 날 item. 축은 payload 를 몰라 장부 landed 에서 붙인다."""
-    out: dict[str, dict] = {}
-    for fn in sorted(glob.glob(str(paths.data("linkedin", "raw", "_actor") / "*.json"))):
-        try:
-            items = json.load(open(fn)).get("items") or []
-        except Exception:                                                    # noqa: BLE001 — 깨진 파일 하나로 멈추지 않는다
-            continue
-        for it in items:
-            for k in profile.match_keys(it):
-                out.setdefault(k, it)                                        # 처음 산 날 값
-    return out
+from skills.linkedin import judge, recheck, run
 
 
 def snapshots(apply: bool) -> tuple[int, int]:
@@ -72,7 +56,7 @@ def restore_inputs(con, apply: bool) -> tuple[int, int]:
     f = notion.query(notion.writable_id(run.DB), ["Tier"])
     if f.is_measured:
         tier_of = {r["_page_id"]: r.get("Tier") for r in f.require()}
-    raw = _raw_by_key()
+    raw = recheck.raw_by_key()
     lines, verdicts, pages, miss = {}, [], {}, 0
     for k, p in posted.items():
         if k in live:
