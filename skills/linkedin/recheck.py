@@ -157,7 +157,7 @@ def run(*, dry_run: bool = False, limit: int | None = None, gate: Gate | None = 
         def buy(chunk=chunk, box=box):
             box["f"] = R.apify.run_actor(SLUG, {"publicIdentifiers": [t["public_id"] for t in chunk], "profileScraperMode": MODE},
                                          skill=R.TASK, est_usd=round(len(chunk) * USD_PER_PROFILE, 3),
-                                         timeout=max(300, len(chunk) * 6))
+                                         timeout=max(R.constraints.get("apify.run_timeout_sec"), len(chunk) * 6))   # 100명이면 1페이지보다 오래 걸린다 — 인원에 비례해 늘린다
             return len(box["f"].require())
 
         # 문 키 = 그날 + 배치 내용(첫 사람·인원). 순번으로 잡으면 앞선 시험 실행이 그날 첫 배치를 '이미 샀다'로 막는다(10/14)
