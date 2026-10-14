@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from kvlib import Fetched, judgments
@@ -38,6 +39,26 @@ class Parse(unittest.TestCase):
         self.assertIn("덱: 못 읽었다 — drive:404", t2)
         t3 = judge.build_input(ROW, Fetched.measured("", why="텍스트 없음(이미지 덱, 3자)"), ALLOWED, [])
         self.assertIn("덱: 텍스트 없음", t3)
+        t4 = judge.build_input(ROW, Fetched.measured("--- 1쪽 ---\n본문", name="d.pdf", chars=12, transcribed=True), ALLOWED, [])
+        self.assertIn("이미지 덱을 옮겨 적음", t4)
+
+
+class Transcribe(unittest.TestCase):
+    PAGES = "--- 1쪽 ---\n" + "월매출 1.3억 · 고객사 현대홈쇼핑\n" * 20
+
+    def test_page_marked_transcript_is_accepted(self):
+        f = judge.transcribe(Path("deck.pdf"), call=lambda p, prompt, **kw: self.PAGES)
+        self.assertTrue(f.is_measured and f.require().startswith("--- 1쪽 ---"))
+
+    def test_refusal_or_summary_never_becomes_deck_text(self):
+        # 🔴 거절·요약 한 줄이 덱 텍스트로 들어가면 그게 Red 의 근거가 된다
+        for out in ("죄송하지만 이 파일을 읽을 수 없습니다.", "--- 1쪽 ---\n짧음", "이 덱은 안전관리 SaaS 를 소개한다. " * 20):
+            self.assertFalse(judge.transcribe(Path("deck.pdf"), call=lambda p, prompt, **kw: out).is_measured, out[:20])
+
+    def test_call_failure_is_unknown_not_raise(self):
+        def boom(p, prompt, **kw):
+            raise RuntimeError("timeout")
+        self.assertIn("timeout", judge.transcribe(Path("deck.pdf"), call=boom).reason)
 
 
 class Judge(unittest.TestCase):

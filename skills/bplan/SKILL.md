@@ -49,6 +49,8 @@ To Drop                → drop     |  미팅요청 · Mail Fwd · Q&A → keep 
 매일    review_test 요약 → ~/kv-data/bplan/reports/<날짜>.md 의 🚩 절 → 패턴이 보이면 criteria.md → replay → diff
 기준    skills/bplan/criteria.md — 점수 어휘는 여기 적지 않는다. 노션 `점수` 옵션을 라이브로 읽어 입력에 싣는다(옛 사고: 어휘표에 빠진 라벨로 348건 쏠림)
 덱      🔴 폼 업로드 폴더를 서비스계정에 **읽기 공유**해야 덱이 읽힌다. 안 되면 "덱: 못 읽었다" 를 사실로만 넘긴다. 서비스계정 이메일은 시트 통로가 쓰는 SA 키의 client_email
+        [2026-10-14] hello@ 업로드 폴더를 jayden@bplan-490807 SA 에 공유함(표본 40건 404 0). 이미지 덱·이미지 파일은 모델이 옮겨 적는다
+        (judge.transcribe — Read 권한은 그 파일 하나 · 25쪽 68초). pptx·동영상·40MB 초과는 아직 "못 읽었다". 🔴 SA 프로젝트 소유자 미확인 — 이관 때 회사 소유로 교체
 ```
 
 ## 명령

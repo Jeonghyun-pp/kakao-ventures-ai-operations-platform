@@ -117,6 +117,26 @@ def run_session(prompt: str, *, system: str | None = None, tools: str | None = N
     return out
 
 
+def read_file(path: Path, prompt: str, *, system: str, timeout_sec: int) -> str:
+    """claude -p 한 번 — **파일 하나만** 읽힌다 (2026-10-14, 비플랜 이미지 덱).
+
+    바깥 사람이 만든 파일(덱)을 읽히므로 도구는 Read 하나, 권한은 그 파일 한 개(`Read(./<이름>)`)뿐이다.
+    `--permission-mode dontAsk` 라 목록 밖은 묻지 않고 거부한다 — 덱 안의 지시가 다른 파일(~/kv-config)을 읽으라 해도 못 읽는다
+    (실측: 같은 호출에서 /etc/hosts 는 거부됐다). 판정은 run_session 과 같이 rc 가 아니라 출력으로."""
+    n = _calls_today()
+    if n >= constraints.get("claude.daily_calls_block"):
+        raise SessionError(f"오늘 claude 호출 {n}회 — 차단선 도달")
+    cmd = [_bin(), "-p", "--strict-mcp-config", "--tools", "Read",
+           "--permission-mode", "dontAsk", "--allowedTools", f"Read(./{path.name})",
+           "--append-system-prompt", system]
+    r = _spawn(cmd, prompt, timeout_sec, cwd=path.parent)
+    out = (r.stdout or "").strip()
+    if not out or r.returncode != 0:
+        _record(False, "empty_output" if not out else f"rc{r.returncode}")
+        raise SessionError(f"rc={r.returncode}: {(r.stderr or out)[:200]}")
+    _record(True)
+    return out
+
 
 def run_skill(prompt: str, *, mcp_config, system_file, allowed_tools: list[str], timeout_sec: int, cwd=None) -> Fetched:
     """긴 세션 한 번 — 스킬(MCP 서버 + 도구)을 붙여 끝까지 돌린다 (2026-09-26, 투심 레인).

@@ -444,7 +444,12 @@ def _llm(criteria: str, data: str) -> str:
     return claude.run_session(f"{criteria}\n\n{data}", system=judge.SYSTEM, tools="")
 
 
-def judge_rows(con, rows: list[dict], all_rows: list[dict], *, llm=_llm, deck=drive.text) -> dict:
+def _deck(url: str) -> Fetched:
+    """덱 텍스트. 이미지 덱은 모델이 옮겨 적는다(2026-10-14) — 판정 입력은 여전히 텍스트."""
+    return drive.text(url, transcribe=functools.partial(judge.transcribe, call=claude.read_file))
+
+
+def judge_rows(con, rows: list[dict], all_rows: list[dict], *, llm=_llm, deck=_deck) -> dict:
     """행마다 덱을 읽고 모델을 한 번 부른다. 호출 자체가 실패하면(인증·차단선) **멈춘다** — 나머지도 같은 이유로 실패한다."""
     crit, run = judge.criteria_text(), judgments.LIVE
     sha = judgments.criteria_sha(judge.SYSTEM, crit)

@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from kv_transport import drive
+from kvlib import Fetched
 
 
 class R:
@@ -47,6 +48,28 @@ class Drive(unittest.TestCase):
         with mock.patch.object(drive, "_get", lambda p, params=None: R({"name": "d.pptx", "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "size": "10"})):
             f = drive.text("https://drive.google.com/open?id=ABCDEFGHIJKLMNOP")
         self.assertIn("지원하지 않는 형식", f.meta["why"])
+
+    def test_image_deck_and_image_file_go_to_transcribe_in_a_folder_holding_only_that_file(self):
+        seen = []
+
+        def tr(p):
+            seen.append(sorted(x.name for x in p.parent.iterdir()))           # 🔴 Read 권한이 묶이는 폴더에 그 파일 하나뿐
+            return Fetched.measured("--- 1쪽 ---\n월매출 1.3억")
+        pdf = lambda p, params=None: R({"name": "d.pdf", "mimeType": "application/pdf", "size": "10"}) if "fields" in (params or {}) else R(content=b"%PDF")
+        with mock.patch.object(drive, "_get", pdf), mock.patch.object(drive, "_pdf_text", lambda data: " "):
+            f = drive.text("https://drive.google.com/open?id=ABCDEFGHIJKLMNOP", transcribe=tr)
+        self.assertEqual((f.require()[:10], f.meta["transcribed"], seen[0]), ("--- 1쪽 ---", True, ["deck.pdf"]))
+        png = lambda p, params=None: R({"name": "d.png", "mimeType": "image/png", "size": "10"}) if "fields" in (params or {}) else R(content=b"\x89PNG")
+        with mock.patch.object(drive, "_get", png):
+            self.assertTrue(drive.text("https://drive.google.com/open?id=ABCDEFGHIJKLMNOP", transcribe=tr).meta["transcribed"])
+            self.assertIn("이미지 파일", drive.text("https://drive.google.com/open?id=ABCDEFGHIJKLMNOP").meta["why"])   # transcribe 없으면 전과 같다
+
+    def test_failed_transcription_is_a_fact_with_its_reason(self):
+        pdf = lambda p, params=None: R({"name": "d.pdf", "mimeType": "application/pdf", "size": "10"}) if "fields" in (params or {}) else R(content=b"%PDF")
+        with mock.patch.object(drive, "_get", pdf), mock.patch.object(drive, "_pdf_text", lambda data: ""):
+            f = drive.text("https://drive.google.com/open?id=ABCDEFGHIJKLMNOP", transcribe=lambda p: Fetched.unknown("timeout"))
+        self.assertEqual(f.require(), "")                                     # 판정은 폼만으로 이어진다
+        self.assertIn("옮겨 적기 실패: timeout", f.meta["why"])
 
     def test_sharing_problem_is_unknown_not_empty(self):
         def get(path, params=None):
