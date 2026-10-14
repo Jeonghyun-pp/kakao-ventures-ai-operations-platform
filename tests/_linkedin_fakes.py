@@ -59,6 +59,7 @@ class Notion:
         self.tables, self.created, self.updated = tables, [], []
 
     clip16 = staticmethod(_notion.clip16)                          # 순수 함수 — 진짜를 쓴다
+    CLEAR = _notion.CLEAR
 
     def writable_id(self, key):
         return key

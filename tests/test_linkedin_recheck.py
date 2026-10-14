@@ -104,6 +104,17 @@ class Recheck(unittest.TestCase):
         self.assertEqual(c.rows(run.RESURFACED), [])
         self.assertEqual(c.notion.updated, [("p1", {"Korea Signal": [run.judge.FOREIGN]})])
 
+    def test_quitting_clears_stale_tenure(self):
+        """현직을 그만두면 재직 개월이 없어진다 — 옛 값을 남기지 말고 비운다."""
+        rows = [legacy("p1", "a")]
+        gone = {**item("a", "X"), "currentPosition": [], "experience": []}
+        with case(rows, {"a": gone}) as c:
+            ledger.append("linkedin", "in/a", run.CHECKED, ts="2026-08-01T00:00:00Z", page_id="p1", fp="v2|Aco|CEO", ffp="Aco")
+            recheck.run()
+        props = c.notion.updated[0][1]
+        self.assertIs(props["Tenure Months"], run.notion.CLEAR)
+        self.assertIn("현직을 그만둠", props["변화 요약"])
+
     def test_revoked_resurface_is_not_open(self):
         with case([], {}):
             ledger.append("linkedin", "in/a", run.RESURFACED, page_id="p1", old="a", new="b")

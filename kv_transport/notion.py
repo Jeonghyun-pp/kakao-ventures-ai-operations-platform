@@ -287,6 +287,17 @@ def _plain(v: dict):
 
 # ---------------------------------------------------------------- 쓰기
 
+class _Clear:
+    """칸을 **비운다**. None 은 "건드리지 않는다"(만들 때 빈 칸을 안 보내려고)라, 갱신에서 값이 없어진 걸 지우려면 이걸 쓴다.
+    발단(10/14): 재확인에서 현직을 그만둔 사람의 재직 개월이 None 이 되자 옛 값(13개월)이 그대로 남아 카드 기준을 잘못 탔다."""
+    def __repr__(self) -> str:
+        return "CLEAR"
+
+
+CLEAR = _Clear()
+_EMPTY = {"number": None, "url": None, "date": None, "select": None, "rich_text": [], "multi_select": [], "checkbox": False}
+
+
 def create(db_key: str, props: dict) -> Fetched:
     """행 하나 생성 → **되읽어 확인**까지 하고 나서 성공이라고 한다.
 
@@ -368,6 +379,11 @@ def _build(db_id: str, props: dict) -> dict:
         if val is None:
             continue
         t = sch[name]["type"]
+        if val is CLEAR:
+            if t not in _EMPTY:
+                raise NotionError(f"'{name}' 타입 {t} 은 비울 수 없다")
+            out[name] = {t: _EMPTY[t]}
+            continue
         if t == "title":
             out[name] = {"title": [{"text": {"content": clip16(sanitize(str(val)))}}]}
         elif t == "rich_text":
@@ -418,6 +434,10 @@ def _verify(db_id: str, page_id: str, props: dict) -> str:
         if want is None:
             continue
         got = live.get(name)
+        if want is CLEAR:
+            if got not in (None, "", [], False):
+                bad.append(name)
+            continue
         t = schema(db_id)[name]["type"]
         if t in ("title", "rich_text"):
             if str(got or "") != clip16(sanitize(str(want))):

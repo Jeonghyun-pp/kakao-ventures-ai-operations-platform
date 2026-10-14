@@ -279,7 +279,8 @@ def resurface(g: Gate, changed: list, today: str) -> int:
             print(f"  ⚠️  {t['live'].get('서비스명')} 판정 못 받음 — 다음 주에 다시")
             continue
         full = R._props({**it, "_axis": t["axis"]}, vv, f"recheck-{today}")
-        props = {k: full[k] for k in REFRESH if k in full}
+        # 다시 잰 값이 없으면(현직을 그만둠 → 재직 개월 없음) 옛 값을 **비운다** — 남기면 산 날 값으로 카드 기준을 탄다
+        props = {k: (full[k] if full.get(k) not in (None, "") else R.notion.CLEAR) for k in REFRESH if k in full}
         new_txt = _fp_text(profile.fingerprint(it))
         summ = f"{today} {why} — {_fp_text(old)} → {new_txt}"
         props.update({"Status": "New", "Last Checked": today, "변화 요약": summ[:1900]})
