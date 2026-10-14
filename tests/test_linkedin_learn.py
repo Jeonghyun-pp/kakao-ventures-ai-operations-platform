@@ -25,9 +25,11 @@ class Learn(unittest.TestCase):
             for i in range(4):
                 card(f"k{i}", "reaction_yes")
             card("k9", "reaction_no")
-            card("k8", "expiry")                                   # 무반응은 정답이 아니다
+            card("k7", "expiry")                                   # 본 날(같은 스레드에 반응)의 무반응 = 안 고름
+            ledger.append("linkedin", "k8", run.POSTED, page_id="p8", parent="y", slack_ts="t", ch="net", day="2026-10-01")
+            ledger.append("linkedin", "k8", run.RESOLVED, by="expiry")  # 아무도 안 본 날 — 정답 아님
             rows, s = learn.table(c.db)
-        self.assertEqual((s["n"], s["yes"], s["no"]), (5, 4, 1))
+        self.assertEqual((s["n"], s["yes"], s["no"]), (6, 4, 2))
         self.assertTrue(all(not r["enough"] and not r["signal"] for r in rows))
 
     def test_leak_check_finds_labeled_people(self):

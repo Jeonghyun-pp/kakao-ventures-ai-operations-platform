@@ -159,6 +159,16 @@ class Reactions(unittest.TestCase):
             run.followup()
         self.assertEqual(c.rows("outreach"), [])
 
+    def test_x_marks_the_day_seen_so_neighbors_become_not_picked(self):
+        """❌ 는 '이번 주엔 관심 없음' — 같은 날 안 고른 카드와 뜻이 같다. 그날을 '본 날'로 만들어 옆 카드도 정답(안 고름)이 된다."""
+        with case({}):
+            for k, by in (("in/a", "reaction_no"), ("in/b", "expiry")):
+                ledger.append("linkedin", k, run.POSTED, ch="net", slack_ts=k, parent="par", day="2026-09-10", page_id=k)
+                ledger.append("linkedin", k, run.RESOLVED, by=by)
+            labels = run._reaction_labels()
+        self.assertEqual({k: (v["label"], v["pressed_no"]) for k, v in labels.items()},
+                         {"in/a": ("no", True), "in/b": ("no", False)})
+
     def test_no_reaction_is_not_a_label(self):
         with case({"par": [{"ts": "m1", "reactions": []}]}):
             posted(day="2026-09-10")

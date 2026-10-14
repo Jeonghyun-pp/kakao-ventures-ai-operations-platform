@@ -1,6 +1,7 @@
 """주간 학습 — 반응(정답)에서 **특징**을 뽑아 기준 근거를 갱신하고, 기준 수정안을 낸다 [사용자 결정 2026-10-14].
 
-    정답    _reaction_labels — ✅ yes · ❌ no · 무반응은 정답 아님. 최근 learn_weeks 주 스레드를 다시 읽어 늦은 반응까지
+    정답    _reaction_labels — ✅ vs 안 고름(본 날의 ❌·무반응). ❌ 는 "이번 주엔 관심 없음"이라 안 고른 것과 같다.
+            아무도 안 본 날은 정답 아님. 최근 learn_weeks 주 스레드를 다시 읽어 늦은 반응까지
     특징    features.extract — 코드가 뽑는 고정 목록
     표      특징 구간별 n · ✅율 · 기저 대비 배수 · 윌슨 95% 구간. n < learn_min_n 이거나 한쪽이 3 미만이면 '표본 부족'
     제안    문턱을 넘은 구간이 있을 때만 claude 가 criteria.md 수정안 → replay → diff (판정이 정답을 더 잘 가르나)
@@ -150,7 +151,7 @@ def run(*, dry_run: bool = False) -> int:
     prop = "dry-run — 제안 생략" if dry_run else propose(g.con, rows, s, out_dir)
     lat = s["latency"]
     md = [f"# 링크드인 주간 학습 — {ledger.today()}", "",
-          f"정답 {s['n']}명 (✅ {s['yes']} · ❌ {s['no']}) · 기저 ✅율 {s['base']:.0%}",
+          f"정답 {s['n']}명 (✅ {s['yes']} · 안 고름 {s['no']} — 본 날의 ❌·무반응) · 기저 ✅율 {s['base']:.0%}",
           f"반응까지 걸린 일수: 중앙값 {lat[len(lat) // 2] if lat else '-'}일 · 7일 넘음 {sum(d > 7 for d in lat)}/{len(lat)}", "",
           "## 기준 수정안", "", prop, "",
           "## 특징 표 (✅ / 정답 수)", "",
@@ -159,11 +160,11 @@ def run(*, dry_run: bool = False) -> int:
         mark = "🔺" if r["signal"] and r["lo"] > s["base"] else "🔻" if r["signal"] else ("" if r["enough"] else "표본 부족")
         md.append(f"| {r['feature']} | {r['bin']} | {r['yes']}/{r['n']} | {r['rate']:.0%} | "
                   f"{(f'{r['lift']:.2f}' if r['lift'] else '-')} | {r['lo']:.0%}~{r['hi']:.0%} | {mark} |")
-    md += ["", "> 무반응은 정답이 아니다(안 본 것). 탐색 카드 행 = 판정 하위에서 올린 카드의 ✅율 — 기준이 놓친 비율.",
+    md += ["", "> 안 본 날의 무반응은 정답이 아니다. 탐색 카드 행 = 판정 하위에서 올린 카드의 ✅율 — 기준이 놓친 비율.",
            "> 사람 특징 → criteria.md · 신선도 → card 정렬 · 서버로 걸 수 있는 특징 → axes.", ""]
     path = out_dir / f"learn-{ledger.today()}.md"
     path.write_text("\n".join(md), encoding="utf-8")
     print(f"· 표 {len(rows)}행 · 신호 {sum(r['signal'] for r in rows)} · 보고서 {path}")
     if not dry_run:
-        print(f"· 슬랙 {report.post('linkedin', f'*링크드인 주간 학습* — 정답 {s['n']}명(✅ {s['yes']} · ❌ {s['no']}) · {prop.splitlines()[0]}\n전체: `{path}`', R._send)}")
+        print(f"· 슬랙 {report.post('linkedin', f'*링크드인 주간 학습* — 정답 {s['n']}명(✅ {s['yes']} · 안 고름 {s['no']}) · {prop.splitlines()[0]}\n전체: `{path}`', R._send)}")
     return 0

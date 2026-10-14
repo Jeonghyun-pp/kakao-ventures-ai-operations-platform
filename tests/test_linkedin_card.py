@@ -194,7 +194,7 @@ class Founder(unittest.TestCase):
             run.card(n=1)
             rep = (c.data / "linkedin" / "reports" / f"{ledger.today()}.md").read_text()
         self.assertEqual(c.db.execute("SELECT verdict, reason FROM judgments WHERE run='human'").fetchall(), [("no", "슬랙 반응")])
-        self.assertIn("에이 — 판정 Catch · 반응 **❌**", rep)
+        self.assertIn("에이 — 판정 Catch · 반응 **안 고름**", rep)
         self.assertNotIn("노션에서 사람이 고친 Tier", rep)
 
     def test_dry_run_does_not_record(self):

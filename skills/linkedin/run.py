@@ -122,19 +122,38 @@ def _pressers(reactions: list[dict], vocab: str) -> list[str]:
 def _reaction_labels() -> dict[str, dict]:
     """키 → {label: yes|no, page_id, ts, explore}. **정답은 심사역의 반응이다** [사용자 결정 2026-10-14].
     노션 Tier 는 AI 가 쓴 값이라 정답이 아니다(판정끼리 맞대면 437/437 일치 — 10/13 보고서).
-    결론(resolved)과 따로 다시 읽은 반응(snapshot)을 시간순으로 접는다. 나중 값이 이긴다 — 단 '반응 없음'은 덮지 않는다.
-    무반응(expiry)은 정답이 아니다 — 안 본 것과 보고 거른 것은 다르다."""
+
+        yes  ✅ 를 받았다
+        no   **안 고름** — 심사역이 그날 카드를 본 날(그 스레드 어느 카드에든 ✅·❌ 가 붙음), 결론 날 때까지 ✅ 를 못 받았다.
+             ❌ 도 여기다: ❌ 는 "이번 주엔 관심 없음"이지 "별로인 사람"이 아니라 같은 날 안 고른 카드와 뜻이 같다.
+             ❌ 의 몫은 '그날 봤다'는 표시다 — ✅ 없이 ❌ 만 누른 날도 나머지 카드가 정답이 된다.
+        —    아무도 안 본 날의 무반응은 정답이 아니다(10/2~13 카드 40장 반응 0 — 바빴다). 아직 결론 안 난 카드도 아니다(✅ 가 올 수 있다).
+
+    결론(resolved)과 따로 다시 읽은 반응(snapshot)을 본다. 다시 올린 카드는 마지막 게시 뒤의 반응만."""
     posted = _last(POSTED)
-    evs = sorted(ledger.rows(TASK, ev=RESOLVED) + ledger.rows(TASK, ev=SNAPSHOT), key=lambda r: r["ts"])
-    out: dict[str, dict] = {}
-    for r in evs:
-        if r["ev"] == RESOLVED:
-            lab = {"reaction_yes": "yes", "reaction_no": "no"}.get(r.get("by"))
-        else:
-            lab = "yes" if r.get("yes_by") else "no" if r.get("no_by") else None
+    yes: dict[str, str] = {}                     # key → ✅ 를 본 시각
+    no_press: set[str] = set()
+    done: dict[str, str] = {}                    # key → 결론 시각
+    for r in sorted(ledger.rows(TASK, ev=RESOLVED) + ledger.rows(TASK, ev=SNAPSHOT), key=lambda r: r["ts"]):
         p = posted.get(r["key"])
-        if lab and p:
-            out[r["key"]] = {"label": lab, "page_id": p.get("page_id"), "ts": r["ts"], "explore": bool(p.get("explore"))}
+        if not p or r["ts"] < p["ts"]:
+            continue
+        if r.get("by") == "reaction_yes" or r.get("yes_by"):
+            yes.setdefault(r["key"], r["ts"])
+        if r.get("by") == "reaction_no" or r.get("no_by"):
+            no_press.add(r["key"])
+        if r["ev"] == RESOLVED:
+            done[r["key"]] = r["ts"]
+    seen = {posted[k].get("parent") for k in (*yes, *no_press)} - {None}
+    out: dict[str, dict] = {}
+    for k, p in posted.items():
+        if k in yes:
+            lab, ts = "yes", yes[k]
+        elif k in done and p.get("parent") in seen:
+            lab, ts = "no", done[k]
+        else:
+            continue
+        out[k] = {"label": lab, "page_id": p.get("page_id"), "ts": ts, "explore": bool(p.get("explore")), "pressed_no": k in no_press}
     return out
 
 
@@ -1205,8 +1224,8 @@ def daily_report(g: Gate, *, pool: int, picked: int) -> None:
             + (f" · 이번 주 판정 {sum(dist.values())}명" if dist else ""))
     md = [f"# 링크드인 하루 보고 — {today}", "", head, "",
           "## 🚩 판정과 반응이 갈린 사람 (지난 7일)", "",
-          "판정 Catch 인데 ❌ · 판정 Catch 아닌데 ✅ — 기준이 틀린 자리다. 무반응은 정답이 아니라 여기 없다.", ""]
-    md += [f"- {names_.get(k, k)} — 판정 {a} · 반응 **{'✅' if b == 'yes' else '❌'}**" for k, a, b in off] or ["없음"]
+          "판정 Catch 인데 안 고름(본 날의 ❌·무반응) · 판정 Catch 아닌데 ✅ — 기준이 틀린 자리다. 안 본 날은 여기 없다.", ""]
+    md += [f"- {names_.get(k, k)} — 판정 {a} · 반응 **{'✅' if b == 'yes' else '안 고름'}**" for k, a, b in off] or ["없음"]
     md += ["", "## 반응", "",
            f"- 탐색 카드(판정 하위에서 1장): ✅ {rw['explore'][0]} / 결론 {rw['explore'][1]} — 하위 판정이 놓친 비율",
            f"- 7일 뒤 늦게 누른 반응: {rw['late']}건 (늦은 ✅ 는 문안·리마인드가 자동으로 나갔다)",
