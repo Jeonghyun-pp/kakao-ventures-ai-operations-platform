@@ -1,42 +1,62 @@
 ---
 name: linkedin
-description: 링크드인에서 극초기 창업자를 주 1회 사서 Tier 를 판정하고 노션에 전량 착지, 평일마다 5명을 #그물망 카드로 올린다. ✅ 면 연락 문안(Reviewer C 심사역 실무 문안) + 극초기 승격 + 2일 뒤 리마인드. 메일과 같은 뼈대(문·판정 저장·보고서·health).
+description: 링크드인에서 극초기 창업자를 주 1회 사서 Tier 를 판정하고 노션에 전량 착지, 평일마다 5명(판정 순 4 + 탐색 1)을 #그물망 카드로 올린다. ✅ 면 연락 문안 + 극초기 승격 + 2일 뒤 리마인드, ❌ 는 "이번엔 관심 없음". 정답은 심사역 반응. 30일마다 프로필을 다시 긁어 바뀐 사람을 다시 올리고, 주 1회 반응에서 특징을 뽑아 기준 수정안을 낸다.
 schedule:
   - { cmd: collect, when: "월 09:10", why: "이때만 돈이 나간다. 축별로 차례인 것만 돈다" }
   - { cmd: card,    when: "매일 11:00", why: "정현님이 훑은 결과가 반영된 뒤에 나간다. 평일만 — 주말엔 아무것도 안 한다" }
   - { cmd: followup, when: "10분마다", why: "심사역이 언제 누를지 우리가 못 정한다. 누르고 10분 안에 문안이 뜬다" }
   - { cmd: remind,   when: "매일 10:00", why: "✅ 2일 뒤 누른 분을 핑. 주말·공휴일엔 코드가 쉰다 — 그날 몫은 다음 평일에 나간다" }
+  - { cmd: recheck,  when: "월 09:40", why: "collect 뒤. 감시 목록 중 30일 된 사람만 다시 긁는다 — 돈이 나가는 두 번째 자리(월 ≈ $6)" }
+  - { cmd: learn,    when: "월 10:10", why: "recheck 뒤. 한 주 반응을 모아 특징 표 · 기준 수정안. 매일 돌리면 하루 5장이라 숫자만 흔들린다" }
 ---
 
 # 링크드인 소싱
 
 2026-09-25 에 메일과 같은 뼈대로 옮겼다(`kvlib` store·gate·report). **동작은 그대로다** — 골든 dry-run 넷이 전·후 동일, 특성화 테스트 27개가 먼저 잡았다.
 
-## 🔴 밖으로 나가는 다섯은 문 하나를 지난다 — 그리고 문은 **열려 있다**
+## 🔴 밖으로 나가는 여섯은 문 하나를 지난다 — 그리고 문은 **열려 있다**
 
 ```
 constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다. off/slack 은 시험·중단용
-  buy       Apify 구매(돈)               off·slack 이면 안 산다. 계획만 찍는다
+  buy       Apify 구매(돈) — collect·recheck   off·slack 이면 안 산다. 계획만 찍는다
   land      노션 착지                    〃 dry
   card      #그물망 카드(헤더+스레드)     slack 이상이면 나간다
   outreach  ✅ 스레드에 연락 문안          〃
   remind    ✅ 2일 뒤 #그물망 본문에 핑     〃
   promote   극초기 DB 승격 + 링크드인 행 표시   on 이어야. linkedin.promote: false 면 "gated"
+  refresh   recheck 가 바뀐 사람의 노션 행을 갱신   on 이어야
 ```
 `--dry-run` 은 이 실행만 문을 내리는 것(`Gate(force="off")`)이다. 무엇을 했(을)는지는 `~/kv-data/linkedin/db/linkedin.sqlite` 의 `actions` 에 남는다.
 장부(`~/kv-data/_ledger/linkedin.jsonl`)는 그대로 **한 일의 기록**이고 card/followup 의 멱등 키다. 두 곳에 적히지만 역할이 다르다.
 끄려면 `outbound: "off"` 한 줄. 되돌리기도 그 한 줄.
+
+## 정답은 심사역의 반응이다 [사용자 결정 2026-10-14]
+
+```
+✅      관심 — 연락 문안·승격·리마인드
+❌      이번엔 관심 없음 — 보고 거른 것. 영구 아님: 프로필이 바뀌면 recheck 가 다시 올린다
+무반응  안 본 것 — 정답이 아니다(10/2~13 카드 40장 반응 0 — 기준 탓이 아니라 바빴다)
+```
+노션 `Tier` 는 AI(claude + criteria.md)가 매긴 값이라 정답이 아니다 — 카드 순서에만 쓴다. 옛 보고서 🚩 절이 그걸 정답으로 대서 437/437 일치만 찍었다.
+✅·❌ 가 같이 붙으면 ✅(연락은 누른 분 개인 계정 · 놓치는 쪽이 비싸다). ❌ 만이면 7일 기다린다(다른 분 ✅ 대기).
+7일 뒤 늦게 누른 반응도 followup 이 최근 `learn_weeks`(4)주를 하루 한 번 다시 읽어 잡는다 — 늦은 ✅ 도 문안·승격·리마인드가 자동.
 
 ## 하루
 
 ```
 월 09:10  collect   축별로 차례인 것만(주차 축 제외) → Apify → 원본 아카이브 → 장부로 중복 제거 → 사후 조건
                     → claude 50명 배치 판정 · **사람별 저장**(judgments: 모델이 본 줄·낸 줄·기준 해시) → 전량 노션 착지
-매일 11:00 card     평일만. 노션 Tier 되읽기(사람이 고친 것 = 정답으로 저장, label) → 아직 안 나간 사람 좋은 순 5명 → 헤더 + 사람별 스레드
+매일 11:00 card     평일만. 반응 정답 동기화(label) → 재고 + 다시 올라온 사람 → 판정 순 4명 + 판정 하위(Wait·Cut)에서 탐색 1명
+                    (탐색은 표시 안 함 — 위만 올리면 하위 판정이 맞는지 영영 모른다) → 헤더 + 사람별 스레드
                     → 하루 보고서(파일 + review_test 요약)
-10분마다  followup  ✅ → outreach.md 문안에 {이름}(성 뺀 한글 이름)·{발신자}(누른 분) 채워 스레드에 → 극초기 승격 · 7일 무반응은 만기(요일 안 봄)
+10분마다  followup  ✅ → outreach.md 문안에 {이름}(성 뺀 한글 이름)·{발신자}(누른 분) 채워 스레드에 → 극초기 승격
+                    7일째 결론: ❌ 있으면 reaction_no · 없으면 expiry · 하루 한 번 최근 4주 늦은 반응 훑기
 매일 10:00 remind   ✅ 누른 날 + 2일(주말·공휴일이면 다음 평일, 목·금 → 월) → #그물망 본문에 "@누른분 김가람(회사) 님께 연락 보내셔야 합니다"
                     이름은 names.py 가 한글로(`가람 김` 는 규칙, 영문은 claude, 확신 없으면 원문 병기). 한 사람 한 번. [사용자 결정 2026-09-29]
+월 09:40  recheck   감시 목록(국적·나이·✅·손댄 행 빼고 그때 안 맞았던 사람 전부) 중 30일 된 사람 → profile-scraper
+                    → 회사·직함 지문 비교 → 바뀐 사람만 Tier 재판정·노션 갱신(Status New·변화 요약·Last Checked) → 다시 재고(🔄 줄)
+월 10:10  learn     최근 4주 반응 다시 읽기 → 특징 표(구간별 ✅율·95% 구간, 표본 부족 표시) → 문턱 넘으면 criteria 수정안 + replay
+                    → ~/kv-data/linkedin/reports/learn-<날짜>.md. 🔴 criteria.md 는 자동으로 안 바뀐다 — 사람이 승인
 매일 12:55 ops health  평일에 오늘 보고서 파일이 없으면 review_test 에 한 줄 (skills/ops 가 여섯 스킬을 한 번에)
 ```
 **전량 착지하는 이유**: 심사역이 노션을 직접 열 수 있어야 한다. 슬랙엔 그중 하루 5명만 간다.
@@ -45,8 +65,9 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
 ## 사람이 하는 것 — 기준 깎기
 
 ```
-정답      노션 `Tier` 칸을 고친다. 그게 전부다 — 다음 card 가 judgments(human) 으로 가져간다
-보고서    ~/kv-data/linkedin/reports/<날짜>.md · 🚩 절 = 노션에서 고쳐진 Tier(판정 ↔ 정답 갈림) — 기준을 깎을 재료
+정답      심사역이 카드에 ✅·❌ 를 누른다. 그게 전부다 — card 가 매일 judgments(human) 으로 가져간다
+보고서    ~/kv-data/linkedin/reports/<날짜>.md · 🚩 절 = 판정과 반응이 갈린 사람 · learn-<날짜>.md = 주간 특징 표·수정안
+승인      learn 수정안이 있으면 replay 결과를 보고 사람이 반영한다(Reviewer C yes/no)
 기준      skills/linkedin/criteria.md
 확인      run replay [--limit N] [--criteria 파일]   저장된 사람을 고친 기준으로 다시 판정 (Apify 0 · 노션 0)
           run diff --b r-<sha>                        무엇이 달라졌나 · 정답과는 어떤가
@@ -63,7 +84,9 @@ cd ~/kv
 ./.venv/bin/python -m skills.linkedin.run followup [--dry-run]
 ./.venv/bin/python -m skills.linkedin.run remind [--dry-run]
 ./.venv/bin/python -m skills.linkedin.run status            # 축별 마지막 실행·다음 페이지·커버리지·재고
-./.venv/bin/python -m skills.linkedin.run label             # 노션 Tier → human (card 가 매일 하지만 손으로도)
+./.venv/bin/python -m skills.linkedin.run label             # 슬랙 반응 → human (card 가 매일 하지만 손으로도)
+./.venv/bin/python -m skills.linkedin.run recheck [--limit N] [--dry-run]
+./.venv/bin/python -m skills.linkedin.run learn [--dry-run]
 ./.venv/bin/python -m skills.linkedin.run replay | diff --b r-<sha>
 ```
 
@@ -77,10 +100,13 @@ axes.py        수집 축(Apify 질의)과 사후 조건(reject) · 카드 기�
 profile.py     Apify 원본 → 키·경력·신호
 brief.py       카드 두 문장 + 회사명 (claude)     outreach.py  연락 문안 채우기 (모델 없음, 원문 outreach.md)
 names.py       ✅ 리마인드에 쓸 한글 이름 (규칙 → claude)
+recheck.py     재확인 — 감시 목록 원칙 · 지문 비교 · 다시 재고로     features.py  카드의 특징(코드, 고정 목록)
+learn.py       주간 학습 — 특징 표 · 수정안 · 사람 이름 유출 검사
+../../tools/linkedin_reaction_backfill.py   정답을 반응으로 옮길 때 한 번(소급 · 입력 복원) — 다시 돌려도 된다
 criteria.md    Tier 기준 — 사람이 깎는다
 ../../people.yaml   심사역 명부(슬랙 ID → 성함). 메일과 같은 파일
 ```
-`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · followup_days · stock_warn_days · outreach_batch · remind_*. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
+`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · followup_days · stock_warn_days · outreach_batch · remind_* · learn_weeks · learn_min_n · recheck_days · recheck_batch · recheck_max. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
 
 ## 알아둘 것 (지우지 않은 결정)
 

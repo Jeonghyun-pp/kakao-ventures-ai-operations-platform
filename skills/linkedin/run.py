@@ -59,7 +59,7 @@ def _cfg(k: str):
     return constraints.get(f"linkedin.{k}")
 
 
-# 🔴 밖으로 나가는 다섯(buy·land·card·outreach·promote)은 전부 `Gate.out` 을 지난다 (constraints.yaml linkedin.outbound).
+# 🔴 밖으로 나가는 것(buy·land·card·outreach·remind·promote·refresh)은 전부 `Gate.out` 을 지난다 (constraints.yaml linkedin.outbound).
 #    `slack` 단계에서 실제로 나가는 종류 — **허용 목록**. 카드·초안은 슬랙 글이고, 구매·착지·승격은 아니다.
 SLACK_KINDS = ("card", "outreach", "remind")
 
@@ -1237,6 +1237,8 @@ def main(argv: list[str] | None = None) -> int:
     rm.add_argument("--dry-run", action="store_true")
     rc_ = sub.add_parser("recheck", help="감시 목록 중 30일 된 사람의 프로필을 다시 긁어 회사·직함이 바뀌면 다시 재고로 (돈 · 노션)")
     rc_.add_argument("--dry-run", action="store_true"); rc_.add_argument("--limit", type=int)
+    ln = sub.add_parser("learn", help="주 1회 — 반응(정답)에서 특징 표 → 기준 근거 · 수정안(자동 반영 안 함)")
+    ln.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
     rp = sub.add_parser("replay", help="고친 기준으로 저장된 사람을 다시 판정 (돈 0 · 노션 0)")
     rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
@@ -1272,6 +1274,10 @@ def main(argv: list[str] | None = None) -> int:
             from . import recheck
             with lock.hold("linkedin-recheck"):
                 return recheck.run(dry_run=a.dry_run, limit=a.limit)
+        if a.cmd == "learn":
+            from . import learn
+            with lock.hold("linkedin-learn"):
+                return learn.run(dry_run=a.dry_run)
         if a.cmd == "replay":
             crit = Path(a.criteria).read_text(encoding="utf-8") if a.criteria else judge.criteria_text()
             r = judgments.replay(_gate().con, judge.judge_lines, crit, judge.sha(crit), limit=a.limit)
