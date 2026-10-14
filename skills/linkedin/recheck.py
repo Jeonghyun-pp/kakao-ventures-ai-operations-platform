@@ -14,10 +14,12 @@
 사유별 목록(리크루팅·컨설팅 빼기 등)으로 줄이지 않는다 — 그 사람이 나중에 창업하면 목록 밖이라 조용히 샌다.
 빼는 것: ✅ 받은 사람(승격됨) · 사람이 손댄 행(타깃·DB로 업데이트·극초기·Status 가 New/Legacy 밖) · 아직 결론 안 난 카드 · 이미 다시 올라와 카드를 기다리는 사람 · 아직 안 나간 재고(card 가 볼 사람).
 
-## 변화 = 회사·직함 지문(profile.fingerprint)이 다르다
+## 변화 = 창업 쪽으로 움직였다 (moved)
 
-헤드라인·소개글은 자주 바뀌어 잡음이다 — 기록만 하고 다시 올리지 않는다.
-기준 지문 = 마지막 checked → 없으면 원본 아카이브의 산 날 item(검색 액터) → 그것도 없으면 이번 값을 기준으로만 남긴다(변화로 안 친다).
+창업 직함 회사가 새로 생김(스텔스가 실명이 됨 포함) · 현직을 그만둠. 직함 표기·부업·창업과 무관한 이직은 변화가 아니다 —
+10/14 첫 실행이 회사·직함 지문 전체를 비교해 390명 중 87명을 올렸고 76명이 그런 잡음이었다(tools/linkedin_recheck_reassess 로 철회).
+기준 = 마지막 checked 의 ffp → 없으면 원본 아카이브의 산 날 item(검색 액터) → 그것도 없으면 이번 값을 기준으로만 남긴다(변화로 안 친다).
+다시 올리기 전 사람 검사(국적·추정 나이) — 옛 Legacy 행엔 국적 태그가 없다. 외국인이면 태그만 달고 안 올린다.
 바뀌면: 노션 행 갱신(재직·창업·공백·헤드라인·Tier·변화 요약·Last Checked · Status=New) → 장부 resurfaced. card 가 그 사람을 다시 후보로 보고
 창업 판정·카드 기준을 새로 건다(안 맞으면 다시 Legacy — 감시 목록엔 남는다).
 """
@@ -185,45 +187,109 @@ def run(*, dry_run: bool = False, limit: int | None = None, gate: Gate | None = 
         if not it:
             miss += 1                                                        # 못 받은 사람 — 기록 안 함, 다음 주에 다시
             continue
-        new = profile.fingerprint(it)
-        old = (checked.get(t["page_id"]) or {}).get("fp") or (profile.fingerprint(raw[t["key"]]) if t["key"] in raw else "")
-        ch = bool(old) and old != new
-        ledger.append(R.TASK, t["key"], R.CHECKED, page_id=t["page_id"], fp=new, pub=t["public_id"], headline=(it.get("headline") or "")[:200],
-                      changed=ch, baseline=not old)
-        if ch:
-            changed.append((t, it, old, new))
+        prev = checked.get(t["page_id"]) or {}
+        base_item = raw.get(t["key"])
+        old_ffp = prev["ffp"] if "ffp" in prev else (founder_fp(base_item) if base_item else None)
+        old_fp = prev.get("fp") or (profile.fingerprint(base_item) if base_item else "")
+        why = moved(old_ffp, founder_fp(it))
+        ledger.append(R.TASK, t["key"], R.CHECKED, page_id=t["page_id"], fp=profile.fingerprint(it), ffp=founder_fp(it),
+                      pub=t["public_id"], headline=(it.get("headline") or "")[:200], changed=bool(why), why=why,
+                      baseline=old_ffp is None)
+        if why:
+            changed.append((t, it, old_fp, why))
         else:
             same += 1
-    print(f"· 받음 {len(todo) - miss}/{len(todo)} · 변화 {len(changed)} · 그대로 {same}" + (f" · 🔴 {'; '.join(unknown)}" if unknown else ""))
-
-    # ---- 바뀐 사람 — 새 기준으로 판정 → 노션 갱신(refresh 문) → resurfaced
-    if changed:
-        sums = []
-        for t, it, _, _ in changed:
-            s = R._summary({**it, "_axis": t["axis"]})
-            s["key"] = t["key"]
-            sums.append(s)
-        crit = judge.criteria_text()
-        v = judge.judge_people(sums, criteria=crit)
-        judgments.save(g.con, judgments.LIVE, judge.sha(crit), {s["key"]: judge._line(s) for s in sums},
-                       v.require() if v.is_measured else [])
-        vmap = {x["key"]: x for x in (v.require() if v.is_measured else [])}
-        for (t, it, old, new), s in zip(changed, sums):
-            judgments.set_page(g.con, t["key"], t["page_id"])
-            vv = vmap.get(t["key"])
-            if not vv:
-                print(f"  ⚠️  {t['live'].get('서비스명')} 판정 못 받음 — 다음 주에 다시(checked 를 되돌리지 않는다: 변화는 기록됐다)")
-                continue
-            full = R._props({**it, "_axis": t["axis"]}, vv, f"recheck-{today}")
-            props = {k: full[k] for k in REFRESH if k in full}
-            summ = f"{today} {_fp_text(old)} → {_fp_text(new)}"
-            props.update({"Status": "New", "Last Checked": today, "변화 요약": summ})
-            st = g.out(f"{t['page_id']}@{today}", "refresh", {"name": t["live"].get("서비스명"), "change": summ},
-                       lambda props=props, t=t: R.notion.update(t["page_id"], R.DB, props).require())
-            if st != "done":
-                print(f"  🔴 {t['live'].get('서비스명')} 노션 갱신 {st}: {(g.row(t['page_id'] + '@' + today, 'refresh') or {}).get('error', '')}")
-                continue
-            ledger.append(R.TASK, t["key"], R.RESURFACED, page_id=t["page_id"], old=_fp_text(old), new=_fp_text(new),
-                          tier=vv["verdict"], name=t["live"].get("서비스명"))
-            print(f"  ✦ {t['live'].get('서비스명')}: {_fp_text(old)} → {_fp_text(new)} ({vv['verdict']})")
+    print(f"· 받음 {len(todo) - miss}/{len(todo)} · 창업 쪽 변화 {len(changed)} · 그대로 {same}" + (f" · 🔴 {'; '.join(unknown)}" if unknown else ""))
+    resurface(g, changed, today)
     return 2 if unknown else 0
+
+
+# ---------------------------------------------------------------- 변화 판정 · 다시 올리기
+
+JOBLESS = "(현직 없음)"
+
+
+def founder_fp(item: dict) -> str:
+    """창업 직함이 붙은 현 회사 집합 — `A|B`. 현직은 있는데 창업 직함이 없으면 "", 현직이 없으면 JOBLESS."""
+    ps = profile.positions(item)
+    if not ps:
+        return JOBLESS
+    return "|".join(sorted({p["company"] for p in ps if p["company"] and profile.is_founder_role(p)}))
+
+
+def moved(old: str | None, new: str) -> str:
+    """**창업 쪽으로 움직였나** — 이유를, 아니면 "". 기준 지문이 없으면(None) 변화로 치지 않는다.
+    🔴 회사·직함 지문 전체를 비교하면 직함 표기("Founder"→"창립자")·부업 추가·창업과 무관한 이직까지 잡힌다 —
+       10/14 첫 실행 390명 중 87명이 '변화'였고 대부분 그런 잡음이었다. 우리가 찾는 건 창업 신호다:
+       창업 직함 회사가 새로 생김(스텔스가 실명이 됨 포함) · 현직을 그만둠(경력단절 — 곧 창업할 수 있다)."""
+    if old is None or old == new:
+        return ""
+    if new == JOBLESS:
+        return "현직을 그만둠"
+    added = set(new.split("|")) - set(old.split("|")) - {""}
+    return f"새 창업 회사: {', '.join(sorted(added))}" if added else ""
+
+
+def _not_target(items: dict[str, tuple[dict, str]]) -> dict[str, str]:
+    """다시 올리기 전 사람 검사 — 국적(claude)·추정 나이. key → 이유. 🔴 07~08월에 산 Legacy 행엔 국적 태그가 없다
+    (태그 소급은 재고에만 했다) — 안 거르면 외국인이 다시 카드로 간다(10/14 첫 실행에서 발견)."""
+    out = {k: f"추정 {axes.MAX_AGE + 1}세 이상" for k, (it, _) in items.items()
+           if (profile.estimated_age(it) or 0) > axes.MAX_AGE}
+    ask = {k: judge.nationality_line(k, *profile.nationality_input(it)) for k, (it, ax) in items.items()
+           if k not in out and not axes.nationality_exempt(ax)}
+    if ask:
+        nf = judge.nationality(ask)
+        if not nf.is_measured:
+            print(f"  ⚠️  국적 판정 실패({nf.reason}) — 이번엔 아무도 안 올린다(외국인이 카드로 가는 쪽이 더 비싸다)")
+            return {k: "국적 미확인" for k in items}
+        out.update({k: judge.FOREIGN for k, v in nf.require().items() if v == judge.FOREIGN})
+    return out
+
+
+def resurface(g: Gate, changed: list, today: str) -> int:
+    """창업 쪽으로 움직인 사람 — 국적·나이 검사 → 새 기준 판정 → 노션 갱신(refresh 문) → resurfaced. 올린 수."""
+    if not changed:
+        return 0
+    bad = _not_target({t["key"]: (it, t["axis"]) for t, it, _, _ in changed})
+    for t, _, _, _ in changed:
+        if bad.get(t["key"]) == judge.FOREIGN:                               # 태그를 남겨 card·recheck 가 다시 안 본다
+            g.out(f"{t['page_id']}@{today}:nat", "refresh", {"name": t["live"].get("서비스명"), "tag": judge.FOREIGN},
+                  lambda t=t: R.notion.update(t["page_id"], R.DB, {"Korea Signal": sorted({*(t["live"].get("Korea Signal") or []),
+                                                                                          judge.FOREIGN})}).require())
+    go = [(t, it, old, why) for t, it, old, why in changed if t["key"] not in bad]
+    if bad:
+        print(f"· 대상 아님 {len(bad)}명 — " + " · ".join(f"{w} {list(bad.values()).count(w)}" for w in sorted(set(bad.values()))))
+    if not go:
+        return 0
+    sums = []
+    for t, it, _, _ in go:
+        s = R._summary({**it, "_axis": t["axis"]})
+        s["key"] = t["key"]
+        sums.append(s)
+    crit = judge.criteria_text()
+    v = judge.judge_people(sums, criteria=crit)
+    judgments.save(g.con, judgments.LIVE, judge.sha(crit), {s["key"]: judge._line(s) for s in sums},
+                   v.require() if v.is_measured else [])
+    vmap = {x["key"]: x for x in (v.require() if v.is_measured else [])}
+    n = 0
+    for t, it, old, why in go:
+        judgments.set_page(g.con, t["key"], t["page_id"])
+        vv = vmap.get(t["key"])
+        if not vv:
+            print(f"  ⚠️  {t['live'].get('서비스명')} 판정 못 받음 — 다음 주에 다시")
+            continue
+        full = R._props({**it, "_axis": t["axis"]}, vv, f"recheck-{today}")
+        props = {k: full[k] for k in REFRESH if k in full}
+        new_txt = _fp_text(profile.fingerprint(it))
+        summ = f"{today} {why} — {_fp_text(old)} → {new_txt}"
+        props.update({"Status": "New", "Last Checked": today, "변화 요약": summ[:1900]})
+        st = g.out(f"{t['page_id']}@{today}", "refresh", {"name": t["live"].get("서비스명"), "change": summ[:300]},
+                   lambda props=props, t=t: R.notion.update(t["page_id"], R.DB, props).require())
+        if st != "done":
+            print(f"  🔴 {t['live'].get('서비스명')} 노션 갱신 {st}: {(g.row(t['page_id'] + '@' + today, 'refresh') or {}).get('error', '')}")
+            continue
+        ledger.append(R.TASK, t["key"], R.RESURFACED, page_id=t["page_id"], old=_fp_text(old), new=new_txt, why=why,
+                      tier=vv["verdict"], name=t["live"].get("서비스명"))
+        print(f"  ✦ {t['live'].get('서비스명')}: {why} ({vv['verdict']})")
+        n += 1
+    return n

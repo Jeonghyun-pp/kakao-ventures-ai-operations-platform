@@ -33,7 +33,8 @@ def case(rows, items, **more):
     fake = Fake(items)
     c = Case(notion=Notion({run.DB: rows, run.EARLY: []}),
              **{"apify": fake, "judge.judge_people": lambda people, criteria=None: Fetched.measured(
-                 [{"key": p["key"], "verdict": "Catch", "reason": "r", "raw": ""} for p in people]), **more})
+                 [{"key": p["key"], "verdict": "Catch", "reason": "r", "raw": ""} for p in people]),
+                "judge.nationality": lambda lines: Fetched.measured({}), **more})
     c.fake = fake
     return c
 
@@ -74,16 +75,40 @@ class Recheck(unittest.TestCase):
     def test_change_refreshes_notion_and_resurfaces(self):
         rows = [legacy("p1", "a"), legacy("p2", "b")]
         with case(rows, {"a": item("a", "NewCo"), "b": item("b", "Same")}) as c:
-            ledger.append("linkedin", "in/a", run.CHECKED, ts="2026-08-01T00:00:00Z", page_id="p1", fp="v2|Stealth|CEO")
-            ledger.append("linkedin", "in/b", run.CHECKED, ts="2026-08-01T00:00:00Z", page_id="p2", fp="v2|Same|CEO")
+            ledger.append("linkedin", "in/a", run.CHECKED, ts="2026-08-01T00:00:00Z", page_id="p1", fp="v2|Stealth|CEO", ffp="Stealth")
+            ledger.append("linkedin", "in/b", run.CHECKED, ts="2026-08-01T00:00:00Z", page_id="p2", fp="v2|Same|CEO", ffp="Same")
             self.assertEqual(recheck.run(), 0)
         self.assertEqual([u[0] for u in c.notion.updated], ["p1"])                            # 무변화(p2)는 노션 0
         props = c.notion.updated[0][1]
         self.assertEqual((props["Status"], props["Tier"]), ("New", "Catch"))
-        self.assertIn("Stealth · CEO → NewCo · CEO", props["변화 요약"])
+        self.assertIn("새 창업 회사: NewCo — Stealth · CEO → NewCo · CEO", props["변화 요약"])
         rs = c.rows(run.RESURFACED)
         self.assertEqual([(r["page_id"], r["old"], r["new"]) for r in rs], [("p1", "Stealth · CEO", "NewCo · CEO")])
         self.assertEqual(len(c.rows(run.CHECKED)), 4)
+
+    def test_moved_means_toward_founding_not_any_edit(self):
+        """직함 표기·부업·무관한 이직은 변화가 아니다 — 10/14 첫 실행 87명 중 76명이 그런 잡음이었다."""
+        self.assertEqual(recheck.moved("Enhans", "Enhans"), "")                      # Founder → 창립자
+        self.assertEqual(recheck.moved("", ""), "")                                  # 엔지니어 → 다른 회사 엔지니어
+        self.assertEqual(recheck.moved("A|B", "A"), "")                              # 창업 직함 하나를 내려놓음
+        self.assertEqual(recheck.moved("Stealth Startup", "Phreesh"), "새 창업 회사: Phreesh")
+        self.assertEqual(recheck.moved("Aco", recheck.JOBLESS), "현직을 그만둠")
+        self.assertEqual(recheck.moved(None, "X"), "")                               # 기준 없음 → 기준만
+
+    def test_foreigner_is_tagged_not_resurfaced(self):
+        rows = [legacy("p1", "a")]
+        with case(rows, {"a": item("a", "NewCo")},
+                  **{"judge.nationality": lambda lines: Fetched.measured({k: run.judge.FOREIGN for k in lines})}) as c:
+            ledger.append("linkedin", "in/a", run.CHECKED, ts="2026-08-01T00:00:00Z", page_id="p1", fp="v2|Stealth|CEO", ffp="Stealth")
+            recheck.run()
+        self.assertEqual(c.rows(run.RESURFACED), [])
+        self.assertEqual(c.notion.updated, [("p1", {"Korea Signal": [run.judge.FOREIGN]})])
+
+    def test_revoked_resurface_is_not_open(self):
+        with case([], {}):
+            ledger.append("linkedin", "in/a", run.RESURFACED, page_id="p1", old="a", new="b")
+            ledger.append("linkedin", "in/a", run.RESURFACED, page_id="p1", revoked=True)
+            self.assertEqual(run._resurfaced_open(), {})
 
     def test_no_baseline_records_only(self):
         rows = [legacy("p1", "a")]

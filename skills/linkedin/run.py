@@ -102,7 +102,7 @@ def _resurfaced_open() -> dict[str, dict]:
     🔴 ❌ 는 영구가 아니다 [사용자 결정 2026-10-14]. 프로필이 바뀌면(recheck) 한 번 나간 사람도 다시 후보다."""
     posted = _last(POSTED, "page_id")
     return {pid: r for pid, r in _last(RESURFACED, "page_id").items()
-            if r["ts"] > posted.get(pid, {}).get("ts", "")}
+            if r["ts"] > posted.get(pid, {}).get("ts", "") and not r.get("revoked")}     # revoked = 기준을 고쳐 다시 보니 변화가 아니었다
 
 
 def _open_posts() -> dict[str, dict]:
