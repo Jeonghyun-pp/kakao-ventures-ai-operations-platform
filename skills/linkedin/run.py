@@ -426,6 +426,7 @@ def _summary(item: dict) -> dict:
         "company_url": profile.company_url(item),
         "company": " · ".join(dict.fromkeys(p["company"] for p in s["positions"] if p["company"])),
         "title": " · ".join(dict.fromkeys(p["title"] for p in s["positions"] if p["title"])),
+        "past": profile.past_positions(item),
     })
     return s
 

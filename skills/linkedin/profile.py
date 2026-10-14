@@ -156,6 +156,20 @@ def fingerprint(item: dict) -> str:
     return f"{FP_VERSION}|{companies}|{titles}"
 
 
+def past_positions(item: dict, n: int = 4) -> str:
+    """끝난 경력 최근 n개 — `직함@회사 · …`. 판정이 연쇄창업·이전 이력을 보려면 이게 있어야 한다
+    (10/14 learn: 연쇄창업 ✅ 58% vs 기저 33% — 그런데 판정 줄엔 현직뿐이었다)."""
+    out = []
+    for e in item.get("experience") or []:
+        if isinstance(e, dict) and not is_present(e):
+            t, c = str(e.get("position") or e.get("title") or "").strip(), str(e.get("companyName") or "").strip()
+            if t or c:
+                out.append(f"{t}@{c}")
+        if len(out) >= n:
+            break
+    return " · ".join(out)
+
+
 def summarize(item: dict) -> dict:
     """판정에 넣을 최소 정보."""
     ps = positions(item)
