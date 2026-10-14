@@ -15,7 +15,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 
-from kvlib import judgments, ledger, paths, report
+from kvlib import ledger, paths, report
 from kv_transport import claude
 
 from . import features, judge
@@ -149,17 +149,45 @@ def leaks(text: str) -> list[str]:
     return sorted(t for t in _people_terms() if t.lower() in low)
 
 
+def evaluate(texts: dict[str, str]) -> dict[str, dict]:
+    """기준 글들을 **같은 입력**으로 정답에 맞댄다 — 이름 → {n, catch, catch_yes, yes, agree}.
+    🔴 저장된 판정 줄(replay)을 쓰지 않는다: 옛 줄엔 이전경력 칸이 없어 새 기준이 볼 근거가 빠진다(10/14).
+       원본 아카이브에서 지금 형식의 줄을 다시 만든다. 기준을 만든 정답으로 다시 재는 것이라 수정안 점수는 낙관적이다."""
+    labels, landed, raw = R._reaction_labels(), R._last(ledger.LANDED), RC.raw_by_key()
+    keys = [k for k in labels if k in raw]
+    lines = []
+    for k in keys:
+        s = R._summary({**raw[k], "_axis": landed.get(k, {}).get("axis", "")})
+        s["key"] = k
+        lines.append(judge._line(s))
+    out = {}
+    for name, text in texts.items():
+        f = judge.judge_lines(lines, keys, text) if keys else None
+        vs = {v["key"]: v["verdict"] for v in (f.require() if f and f.is_measured else [])}
+        lab = [(vs[k], labels[k]["label"]) for k in keys if k in vs]
+        out[name] = {"n": len(lab), "catch": sum(v == "Catch" for v, _ in lab), "yes": sum(l == "yes" for _, l in lab),
+                     "catch_yes": sum(v == "Catch" and l == "yes" for v, l in lab),
+                     "agree": sum((v == "Catch") == (l == "yes") for v, l in lab)}
+    return out
+
+
+def _fmt(m: dict) -> str:
+    p = f"{m['catch_yes']}/{m['catch']}" + (f" ({m['catch_yes'] / m['catch']:.0%})" if m["catch"] else "")
+    return f"Catch 중 ✅ {p} · ✅ 중 Catch {m['catch_yes']}/{m['yes']} · 일치 {m['agree']}/{m['n']}"
+
+
 def propose(con, rows: list[dict], summary: dict, out_dir: Path) -> str:
-    """문턱을 넘은 구간이 있으면 claude 수정안 → replay → diff 요약. 없으면 이유 한 줄."""
+    """매주: 지금 기준의 성적(같은 입력) + 문턱을 넘은 특징이 있으면 claude 수정안과 나란히. 반영은 사람."""
+    crit = judge.criteria_text()
     sig = [r for r in rows if r["signal"]]
     if not sig:
-        return "문턱을 넘은 특징이 없다 — 수정안 없음 (표본이 쌓이면 나온다)"
-    crit = judge.criteria_text()
+        m = evaluate({"now": crit})["now"]
+        return f"지금 기준: {_fmt(m)} (기저 ✅율 {summary['base']:.0%})\n문턱을 넘은 특징이 없다 — 수정안 없음"
     facts = "\n".join(f"- {r['feature']} = {r['bin']}: ✅ {r['yes']}/{r['n']} ({r['rate']:.0%}, 기저 {summary['base']:.0%}, "
                       f"95% {r['lo']:.0%}~{r['hi']:.0%})" for r in sig)
     prompt = (f"# 현재 criteria.md\n\n{crit}\n\n# 지난 {R._cfg('learn_weeks')}주+ 심사역 반응에서 우연으로 보기 어려운 특징\n{facts}\n\n"
-              "# 할 일\n위 특징을 반영해 criteria.md 전체를 다시 써라. 규칙:\n"
-              "- 룰마다 근거 수치와 n 을 주석으로 단다.\n- 특정 사람 이름·회사명을 쓰지 않는다 — 특징만.\n"
+              "# 할 일\n위 특징을 반영해 criteria.md 전체를 다시 써라. 이미 반영된 특징이면 근거 수치만 갱신한다. 규칙:\n"
+              "- 룰마다 근거 수치와 n 을 단다.\n- 특정 사람 이름·회사명을 쓰지 않는다 — 특징만.\n"
               "- 위 목록에 없는 새 룰을 지어내지 않는다. 출력 형식 절은 그대로 둔다.\n- 머리말 없이 파일 본문만 출력한다.\n")
     try:
         text = claude.run_session(prompt, system="너는 벤처캐피털 소싱 기준 문서를 고친다. 요구된 본문만 출력한다.", tools="")
@@ -170,12 +198,14 @@ def propose(con, rows: list[dict], summary: dict, out_dir: Path) -> str:
         return f"🔴 수정안에 특정 사람이 들어갔다 — 버린다: {', '.join(bad[:5])}"
     cand = out_dir / f"learn-{ledger.today()}-criteria.md"
     cand.write_text(text, encoding="utf-8")
-    r = judgments.replay(con, judge.judge_lines, text, judge.sha(text))
-    rows_ = judgments.diff(con, judgments.LIVE, r["run"], bucket=R._bucket)
-    lab = [x for x in rows_ if x["human"]]
-    return (f"수정안 `{cand}` · replay {r['run']} (판정 {r['judged']})\n"
-            f"정답 {len(lab)}명 중 일치 — 지금 기준 {sum(x['a'] == x['human'] for x in lab)} · 수정안 {sum(x['b'] == x['human'] for x in lab)}\n"
-            f"반영하려면 사람이 승인한다: `cp {cand} skills/linkedin/criteria.md`")
+    m = evaluate({"now": crit, "cand": text})
+    pn = m["now"]["catch_yes"] / m["now"]["catch"] if m["now"]["catch"] else 0
+    pc = m["cand"]["catch_yes"] / m["cand"]["catch"] if m["cand"]["catch"] else 0
+    better = pc > pn and m["cand"]["catch_yes"] >= m["now"]["catch_yes"] - 1           # 정밀도가 오르고 잡는 ✅ 가 크게 안 줄 때만
+    return (f"지금 기준: {_fmt(m['now'])}\n수정안:   {_fmt(m['cand'])}  `{cand}`\n"
+            + (f"→ 수정안이 낫다. 반영은 사람이 승인한다: `cp {cand} skills/linkedin/criteria.md` 뒤 `python -m tools.linkedin_retier --apply`"
+               if better else "→ 지금 기준 유지 (수정안이 낫지 않다)")
+            + "\n(기준을 만든 정답으로 다시 잰 값이라 낙관적이다 — 탐색 카드 줄이 표본 밖 검증이다)")
 
 
 def run(*, dry_run: bool = False) -> int:

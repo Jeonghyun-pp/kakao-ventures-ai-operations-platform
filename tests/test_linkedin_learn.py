@@ -38,6 +38,21 @@ class Learn(unittest.TestCase):
             self.assertEqual(learn.leaks("스텔스 2년차는 Cut. SampleTeam 같은 팀은 Catch"), ["SampleTeam"])
             self.assertEqual(learn.leaks("창업 4~12개월은 가점 (✅ 9/10)"), [])
 
+    def test_evaluate_rebuilds_lines_and_scores_catch(self):
+        """같은 입력(원본에서 다시 만든 줄)으로 기준 글마다 Catch 정밀도를 잰다."""
+        items = {k: {"publicIdentifier": k, "headline": "CEO", "currentPosition": [{"companyName": "A", "position": "CEO"}],
+                     "experience": [], "firstName": k} for k in ("k1", "k2", "k3")}
+        def fake(lines, keys, text):
+            from kvlib import Fetched
+            return Fetched.measured([{"key": k, "verdict": "Catch" if (text == "A" or k == "k1") else "Wait"} for k in keys])
+        with Case() as c, mock.patch.object(recheck, "raw_by_key", lambda: items), mock.patch.object(learn.judge, "judge_lines", fake):
+            card("k1", "reaction_yes")
+            card("k2", "expiry")
+            card("k3", "expiry")
+            m = learn.evaluate({"A": "A", "B": "B"})
+        self.assertEqual((m["A"]["catch"], m["A"]["catch_yes"]), (3, 1))
+        self.assertEqual((m["B"]["catch"], m["B"]["catch_yes"], m["B"]["agree"]), (1, 1, 3))
+
     def test_wilson_bounds(self):
         lo, hi = learn._wilson(9, 10)
         self.assertTrue(0.5 < lo < 0.9 < hi <= 1.0)

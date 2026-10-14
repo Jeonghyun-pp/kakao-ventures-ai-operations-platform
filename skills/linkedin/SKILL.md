@@ -68,7 +68,8 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
 ```
 정답      심사역이 카드에 ✅·❌ 를 누른다. 그게 전부다 — card 가 매일 judgments(human) 으로 가져간다
 보고서    ~/kv-data/linkedin/reports/<날짜>.md · 🚩 절 = 판정과 반응이 갈린 사람 · learn-<날짜>.md = 주간 특징 표·수정안
-승인      learn 수정안이 있으면 replay 결과를 보고 사람이 반영한다(Reviewer C yes/no)
+승인      learn 이 매주 지금 기준의 성적(Catch 중 ✅)을 찍고, 수정안이 더 나으면 반영 명령을 적는다 — 사람이 승인(Reviewer C yes/no)
+          cp <수정안> skills/linkedin/criteria.md → python -m tools.linkedin_retier --apply (재고 Tier 다시 매기기)
 기준      skills/linkedin/criteria.md
 확인      run replay [--limit N] [--criteria 파일]   저장된 사람을 고친 기준으로 다시 판정 (Apify 0 · 노션 0)
           run diff --b r-<sha>                        무엇이 달라졌나 · 정답과는 어떤가
@@ -104,6 +105,8 @@ names.py       ✅ 리마인드에 쓸 한글 이름 (규칙 → claude)
 recheck.py     재확인 — 감시 목록 원칙 · 지문 비교 · 다시 재고로     features.py  카드의 특징(코드, 고정 목록)
 learn.py       주간 학습 — 특징 표 · 수정안 · 사람 이름 유출 검사
 ../../tools/linkedin_reaction_backfill.py   정답을 반응으로 옮길 때 한 번(소급 · 입력 복원) — 다시 돌려도 된다
+../../tools/linkedin_retier.py   기준을 바꾼 뒤 재고 Tier 다시 매기기(노션 덮어쓰기)
+../../tools/linkedin_recheck_reassess.py   변화 규칙을 고친 뒤 그날 다시 올린 사람 재판정
 criteria.md    Tier 기준 — 사람이 깎는다
 ../../people.yaml   심사역 명부(슬랙 ID → 성함). 메일과 같은 파일
 ```
