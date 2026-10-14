@@ -59,6 +59,43 @@ def refresh_snapshots() -> int:
     return n
 
 
+TAGGED = "tagged"     # 장부 — 카드 한 장에 붙인 태그(features.TAGS). 한 번 붙이면 다시 안 부른다
+
+
+def profile_text(it: dict) -> str:
+    """태그를 붙일 재료 — 헤드라인·소개·현직·경력(회사·직함·기간). 이름은 넣지 않는다(특징만 본다)."""
+    exp = [e for e in (it.get("experience") or []) if isinstance(e, dict)][:8]
+    lines = [f"헤드라인: {str(it.get('headline') or '')[:200]}", f"소개: {str(it.get('about') or '')[:600]}"]
+    lines += [f"경력: {e.get('position') or e.get('title') or ''} @ {e.get('companyName') or ''}" for e in exp]
+    lines += [f"학력: {e.get('schoolName') or e.get('title') or ''} {e.get('degree') or ''}"
+              for e in (it.get("education") or [])[:3] if isinstance(e, dict)]
+    return " / ".join(x.replace("\n", " ").replace("\t", " ") for x in lines)
+
+
+def tag(raw: dict[str, dict], keys: list[str]) -> dict[str, list[str]]:
+    """key → 태그 목록. 장부에 있으면 그걸, 없으면 claude(도구 끔 · 50명씩)로 붙여 장부에 남긴다."""
+    have = {r["key"]: r.get("tags") or [] for r in ledger.rows(R.TASK, ev=TAGGED)}
+    todo = [k for k in keys if k not in have and raw.get(k)]
+    vocab = "\n".join(f"- {t}: {d.split(' (')[0]}" for t, d in features.TAGS.items())
+    for i in range(0, len(todo), judge.BATCH):
+        chunk = todo[i:i + judge.BATCH]
+        prompt = (f"# 태그 정의 — 이 어휘만 쓴다\n{vocab}\n\n# 대상 {len(chunk)}명 (key⇥프로필)\n"
+                  + "\n".join(f"{k}\t{profile_text(raw[k])}" for k in chunk)
+                  + f"\n\n# 출력\n정확히 {len(chunk)}줄. `key<TAB>태그,태그` — 해당 없으면 `key<TAB>-`. 근거가 프로필에 있을 때만 붙인다. 다른 말 없이.\n")
+        try:
+            out = claude.run_session(prompt, system="너는 벤처캐피털 소싱 담당자를 돕는다. 요구된 형식만 출력한다.", tools="")
+        except claude.SessionError as e:
+            print(f"  ⚠️  태그 배치 실패({e}) — 다음 주에 다시")
+            break
+        for line in out.splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 2 and parts[0] in chunk and parts[0] not in have:
+                tags = [t.strip() for t in parts[1].split(",") if t.strip() in features.TAGS]   # 어휘 밖은 버린다
+                have[parts[0]] = tags
+                ledger.append(R.TASK, parts[0], TAGGED, tags=tags)
+    return {k: have[k] for k in keys if k in have}
+
+
 def table(con) -> tuple[list[dict], dict]:
     """정답 있는 카드 → 특징 구간별 행. (행 목록, 요약)."""
     labels = R._reaction_labels()
@@ -66,13 +103,14 @@ def table(con) -> tuple[list[dict], dict]:
     landed = R._last(ledger.LANDED)
     live = dict(con.execute("SELECT key, verdict FROM judgments WHERE run='live' AND ok=1"))
     raw = RC.raw_by_key()
+    tags = tag(raw, list(labels))
     rows: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])     # (특징, 구간) → [✅, 결론]
     for k, lab in labels.items():
         p, ld = posted.get(k, {}), landed.get(k, {})
         card = {"axis": ld.get("axis"), "tier": live.get(k) or ld.get("tier"), "posted_day": p.get("day"),
                 "captured_day": ld.get("ts", "")[:10] if str(ld.get("ts", "")).startswith("20") else None,
                 "explore": p.get("explore"), "resurfaced": bool(p.get("gk"))}
-        for f, b in features.extract(raw.get(k), card).items():
+        for f, b in features.extract(raw.get(k), card, tags.get(k)).items():
             rows[(f, b)][0] += lab["label"] == "yes"
             rows[(f, b)][1] += 1
     n = len(labels)
