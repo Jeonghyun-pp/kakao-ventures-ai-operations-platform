@@ -263,7 +263,7 @@ class SendCase(unittest.TestCase):
         self.addCleanup(self.con.close)
         msgs = [mail("a", sender="f@example.com", subject="투자 문의", ms=10),
                 mail("a2", sender="f@example.com", subject="투자 문의 (자료 추가)", ms=20),         # 같은 사람이 대화를 나눠 또 보냄
-                mail("fu", sender="g@example.com", subject="재문의 FOLLOW", ms=30),
+                mail("fu", sender="f@example.com", subject="재문의 FOLLOW", ms=30),            # 같은 사람의 투자 재문의
                 mail("t1", sender="h@example.com", subject="투자 문의 H", ms=40),
                 mail("t2", t="t1", sender="deals@example.vc", subject="Re: 투자 문의 H", ms=50),   # 우리가 이미 답했다
                 mail("nr", sender="no-reply@example.com", subject="투자 문의 NR", ms=60)]
@@ -285,7 +285,8 @@ class SendCase(unittest.TestCase):
         self.assertEqual(h.calls, [])                                                # 🔴 아무 손도 안 불렀다
         self.assertEqual(s["a"][0], "dry")                                           # 보냈을 것
         self.assertIn("같은 수신자", s["a2"][1]["why"])
-        self.assertIn("후속", s["fu"][1]["why"])
+        self.assertIn("같은 수신자", s["fu"][1]["why"])                               # [10-15] 재문의라서가 아니라 이미 보낼 사람이라서 막힌다
+        self.assertNotIn("후속", s["fu"][1]["why"])                                   #          투자 재문의도 폼 안내 대상이다 — 덱은 폼으로만 받는다
         self.assertIn("대화가 이미 진행", s["t1"][1]["why"])
         self.assertIn("수신자", s["nr"][1]["why"])
         self.assertEqual((r["would_send"], r["skipped"], r["sent"]), (1, 4, 0))

@@ -228,7 +228,8 @@ class Flow(Gate):
         to = (act.get("to") or "").lower()
         webflow = row["webflow_kind"] is not None
         why = (
-            "후속·재문의 — 폼 안내를 또 보내지 않는다" if follow == "yes" else
+            # [사용자 결정 2026-10-15] 덱·투자 관련은 폼으로만 받는다 — 후속·재문의여도 폼 안내다. 같은 사람에게 두 번은 아래 수신자 검사가 막는다
+            "후속·재문의 — 폼 안내를 또 보내지 않는다" if follow == "yes" and cat != rules.INBOUND_KO else
             # ponytail: no-reply 류는 나열이다(열린 집합). 놓쳐도 반송될 뿐이고, 주 방어는 "수신자 = DB 에 기록된 발신자"다
             "보낼 수 없는 수신자" if not to or to in own or re.search(r"no-?reply|donotreply|mailer-daemon", to) else
             "같은 수신자에게 이미 보냈거나 보낼 것이다" if self.con.execute(
