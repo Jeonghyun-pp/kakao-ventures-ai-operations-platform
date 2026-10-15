@@ -38,6 +38,7 @@ from kvlib import Fetched, constraints, secrets
 
 _API = "https://sheets.googleapis.com/v4/spreadsheets"
 _SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly"
+_WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets"     # append_row 만 쓴다. 읽기는 계속 readonly
 _GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 
 _NET_ERRORS = (
@@ -145,16 +146,17 @@ def auth_check() -> Fetched:
 
 # ---------------------------------------------------------------- HTTP
 
-def _get(path: str, *, params: dict | None = None) -> dict:
-    """시트 요청 한 번. 재시도 계층은 노션·지메일 통로와 같다."""
+def _get(path: str, *, params: dict | None = None, method: str = "GET", json_body: dict | None = None,
+         scope: str = _SCOPE) -> dict:
+    """시트 요청 한 번. 재시도 계층은 노션·지메일 통로와 같다. 쓰기는 append_row 하나뿐이다."""
     net_backoff = constraints.get("http.retry_backoff_sec")
     url = f"{_API}{path}"
     net_try = 0
     other_try = 0
     while True:
         try:
-            r = requests.get(url, headers={"Authorization": f"Bearer {_access_token()}"},
-                             params=params, timeout=constraints.get("http.timeout_sec"))
+            r = requests.request(method, url, headers={"Authorization": f"Bearer {_access_token(scope)}"},
+                                 params=params, json=json_body, timeout=constraints.get("http.timeout_sec"))
         except _NET_ERRORS as e:
             if net_try < len(net_backoff):
                 w = net_backoff[net_try]
@@ -226,3 +228,30 @@ def values(url_or_id: str, worksheet: str) -> Fetched:
         # 키가 아예 없으면 워크시트가 비었거나 응답이 이상하다 — 0행과 구별해 미상으로 둔다
         return Fetched.unknown(f"응답에 values 가 없다: {str(res)[:200]}")
     return Fetched.measured([[str(c) for c in r] for r in rows], rows=len(rows), range=res.get("range"))
+
+
+# ---------------------------------------------------------------- 쓰기 (하나뿐)
+
+def append_row(url_or_id: str, worksheet: str, row: list) -> Fetched:
+    """워크시트 **맨 아래에** 한 줄을 붙이고, 붙은 줄을 다시 읽어 돌려준다(표시 문자열 list[str]).
+
+    🔴 RAW 로 쓴다. USER_ENTERED 는 '+82 10-…' 같은 연락처를 수식으로 읽어 #ERROR! 를 만든다.
+       날짜는 문자열이 아니라 **시트 일련번호(숫자)** 로 넘긴다 — 그 열의 서식(폼이 정한 것)대로 표시돼 폼 응답과 같은 모양이 된다.
+    🔴 쓴 것은 되읽는다. 200 은 저장을 뜻하지 않는다.
+    🔴 중간에 끼우지 않는다(INSERT_ROWS) — 폼이 계속 쓰는 시트다.
+    """
+    try:
+        sid = spreadsheet_id(url_or_id)
+        rng = quote(f"'{worksheet}'!A1", safe="")
+        res = _get(f"/{sid}/values/{rng}:append", method="POST", scope=_WRITE_SCOPE,
+                   params={"valueInputOption": "RAW", "insertDataOption": "INSERT_ROWS"}, json_body={"values": [row]})
+        updated = ((res.get("updates") or {}).get("updatedRange") or "")
+        if not updated:
+            return Fetched.unknown("append 응답에 updatedRange 가 없다 — 썼는지 모른다")
+        got = _get(f"/{sid}/values/{quote(updated, safe='')}", params={"valueRenderOption": "FORMATTED_VALUE"})
+    except AuthDead as e:
+        return Fetched.unknown(f"auth_dead:{e}")
+    except SheetsError as e:
+        return Fetched.unknown(f"sheets:{e}")
+    vals = (got.get("values") or [[]])[0]
+    return Fetched.measured(vals, range=updated)

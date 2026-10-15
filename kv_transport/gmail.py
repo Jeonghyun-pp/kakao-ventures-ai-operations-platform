@@ -290,6 +290,29 @@ def message(msg_id: str) -> Fetched:
         return Fetched.unknown(f"gmail:{e}")
 
 
+def attachments(msg_id: str) -> Fetched:
+    """첨부 파일 `[{name, mime, data(bytes)}]`. 읽기만 한다 — 메일로 온 덱을 판정이 읽을 때 쓴다(drive.text 의 메일 링크)."""
+    try:
+        m = _get(f"/messages/{msg_id}", params={"format": "full"})
+        out = []
+
+        def walk(part: dict) -> None:
+            body = part.get("body") or {}
+            if part.get("filename") and body.get("attachmentId"):
+                raw = _get(f"/messages/{msg_id}/attachments/{body['attachmentId']}").get("data", "")
+                out.append({"name": part["filename"], "mime": part.get("mimeType", ""),
+                            "data": base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))})
+            for sub in part.get("parts") or []:
+                walk(sub)
+
+        walk(m.get("payload") or {})
+    except AuthDead as e:
+        return Fetched.unknown(f"auth_dead:{e}")
+    except GmailError as e:
+        return Fetched.unknown(f"gmail:{e}")
+    return Fetched.measured(out)
+
+
 def thread_after(thread_id: str, msg_id: str) -> Fetched:
     """그 메시지 **뒤에** 스레드에 붙은 메시지 수. **초안은 세지 않는다.**
 

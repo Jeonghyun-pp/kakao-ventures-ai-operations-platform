@@ -42,7 +42,7 @@ from langgraph.types import Command, interrupt                  # noqa: E402
 from kvlib import constraints, paths, report                                   # noqa: E402
 from kvlib.gate import Gate                                     # noqa: E402
 
-from . import clean, route, rules                               # noqa: E402
+from . import clean, intake, route, rules                       # noqa: E402
 
 ASK = (rules.EVENT_SPEAKER, rules.TRUSTED_REF)                  # route.decide 가 'slack' 으로 보내는 갈래
 YES_DRAFT = {"trusted_ref": "trusted_direct_ko"}                # ⭕ 에 나가는 초안. event 의 ⭕ 는 사람이 잇는다(일정 조율은 범위 밖)
@@ -184,7 +184,7 @@ class Flow(Gate):
         모델 어휘에 WEBFLOW 가 없어 주소 없는 폼도 내용으로 분류되고, 회신이면 no-reply 수신자 검사에서 걸린다.
         한 번 done 인 (메일, 종류) 는 다시 안 본다. 회신의 세 단계는 `_reply` 에.
         """
-        n = {"sent": 0, "would_send": 0, "skipped": 0, "archive": 0, "forward": 0}
+        n = {"sent": 0, "would_send": 0, "skipped": 0, "archive": 0, "forward": 0, "intake": 0}
         for mid, cat, follow in self.con.execute(
                 "SELECT j.message_id, j.category, j.followup FROM judgments j JOIN messages m ON m.id=j.message_id"
                 " WHERE j.run='live' AND j.ok=1 AND m.direction='in' ORDER BY m.internal_ms").fetchall():   # 오래된 것부터 — 같은 사람의 첫 메일이 회신을 받는다
@@ -194,6 +194,8 @@ class Flow(Gate):
             if a == "reply":
                 if (self.row(mid, "send") or {}).get("status") not in ("done", "skipped"):
                     self._reply(mid, m, row, cat, follow, act, n)
+            elif a == "intake":
+                self._intake(mid, m, row, cat, follow, act, n)
             elif a in ("archive", "forward") and (self.row(mid, a) or {}).get("status") != "done":
                 n[a] += 1
                 if a == "archive":
@@ -201,6 +203,33 @@ class Flow(Gate):
                 else:
                     self._forward(mid, m, row, cat, act)
         return n
+
+    def _intake(self, mid: str, m: dict, row, cat: str, follow: str, act: dict, n: dict) -> None:
+        """폼 오류 메일 → 비플랜 시트 한 줄(intake.py) → 「구글 폼 오류」 회신 초안 [사용자 결정 2026-10-15].
+
+        ① 폼 칸은 한 번만 뽑아 actions 에 남긴다 — 문이 닫혀 있어도(dry) 무엇을 넣었을지 보인다.
+        ② 시트 쓰기는 문(`out`) 뒤. SLACK_KINDS 밖이라 'on' 에서만 실제로 쓴다.
+        ③ 회신은 "보내주신 자료로 검토하겠다"는 약속이라 **시트에 들어간 뒤에만**(dry 면 회신도 dry). 기업명을 못 뽑으면 둘 다 안 하고 사람에게.
+        """
+        rec = self.row(mid, "intake") or {}
+        if rec.get("status") == "skipped":
+            return
+        fields, has_att = rec.get("fields"), rec.get("has_attachment")
+        if not fields:
+            if not self.llm:
+                return                                                   # 뽑을 손이 없다 — 다음 실행에
+            fields = intake.extract(m, self.llm)
+            if fields is None:
+                self.put(mid, "intake", "skipped", {"category": cat, "why": "기업명을 못 뽑았다 — 사람이 본다"})
+                n["skipped"] += 1
+                return
+            has_att = self.io.has_deck_attachment(mid)
+        status = self.out(mid, "intake", {"category": cat, "fields": fields, "has_attachment": has_att},
+                          lambda: self.io.intake(m, fields, has_att))
+        n["intake"] += status in ("done", "dry")
+        if status in ("done", "dry") and (self.row(mid, "send") or {}).get("status") not in ("done", "skipped"):
+            body = route.tpl("form_error_ko", ceo=intake.ceo_name(fields))
+            self._reply(mid, m, row, cat, follow, {**act, "action": "reply", "body": body}, n)
 
     def _forward(self, mid: str, m: dict, row, cat: str, act: dict) -> None:
         """옛 시스템은 슬랙 이메일 주소로 가는 **초안**을 만들었다. 여기선 채널에 **바로** 올린다 — 누를 사람이 없어도 도착한다.
@@ -412,3 +441,9 @@ class RealIO:
 
     def archive(self, mid: str) -> bool:
         return self.gmail.archive(mid).require()
+
+    def has_deck_attachment(self, mid: str) -> bool:
+        return intake.has_deck_attachment(self.gmail.attachments(mid))
+
+    def intake(self, m: dict, fields: dict, has_attachment: bool) -> dict:
+        return intake.deliver(m, fields, has_attachment=has_attachment)

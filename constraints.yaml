@@ -138,7 +138,7 @@ gmail:
                                #    표본 1건이 100% 면 승격을 통과해버린다.
   # 분류와 무관하게 **영원히** 사람이 보낸다. 무수정률이 100% 여도 승격 대상이 아니다.
   #    카테고리 이름이어야 걸린다(flow._reply 가 판정 카테고리와 비교). 옛 PARTNERSHIP_DECLINE 은 어디에도 안 걸렸다 [2026-10-15 고침]
-  never_auto_send: [PARTNERSHIP, TRUSTED_REF, RECRUIT, IMPERSONATION]
+  never_auto_send: [PARTNERSHIP, TRUSTED_REF, RECRUIT, IMPERSONATION, FORM_ERROR]   # FORM_ERROR: "검토하겠다" 약속 — 사람이 보낸다 [2026-10-15]
 
 bplan:
   # 🔴 밖으로 나가는 문(kvlib.gate). off 기록만 · slack 카드·리마인드만 · on 노션 점수·to do·드랍 초안까지. 켜는 건 사람.
@@ -248,6 +248,7 @@ mail_observe:
   #    안 그러면 현행이 같은 메일에 초안을 또 만들고, 사람이 그걸 누르면 같은 안내가 두 번 간다.
   send_branches: []
   send_per_day: 20             # 하루 발송 상한. 폭주 방지다 — 평소 콜드 문의는 하루 서너 통
+  intake_landed_days: 2        # 폼 오류 접수가 시트에 들어간 뒤 이만큼 지나도 비플랜 노션 행이 없으면 보고서 🚩 [2026-10-15]
   partnership_decline_days: 7  # 국내 제휴 제안은 이만큼 기다렸다가 거절 초안 [사용자 결정 2026-10-13]. 그사이 사람이 답하면 건너뛴다
   remind_days: 2               # 질문·인계 글에 이만큼 반응이 없으면 스레드에 한 줄. 무응답을 거절로 바꾸지 않는다
   remind_max: 3

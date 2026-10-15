@@ -60,6 +60,10 @@ _KST = timezone(timedelta(hours=9))
 
 # 접수 알림 제목. 답장(`Re:`)은 잡지 않는다 — 창업자의 후속 메일은 사람이 봐야 한다.
 _SUBJ_RE = re.compile(r"^\[카카오벤처스\]\s*(.*?)\s*로부터\s*접수된\s*사업계획서\s*$")
+# 🔴 폼 오류로 메일로 온 접수(메일 레인 skills/mail/intake.py 가 시트에 한 줄 붙인다) [사용자 결정 2026-10-15].
+#    접수 알림 메일이 없으므로 `추가내용` 칸 끝의 이 표식이 원래 메일을 가리킨다 — 드랍 초안은 그 메일에 답장이다.
+MAIL_MARK = "[hello 메일 접수 — 구글폼 오류 · 메일 {mid}]"
+MAIL_MARK_RE = re.compile(r"\[hello 메일 접수 — 구글폼 오류 · 메일 ([0-9a-f]+)\]")
 _INTAKE_QUERY = 'subject:"로부터 접수된 사업계획서" in:inbox -label:"%s"'
 
 
@@ -596,7 +600,8 @@ def _draft(g: Gate, key: str, row: dict, n: Counter) -> None:
     n["draft"] += 1
 
     def do():
-        mid = _intake_mail(row.get("기업명", ""))
+        mark = MAIL_MARK_RE.search(row.get("추가내용") or "")
+        mid = mark.group(1) if mark else _intake_mail(row.get("기업명", ""))
         if not mid:
             raise RuntimeError("접수 알림 메일을 못 찾았다 — 초안을 붙일 스레드가 없다")
         return gmail.draft_reply(gmail.message(mid).require(), drop_body(row), email).require()

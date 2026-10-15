@@ -1,4 +1,6 @@
 """구글드라이브 — 덱(사업계획서)을 **읽기만** 한다. 쓰기 함수는 없다.
+    🔴 hello 메일 링크(`mail.google.com/…#all/<메일번호>`)도 덱으로 읽는다 — 폼 오류로 메일로 온 덱은 시트 덱 칸에 메일 링크가 들어간다
+       (2026-10-15). 서비스계정은 저장 용량이 없어 드라이브에 못 올린다. 첨부 중 첫 PDF·이미지를 같은 길로 읽는다.
 
     text(url) -> Fetched[str]   드라이브 링크 → 파일 텍스트. PDF 는 pdftotext(poppler), 구글 슬라이드·문서는 PDF 로 export 뒤 같은 길.
                                 텍스트가 거의 없으면(이미지 덱) measured("") + meta(why="텍스트 없음") — "못 읽었다"를 사실로 넘긴다.
@@ -19,11 +21,12 @@ import requests
 
 from kvlib import Fetched, constraints
 
-from . import sheets
+from . import gmail, sheets
 
 _API = "https://www.googleapis.com/drive/v3"
 _SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 _ID_RE = re.compile(r"(?:[?&]id=|/d/)([A-Za-z0-9_-]{10,})")
+_MAIL_RE = re.compile(r"mail\.google\.com/mail/[^#\s]*#[a-z]+/([0-9a-f]{12,})")
 _GOOGLE = "application/vnd.google-apps."
 _IMAGES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}   # 모델의 Read 가 여는 이미지 형식
 
@@ -87,9 +90,34 @@ def _as_image(data: bytes, suffix: str, name: str, why: str, transcribe) -> Fetc
     return Fetched.measured(out, name=name, chars=len(out), transcribed=True)
 
 
+def _from_mail(msg_id: str, transcribe) -> Fetched:
+    """메일 첨부 중 첫 PDF·이미지 → 드라이브 파일과 같은 길(크기 상한·텍스트·이미지 덱 옮겨 적기)."""
+    f = gmail.attachments(msg_id)
+    if not f.is_measured:
+        return Fetched.unknown(f"메일 첨부: {f.reason}")
+    for a in f.require():
+        mime, data, name = a["mime"], a["data"], a["name"]
+        if mime == "application/octet-stream" and name.lower().endswith(".pdf"):
+            mime = "application/pdf"
+        if mime != "application/pdf" and mime not in _IMAGES:
+            continue
+        if len(data) > constraints.get("drive.max_bytes"):
+            return Fetched.measured("", why=f"파일이 너무 크다 {len(data) // 1_000_000}MB", name=name)
+        if mime in _IMAGES:
+            return _as_image(data, _IMAGES[mime], name, "이미지 파일", transcribe)
+        out = _pdf_text(data).strip()
+        if len(out) < constraints.get("drive.min_text_chars"):
+            return _as_image(data, ".pdf", name, f"텍스트 없음(이미지 덱, {len(out)}자)", transcribe)
+        return Fetched.measured(out, name=name, chars=len(out))
+    return Fetched.measured("", why="메일에 PDF·이미지 첨부가 없다")
+
+
 def text(url: str, *, transcribe=None) -> Fetched:
     """덱 텍스트. 못 읽는 건 이유와 함께 — 판정 입력에 '덱: <이유>' 로 들어간다.
     `transcribe(path) -> Fetched[str]` 를 주면 이미지 덱(글자 없는 PDF)·이미지 파일을 모델이 옮겨 적는다(2026-10-14)."""
+    mail = _MAIL_RE.search(url or "")
+    if mail and (not file_id(url) or (url or "").find("mail.google.com") < (url or "").find("drive.google.com")):
+        return _from_mail(mail.group(1), transcribe)
     fid = file_id(url)
     if not fid:
         return Fetched.measured("", why="드라이브 링크가 아니다")

@@ -270,6 +270,29 @@ def _send_section(con, since: str) -> list[str]:
     return out
 
 
+def _intake_section(con, *, landed: set[str] | None = None, now: str | None = None) -> list[str]:
+    """폼 오류 메일 → 비플랜 시트 → 노션 행 → 회신, 한 건씩 어디까지 이어졌나 [사용자 결정 2026-10-15 "앞으로도 그렇게 작동되는지 검증"].
+    🚩 = 끊긴 곳: 시트 쓰기 실패 · 기업명 못 뽑음 · 시트에 들어간 지 `intake_landed_days` 가 지났는데 비플랜 노션 행이 없다(sync 가 못 읽었거나 안 돈다)."""
+    landed = ledger.keys("bplan", ledger.LANDED) if landed is None else landed
+    late = ledger.now(timedelta(days=constraints.get("mail_observe.intake_landed_days"))) if now is None else now
+    out = []
+    for key, st, detail, created in con.execute("SELECT key, status, detail, created FROM actions WHERE kind='intake' ORDER BY created DESC"):
+        d = json.loads(detail)
+        res = d.get("result") or {}
+        co = (d.get("fields") or {}).get("기업명") or res.get("company") or "?"
+        draft = (con.execute("SELECT status FROM actions WHERE key=? AND kind='draft'", (key,)).fetchone() or ["없음"])[0]
+        if st == "done":
+            on = res.get("key") in landed
+            mark = "" if on else ("🚩 " if created < late else "")
+            line = f"시트 ✅ · 노션 {'✅' if on else '아직'} · 회신 초안 {draft}"
+        elif st == "dry":
+            mark, line = "", f"시트에 넣었을 것(문 닫힘) · 회신 초안 {draft}"
+        else:
+            mark, line = "🚩 ", f"{st} — {d.get('error') or d.get('why') or ''}"
+        out.append(f"- {mark}{co} · {line} · `{key}`")
+    return out or ["없음"]
+
+
 def report(con, since: str) -> tuple[str, str]:
     """`since`(UTC ISO) 뒤에 판정된 메일. (파일에 쓸 전체 보고서, 슬랙에 올릴 짧은 요약).
 
@@ -291,6 +314,8 @@ def report(con, since: str) -> tuple[str, str]:
         kinds = {a.split(":")[0] for a in acts.get(r["id"], ())}
         if "post" in kinds:                                      # 슬랙에 물었을 건 — 사람이 결정한다
             return "슬랙에 물었을 것 · " + ", ".join(acts[r["id"]])
+        if "intake" in kinds:                                    # 폼 오류 → 비플랜 시트. 무엇을 넣었는지·약속 회신을 사람이 본다
+            return "폼 오류 → 비플랜 · " + ", ".join(acts[r["id"]])
         if kinds & {"send", "draft"}:                            # 회신이 나갈(나갔을) 건 — 문안·수신자를 사람이 본다
             return "자동 회신 · " + ", ".join(acts[r["id"]])
         # 아카이브·포워드만 있는 건은 일상이다 — 여기 올리면 절이 전체 표와 같아진다(09-23 실측: 35통 중 28통이 걸렸다)
@@ -305,6 +330,7 @@ def report(con, since: str) -> tuple[str, str]:
     md += [f"- **{why}** · `{r['c']}` · {cell(r['subject'])[:70]}  \n  {cell(r['reason'])}  \n  `{r['id']}` · {r['sender']}"
            for r, why in flagged] or ["없음"]
     md += ["", "## 📤 보냈을 메일 (폼 안내)", ""] + _send_section(con, since)
+    md += ["", "## 📥 폼 오류 → 비플랜 (시트 · 노션 · 회신)", ""] + _intake_section(con)
     md += ["", "## 전체", "", "| 날짜 | 분류 | 후속 | 규칙 | 제목 | 발신 | 이유 | id |", "|---|---|---|---|---|---|---|---|"]
     md += [f"| {when(r['internal_ms'])} | `{r['c']}` | {r['f'] or ''} | {r['rc'] or ''} "
            f"| {cell(r['subject'])[:60]} | {r['sender']} | {cell(r['reason'])[:160]} | `{r['id']}` |" for r in rows]

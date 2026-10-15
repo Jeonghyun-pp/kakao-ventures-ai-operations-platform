@@ -44,11 +44,18 @@ class Decide(unittest.TestCase):
 
     def test_shared_without_reply(self):
         """[사용자 결정 2026-10-08] 출자·채용·폼 오류·사칭은 슬랙 공유. 회신은 안 만든다."""
-        for cat in (rules.LP_CUSTODY, rules.RECRUIT, rules.FORM_ERROR, rules.IMPERSONATION):
+        for cat in (rules.LP_CUSTODY, rules.RECRUIT, rules.IMPERSONATION):
             act = decide(cat)
             self.assertEqual(act["action"], "forward", cat)
             self.assertNotIn("body", act, cat)
             self.assertNotIn("unknown", act, cat)
+
+    def test_form_error_goes_to_bplan_sheet(self):
+        """[사용자 결정 2026-10-15] 폼 오류 → 비플랜 시트 한 줄 + 「구글 폼 오류」 회신. 영원히 수동."""
+        act = decide(rules.FORM_ERROR)
+        self.assertEqual((act["action"], act["to"]), ("intake", "a@example.com"))
+        self.assertIn(rules.FORM_ERROR, route.constraints.get("gmail.never_auto_send"))
+        self.assertIn("보내주신 사업계획서가 잘 확인되었으므로", route.tpl("form_error_ko", ceo="김대표 "))
 
     def test_legacy_inbound_en_is_left_alone(self):
         """옛 어휘(언어 기준) 판정은 외국인인지 모른다 — 폼 안내도 아카이브도 하지 않는다."""
