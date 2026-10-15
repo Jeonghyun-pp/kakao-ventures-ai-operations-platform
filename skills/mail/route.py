@@ -185,7 +185,7 @@ def decline_body(msg: dict, llm) -> str | None:
     return tpl(_DECLINE[kind], org=org)
 
 
-_SHARE = {rules.LP_CUSTODY: "출자·수탁 제안", rules.RECRUIT: "채용 문의", rules.IMPERSONATION: "사칭 확인 문의"}
+_SHARE = {rules.RECRUIT: "채용 문의", rules.IMPERSONATION: "사칭 확인 문의"}
 
 
 def decide(msg: dict, hit: dict) -> dict:
@@ -272,15 +272,20 @@ def decide(msg: dict, hit: dict) -> dict:
                 "after_days": constraints.get("mail_observe.partnership_decline_days"),
                 "note": "국내 제휴 제안 → 기다렸다가 거절 초안"}
 
-    # 🔴 [사용자 결정 2026-10-08] 출자·수탁 · 채용 · 사칭 확인 → 아카이브에서 **슬랙 공유**로 되돌렸다. (폼 오류는 위 — 10-15 에 비플랜 시트로)
-    #    08-18·09-02 에 아카이브로 바꾼 대가("조용히 사라진다")를 사람이 받아들이지 않았다.
-    #    회신은 여전히 안 만든다 — 채용은 상태가 시점마다 바뀌고, 사칭은 회신 절대 금지, 폼 오류에 폼 안내는 무한루프다.
     if cat == rules.FORM_ERROR:
         # 🔴 [사용자 결정 2026-10-15] 폼 오류로 메일로 낸 접수 → 비플랜 응답 시트에 폼 응답과 같은 한 줄(intake.py) + 노션 「구글 폼 오류」 회신.
         #    회신은 "보내주신 자료로 검토하겠다"는 약속이라, **시트에 들어간 뒤에만** 초안을 만든다(flow._intake). 영원히 수동(never_auto_send).
         return {"action": "intake", "to": msg["sender"], "note": "폼 오류 접수 → 비플랜 시트 + 「구글 폼 오류」 회신 초안"}
 
-    if cat in (rules.LP_CUSTODY, rules.RECRUIT, rules.IMPERSONATION):
+    if cat == rules.LP_CUSTODY:
+        # 🔴 [사용자 결정 2026-10-15] 슬랙 공유 → 아카이브. 금융기관의 출자·수탁 영업이다 — 사람이 10-08 라벨링과 10-15 두 번 다
+        #    Example Custodian 수탁 제안을 아카이브했다(10-08 "슬랙 공유" 결정을 실제 처리가 뒤집음). 회신도 안 만든다.
+        return {"action": "archive", "note": "출자·수탁 제안 — 회신 없이 아카이빙"}
+
+    # 🔴 [사용자 결정 2026-10-08] 채용 · 사칭 확인 → 아카이브에서 **슬랙 공유**로 되돌렸다.
+    #    08-18 에 아카이브로 바꾼 대가("조용히 사라진다")를 사람이 받아들이지 않았다.
+    #    회신은 여전히 안 만든다 — 채용은 상태가 시점마다 바뀌고, 사칭은 회신 절대 금지다.
+    if cat in (rules.RECRUIT, rules.IMPERSONATION):
         return {"action": "forward", "note": f"{_SHARE[cat]} → 슬랙 공유 (회신 없음)"}
 
     return {"action": "forward",

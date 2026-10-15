@@ -25,7 +25,7 @@ class Decide(unittest.TestCase):
     def test_silent_archive_branches(self):
         """🔴 회신 없이 아카이브되는 갈래."""
         for cat in (rules.SYSTEM_NOTICE, rules.AD_NOISE, rules.MASS_BLAST, rules.VENDOR_PITCH,
-                    rules.FOREIGN_COLD, rules.CLOSED_FOLLOWUP):
+                    rules.FOREIGN_COLD, rules.CLOSED_FOLLOWUP, rules.LP_CUSTODY):
             act = decide(cat)
             self.assertEqual(act["action"], "archive", cat)
             self.assertNotIn("body", act, cat)          # 초안을 만들지 않는다
@@ -43,8 +43,8 @@ class Decide(unittest.TestCase):
         self.assertIn("자동 회신", decide(rules.INBOUND_KO)["body"])               # 메일로 직접 온 것은 그대로
 
     def test_shared_without_reply(self):
-        """[사용자 결정 2026-10-08] 출자·채용·폼 오류·사칭은 슬랙 공유. 회신은 안 만든다."""
-        for cat in (rules.LP_CUSTODY, rules.RECRUIT, rules.IMPERSONATION):
+        """[사용자 결정 2026-10-08] 채용·사칭은 슬랙 공유. 회신은 안 만든다. (출자·수탁은 10-15 에 아카이브)"""
+        for cat in (rules.RECRUIT, rules.IMPERSONATION):
             act = decide(cat)
             self.assertEqual(act["action"], "forward", cat)
             self.assertNotIn("body", act, cat)

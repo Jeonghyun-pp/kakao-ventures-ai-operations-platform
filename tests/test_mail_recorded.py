@@ -20,7 +20,7 @@ from skills.mail import route, rules
 FIXTURE = paths.data("mail", "fixtures") / "recorded_decisions_20260903_20260921.json"
 # 🔴 녹음 뒤에 사용자가 정책을 바꾼 갈래 — 옛 행동을 재현하면 오히려 틀린다. 새 행동은 test_mail_route 가 잰다.
 #    2026-10-08 INBOUND_EN 폐지 · 출자/채용/폼 오류/사칭 아카이브 → 슬랙 공유 · 2026-10-13 제휴 → 7일 뒤 거절
-CHANGED = {rules.INBOUND_EN, rules.LP_CUSTODY, rules.RECRUIT, rules.FORM_ERROR, rules.IMPERSONATION, rules.PARTNERSHIP}
+CHANGED = {rules.INBOUND_EN, rules.RECRUIT, rules.FORM_ERROR, rules.IMPERSONATION, rules.PARTNERSHIP}   # LP_CUSTODY 는 10-15 에 녹음과 같은 아카이브로 돌아왔다
 COMPARE = ("action", "to", "body", "note", "also_reply", "kind", "ch", "lead", "unknown")     # ask 는 09-21 에 '무반응 7일' 문구를 뺐다 — 녹음은 옛 문구
 
 
