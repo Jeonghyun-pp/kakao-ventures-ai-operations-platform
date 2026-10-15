@@ -114,7 +114,7 @@ class Flow(Gate):
             "SELECT m.*, j.category, j.reason FROM messages m JOIN judgments j ON j.message_id=m.id AND j.run='live'"
             " WHERE m.id=?", (mid,)).fetchone()
         m = json.loads(row["raw_json"])
-        m.update(sender=row["sender"], subject=row["subject"])
+        m.update(sender=row["sender"], subject=row["subject"], webflow_kind=row["webflow_kind"])   # route 가 홈페이지 문의 템플릿을 고른다
         if row["webflow_kind"] is not None:                              # 폼은 문의자가 보낸 글로 보인다 (알림 껍데기가 아니라)
             m.update(sender_raw=row["sender"], body=clean.webflow(m.get("body") or "")["content"])
         else:

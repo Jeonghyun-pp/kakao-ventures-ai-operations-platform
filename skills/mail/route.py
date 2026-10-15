@@ -227,6 +227,12 @@ def decide(msg: dict, hit: dict) -> dict:
         return {"action": "archive", "note": "끝난 건의 후속 — 회신 없이 아카이빙"}
 
     if cat == rules.INBOUND_KO:
+        # 🔴 [사용자 결정 2026-10-15] 홈페이지(웹플로우) 문의는 노션 「홈페이지 문의 › 투자 문의」 템플릿.
+        #    일반 템플릿의 "자동 회신 메일을 통해서 이미 한번 확인하셨겠지만" 은 홈페이지 문의자에게 맞지 않는다 — 자동 회신을 안 받았다.
+        if msg.get("webflow_kind") is not None:
+            return {"action": "reply", "to": msg["sender"],
+                    "body": tpl("webflow_invest_ko", google_form=GOOGLE_FORM),
+                    "note": "홈페이지 투자 문의 → 구글폼 안내"}
         return {"action": "reply", "to": msg["sender"],
                 "body": tpl("inbound_form_ko", google_form=GOOGLE_FORM),
                 "note": "한국어 콜드 제안 → 구글폼 안내"}

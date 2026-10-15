@@ -35,6 +35,13 @@ class Decide(unittest.TestCase):
         self.assertEqual((act["action"], act["to"]), ("reply", "a@example.com"))
         self.assertEqual(act["body"], route.tpl("inbound_form_ko", google_form=route.GOOGLE_FORM))
 
+    def test_webflow_inbound_uses_homepage_template(self):
+        """[사용자 결정 2026-10-15] 홈페이지 문의자는 자동 회신을 안 받았다 — 노션 「홈페이지 문의 › 투자 문의」 문안."""
+        act = decide(rules.INBOUND_KO, webflow_kind="투자 문의")
+        self.assertEqual(act["body"], route.tpl("webflow_invest_ko", google_form=route.GOOGLE_FORM))
+        self.assertNotIn("자동 회신", act["body"])
+        self.assertIn("자동 회신", decide(rules.INBOUND_KO)["body"])               # 메일로 직접 온 것은 그대로
+
     def test_shared_without_reply(self):
         """[사용자 결정 2026-10-08] 출자·채용·폼 오류·사칭은 슬랙 공유. 회신은 안 만든다."""
         for cat in (rules.LP_CUSTODY, rules.RECRUIT, rules.FORM_ERROR, rules.IMPERSONATION):
