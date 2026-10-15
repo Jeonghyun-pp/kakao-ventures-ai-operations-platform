@@ -221,12 +221,14 @@ class Flow(Gate):
         ② 발송 시점의 문은 **문이 on 일 때만** 본다 — 막히면 `dry` 로 남아 다음 실행에 다시 본다.
         ③ 실행은 `_out` 을 지난다. `send` 는 SLACK_KINDS 밖이라 문이 on 이 아니면 저절로 dry 다.
         """
+        wait = act.get("after_days")
+        if wait and (datetime.fromisoformat(self.now().replace("Z", "+00:00")).timestamp() * 1000 - row["internal_ms"]) < wait * 86_400_000:
+            return                                                       # 아직 기다리는 중 — 아무것도 안 적는다. 다음 실행에 다시 본다
         own = {a.lower() for a in constraints.get("mail_observe.own_addresses")}
         to = (act.get("to") or "").lower()
         webflow = row["webflow_kind"] is not None
         why = (
             "후속·재문의 — 폼 안내를 또 보내지 않는다" if follow == "yes" else
-            "영원히 수동인 갈래" if cat in constraints.get("gmail.never_auto_send") else
             # ponytail: no-reply 류는 나열이다(열린 집합). 놓쳐도 반송될 뿐이고, 주 방어는 "수신자 = DB 에 기록된 발신자"다
             "보낼 수 없는 수신자" if not to or to in own or re.search(r"no-?reply|donotreply|mailer-daemon", to) else
             "같은 수신자에게 이미 보냈거나 보낼 것이다" if self.con.execute(
@@ -241,10 +243,17 @@ class Flow(Gate):
             self.put(mid, "send", "skipped", {**detail, "why": why})
             n["skipped"] += 1
             return
+        if act.get("pick_decline"):                                      # 제휴 거절 — 상대(학회·탐방·기타)에 맞는 템플릿을 모델이 고른다
+            body = route.decline_body(m, self.llm) if self.llm else None
+            if body is None:
+                return                                                   # 못 골랐다 — 아무것도 안 적고 다음 실행에 다시 본다
+            act = {**act, "body": body}
         subject = row["subject"] if webflow else None
-        if cat not in constraints.get("mail_observe.send_branches"):         # 허용 목록 밖(기본) — 발송 대신 **초안**. 현행과 같은 동작이다
+        # 허용 목록 밖(기본) — 발송 대신 **초안**. 영원히 수동인 갈래(gmail.never_auto_send)는 허용 목록에 넣어도 초안까지다
+        manual = cat in constraints.get("gmail.never_auto_send")
+        if manual or cat not in constraints.get("mail_observe.send_branches"):
             self.out(mid, "draft", {**detail, "template": "form_guide"}, lambda: self.io.draft_reply(mid, to, act["body"], subject))
-            self.put(mid, "send", "dry", {**detail, "blocked": "갈래 미개방 — 초안으로"})
+            self.put(mid, "send", "dry", {**detail, "blocked": "영원히 수동인 갈래 — 초안으로" if manual else "갈래 미개방 — 초안으로"})
             n["would_send"] += 1
             return
         blocked = self._blocked(mid, cat, row["thread_id"]) if constraints.get("mail_observe.outbound") == "on" else ""

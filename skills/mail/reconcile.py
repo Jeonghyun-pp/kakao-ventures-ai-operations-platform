@@ -4,22 +4,24 @@
 모델이 했을 행동과 맞으면 그 카테고리를 정답으로 적는다. 행동은 알아도 카테고리는 모르는 경우(치웠는데 모델은 회신이라 했다 등)는 적지 않고 **사람에게 묻는 목록**으로 낸다.
 
   사람 행동     trash(휴지통) · reply(스레드 뒤에 우리가 보낸 메일) · forward(그 보낸 메일이 Fwd) · label:<카테고리>(카테고리 이름 라벨) · archive(받은편지함에서 빠짐) · none
-  모델 행동     archive {AD_NOISE VENDOR_PITCH SYSTEM_NOTICE LP_CUSTODY MASS_BLAST} · reply {INBOUND_*} · handoff {UNKNOWN PARTNERSHIP EVENT_SPEAKER TRUSTED_REF RECRUIT IMPERSONATION FORM_ERROR}
+  모델 행동     route.decide 의 행동 — archive · reply · handoff(forward·slack) · protect 는 대조하지 않는다
   일치          archive/trash↔archive · reply↔reply · forward↔handoff → 정답 = 모델 카테고리 · label:<카테고리> → 정답 = 그 카테고리(행동과 무관하게 가장 세다)
   불일치        묻는다. none 은 보류(아직 안 봤다).
 """
 from __future__ import annotations
 
-from . import rules
+from . import route, rules
 
-ARCHIVE = {rules.AD_NOISE, rules.VENDOR_PITCH, rules.SYSTEM_NOTICE, rules.LP_CUSTODY, rules.MASS_BLAST}
-REPLY = {rules.INBOUND_EN, rules.INBOUND_KO}
-HANDOFF = {rules.UNKNOWN, rules.PARTNERSHIP, rules.EVENT_SPEAKER, rules.TRUSTED_REF, rules.RECRUIT, rules.IMPERSONATION, rules.FORM_ERROR}
 SKIP = {rules.BPLAN_INTAKE, rules.INTERNAL, rules.WEBFLOW}
+# 🔴 모델 행동은 route.decide 에서 끌어온다 — 여기 따로 적어 두면 기준이 바뀔 때 둘이 갈린다(10-08 결정이 그렇게 어긋났다).
+_AS = {"archive": "archive", "reply": "reply", "forward": "handoff", "slack": "handoff"}
 
 
 def model_action(category: str) -> str:
-    return "archive" if category in ARCHIVE else "reply" if category in REPLY else "handoff" if category in HANDOFF else "skip"
+    if category in SKIP:
+        return "skip"
+    act = route.decide({"sender": "", "subject": "", "body": ""}, {"category": category, "why": ""})["action"]
+    return _AS.get(act, "skip")                                       # protect(옛 어휘 등) — 손대지 않을 메일이라 대조하지 않는다
 
 
 def human_action(labels: list[str], names: dict[str, str], tail: list[dict], subject_of) -> tuple[str, str]:

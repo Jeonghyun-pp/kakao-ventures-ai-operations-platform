@@ -20,7 +20,7 @@ constraints.yaml  mail_observe.outbound
 
 열려 있는 것   mail_observe.report_slack: on  → 아침 요약(저녁 ops digest 한 통으로 묶임)이 report_channel(test) 로. 이것뿐이다
 ```
-**켜는 순서(사람이 한다)**: `outbound: slack` → `forward_channel: bplan`(실채널) → `outbound: on` → `send_branches: [INBOUND_EN]`(보고서가 "켜도 된다"를 낸 갈래 하나씩).
+**켜는 순서(사람이 한다)**: `outbound: slack` → `forward_channel: bplan`(실채널) → `outbound: on` → `send_branches: [INBOUND_KO]`(보고서가 "켜도 된다"를 낸 갈래 하나씩).
 되돌리기는 같은 줄을 되돌리는 것. 각 단계에서 새로 나가는 것은 정확히 하나씩이다.
 
 발송 코드는 `kv_transport/gmail_send.py` 한 파일이고 부르는 곳은 `flow.py` 뿐이다(`check_intent` A8 · 변이 테스트 10/10).

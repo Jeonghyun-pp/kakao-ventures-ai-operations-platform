@@ -313,11 +313,11 @@ class SendCase(unittest.TestCase):
         self.assertEqual([c[:2] for c in h.calls], [("draft", "a"), ("send", "draft-a")])   # 초안 하나, 발송 하나. 두 번째 실행은 아무것도 안 한다
         self.assertEqual(self.sends()["a"][0], "done")
 
-    def test_never_auto_send_branch_is_skipped(self):
+    def test_never_auto_send_branch_is_draft_only(self):
         real = flow.constraints.get
         with mock.patch.object(flow.constraints, "get", lambda k: ["INBOUND_KO"] if k == "gmail.never_auto_send" else real(k)):
             self.flow(Hands()).act_all()
-        self.assertIn("영원히 수동", self.sends()["a"][1]["why"])
+        self.assertIn("영원히 수동", self.sends()["a"][1]["blocked"])                  # 허용 목록에 있어도 초안까지다
 
     def test_send_time_gates_block_without_sending(self):
         for setup, word in ((lambda h: h.legacy.add("a"), "현행 시스템"), (lambda h: setattr(h, "after", 1), "대화가 진행")):
@@ -408,10 +408,18 @@ class ActCase(unittest.TestCase):
         llm = lambda p, s: "CATEGORY: %s\nREASON: 요약\nFOLLOWUP: no" % next((c for k, c in cats.items() if k in p.split("제목:")[1][:20]), "UNKNOWN")
         observe.run_once(self.con, Reader(msgs), llm, days=2, max_judge=50, no_judge=False)
 
-    def flow(self, hands):
-        f = flow.Flow(self.con, self.path, hands, now=lambda: "2026-09-22T01:00:00Z")
+    def flow(self, hands, llm=lambda p, s: "KIND: 학회\nORG: BICS"):
+        f = flow.Flow(self.con, self.path, hands, now=lambda: "2026-09-22T01:00:00Z", llm=llm)
         self.addCleanup(f.close)
         return f
+
+    def test_partnership_without_pick_writes_nothing(self):
+        """거절 템플릿을 못 고르면(모델 없음·엉뚱한 답) 초안을 안 만든다 — 다음 실행에 다시 본다."""
+        for llm in (None, lambda p, s: "KIND: 모름"):
+            self.con.execute("DELETE FROM actions")
+            self.flow(Hands(), llm=llm).act_all()
+            self.assertNotIn(("pt", "draft"), self.acts())
+            self.assertNotIn(("pt", "send"), self.acts())
 
     def acts(self):
         return {(r[0], r[1]): r[2] for r in self.con.execute("SELECT key, kind, status FROM actions")}
@@ -420,17 +428,23 @@ class ActCase(unittest.TestCase):
         h = Hands()
         n = self.flow(h).act_all()
         self.assertEqual(h.calls, [])
-        self.assertEqual(self.acts(), {("ad", "archive"): "dry", ("pt", "forward"): "dry", ("pt", "draft"): "dry", ("uk", "forward"): "dry"})
-        self.assertEqual((n["archive"], n["forward"]), (1, 2))
+        self.assertEqual(self.acts(), {("ad", "archive"): "dry", ("pt", "draft"): "dry", ("pt", "send"): "dry", ("uk", "forward"): "dry"})
+        self.assertEqual((n["archive"], n["forward"]), (1, 1))
+
+    def test_partnership_waits_before_decline(self):
+        """[사용자 결정 2026-10-13] 받은 지 7일이 안 됐으면 아무것도 적지 않는다 — 다음 실행에 다시 본다."""
+        self.con.execute("UPDATE messages SET internal_ms=? WHERE id='pt'", (1_790_038_800_000,))   # 2026-09-22 01:00Z — now 와 같은 날
+        self.flow(Hands()).act_all()
+        self.assertNotIn(("pt", "draft"), self.acts())
+        self.assertNotIn(("pt", "send"), self.acts())
 
     def test_slack_level_posts_forward_to_the_configured_channel_only(self):
-        """포워드는 슬랙 글이라 'slack' 단계에서 올라간다. 거절 초안·아카이브는 여전히 기록만."""
+        """포워드는 슬랙 글이라 'slack' 단계에서 올라간다. 제휴 거절 초안·아카이브는 여전히 기록만."""
         h = Hands()
         with gate("slack"):
             self.flow(h).act_all()
         posts = [c for c in h.calls if c[0] == "post"]
-        self.assertEqual([c[1] for c in posts], ["test", "test"])                       # forward_channel 기본값
-        self.assertTrue(any("제휴 제안" in c[2] for c in posts))
+        self.assertEqual([c[1] for c in posts], ["test"])                               # forward_channel 기본값 — 제휴는 슬랙에 안 올린다(10-13)
         self.assertTrue(any(c[0] == "thread" for c in h.calls))                         # 전문은 스레드에
         self.assertEqual((self.acts()[("pt", "draft")], self.acts()[("ad", "archive")]), ("dry", "dry"))
 

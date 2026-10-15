@@ -33,9 +33,14 @@ INTERNAL = "INTERNAL"
 SYSTEM_NOTICE = "SYSTEM_NOTICE"
 AD_NOISE = "AD_NOISE"
 
-# claude 가 판정하는 것 — 이 9개 밖의 값은 파서가 버린다
+# claude 가 판정하는 것 — JUDGE_CATEGORIES 밖의 값은 파서가 버린다
 INBOUND_KO = "INBOUND_KO"
+# 🔴 [사용자 결정 2026-10-08] 옛 어휘다 — 모델에게 더는 안 준다. 언어가 아니라 사람으로 가른다:
+#    외국인 콜드 제안은 FOREIGN_COLD(아카이브), 한국인은 언어와 무관하게 INBOUND_KO.
+#    이름은 DB 에 남은 옛 판정을 읽으려고만 둔다(route 는 손대지 않는다).
 INBOUND_EN = "INBOUND_EN"
+FOREIGN_COLD = "FOREIGN_COLD"
+CLOSED_FOLLOWUP = "CLOSED_FOLLOWUP"
 TRUSTED_REF = "TRUSTED_REF"
 EVENT_SPEAKER = "EVENT_SPEAKER"
 PARTNERSHIP = "PARTNERSHIP"
@@ -47,11 +52,11 @@ UNKNOWN = "UNKNOWN"
 
 # 🔴 AD_NOISE 가 여기에도 있다 [사용자 결정 2026-08-18].
 #    규칙은 발신·제목 토큰으로만 광고를 잡는데, 그 명단에 없는 홍보 메일은 못 잡는다.
-#    특히 영문 홍보는 콜드 투자 제안과 문면이 비슷해 INBOUND_EN 으로 새기 쉬웠다.
+#    특히 영문 홍보는 콜드 투자 제안과 문면이 비슷해 투자 문의로 새기 쉬웠다.
 #    claude 가 내용을 읽고 홍보라고 하면 아카이빙한다 — 언어와 무관하게.
-JUDGE_CATEGORIES = (INBOUND_KO, INBOUND_EN, TRUSTED_REF, EVENT_SPEAKER,
+JUDGE_CATEGORIES = (INBOUND_KO, FOREIGN_COLD, TRUSTED_REF, EVENT_SPEAKER,
                     PARTNERSHIP, VENDOR_PITCH, LP_CUSTODY, RECRUIT, IMPERSONATION,
-                    AD_NOISE, FORM_ERROR, SYSTEM_NOTICE, UNKNOWN)
+                    AD_NOISE, FORM_ERROR, CLOSED_FOLLOWUP, SYSTEM_NOTICE, UNKNOWN)
 # SYSTEM_NOTICE 는 규칙(발신 주소 정확 일치)이 먼저 잡고, 모델도 붙일 수 있다 [2026-09-22] — 기계 알림에 넣을 칸이 없어
 # 하루 60통이 UNKNOWN → 포워드로 새던 것. 현행 criteria.md 는 이 이름을 안 쓰므로 현행 판정은 안 바뀐다.
 
