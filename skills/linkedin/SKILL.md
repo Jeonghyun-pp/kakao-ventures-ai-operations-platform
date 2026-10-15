@@ -25,6 +25,7 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
   remind    ✅ 2일 뒤 #그물망 본문에 핑     〃
   promote   극초기 DB 승격 + 링크드인 행 표시   on 이어야. linkedin.promote: false 면 "gated"
   refresh   recheck 가 바뀐 사람의 노션 행을 갱신   on 이어야
+  overview  카드가 나간 사람의 노션 행 본문에 상세 개괄(출처 포함)   on 이어야
 ```
 `--dry-run` 은 이 실행만 문을 내리는 것(`Gate(force="off")`)이다. 무엇을 했(을)는지는 `~/kv-data/linkedin/db/linkedin.sqlite` 의 `actions` 에 남는다.
 장부(`~/kv-data/_ledger/linkedin.jsonl`)는 그대로 **한 일의 기록**이고 card/followup 의 멱등 키다. 두 곳에 적히지만 역할이 다르다.
@@ -143,7 +144,7 @@ criteria.md    Tier 기준 — 사람이 깎는다
 
 **추정 40세 이상은 안 올린다** [사용자 결정 2026-09-29 "나이가 많다"]. 생년이 없어 `profile.estimated_age` 가 학부 입학 연도(+19) 또는 첫 경력 연도(+23)로 역산해 노션 `추정 나이` 칸에 남기고 `card_reject` 가 본다(`axes.MAX_AGE`). 추정 불가는 통과. 첫 경력 역산은 나이를 **낮게** 잡는 쪽으로 틀린다(재학 중 인턴 · 잘린 경력) — 새는 쪽이지 버리는 쪽이 아니다. 옛 재고는 `tools/linkedin_age_backfill.py` 가 채웠다(122명 중 23명 제외 → 99명).
 
-**카드에 회사 개괄 3줄** [사용자 피드백 2026-10-15 "회사 법인명 웹/링크드인에 검색해서 개괄 간단히"]. 올릴 사람만(하루 5명) `overview.py` 가 claude 웹 조사(`claude.web_research` — 도구는 WebSearch·WebFetch 둘뿐)로 무엇을·단계·회사(법인/개인사업자·인원·웹 노출)를 쓴다. 지어내지 않고 못 찾으면 `확인 안 됨`(overview.md). 동시에 부르고 5명 ≈ 2분. 실패하면 그 사람만 개괄 없이 나간다 — 관문이 아니다. 끄기: `linkedin.card_overview`. 발단: 10명 시험에서 Catch 4명이 무역·대행·자문·토큰 사업이었는데 프로필로는 안 보였다.
+**카드에 회사 개괄 3줄** [사용자 피드백 2026-10-15 "회사 법인명 웹/링크드인에 검색해서 개괄 간단히"]. 올릴 사람만(하루 5명) `overview.py` 가 claude 웹 조사(`claude.web_research` — 도구는 WebSearch·WebFetch 둘뿐)로 무엇을·단계·회사(법인/개인사업자·인원·웹 노출)를 카드에 3줄, 같은 호출의 상세 8항목(출처 링크)을 노션 행 본문에 붙인다(문 `overview`). 지어내지 않고 못 찾으면 `확인 안 됨`(overview.md). 동시에 부르고 5명 ≈ 2분. 실패하면 그 사람만 개괄 없이 나간다 — 관문이 아니다. 끄기: `linkedin.card_overview`. 발단: 10명 시험에서 Catch 4명이 무역·대행·자문·토큰 사업이었는데 프로필로는 안 보였다.
 
 **창업자가 아니면 안 올린다** [사용자 결정 2026-09-29]. 판정은 카드 문안을 쓰는 claude 가 같은 호출에서 낸다 — `창업 · 준비 · 비창업`(brief.md). `비창업`만 뺀다(`준비`는 축 B 경력단절의 대상이다). 직함 OR 목록으로 안 한 이유: 다음 표현에서 새고, "기존 회사 대표 승계"(Founder B)는 직함으로 원리상 안 갈린다. 판정은 장부 `screened` 에 남아 card·`_backlog` 가 같이 보고, 통과자의 문안은 올릴 때 재사용한다. 판정 못 받은 사람은 그날 안 나가고 다음에 재판정. `./kv linkedin screen` = 재고 전체 판정(슬랙·노션 0). 발단: 09-29 미리보기 5명 중 4명이 합류자·승계 대표. 첫 screen: 156명 → 창업 107 · 준비 15 · 비창업 34.
 

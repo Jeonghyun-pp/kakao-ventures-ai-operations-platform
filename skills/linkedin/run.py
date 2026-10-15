@@ -507,8 +507,8 @@ def _screened() -> dict[str, dict]:
     return {pid: r for pid, r in _last(SCREENED, "page_id").items() if r["ts"] > resurf.get(pid, {}).get("ts", "")}
 
 
-def _overviews(pick: list, bmap: dict) -> dict[str, list[str]]:
-    """올릴 사람의 회사 개괄 {key: 줄}. 꺼져 있거나 실패하면 빈 값 — 카드는 그대로 나간다."""
+def _overviews(pick: list, bmap: dict) -> dict[str, dict[str, list[str]]]:
+    """올릴 사람의 회사 개괄 {key: {"card": 카드 줄, "notion": 노션 항목}}. 꺼져 있거나 실패하면 빈 값 — 카드는 그대로 나간다."""
     if not _cfg("card_overview"):
         return {}
     from . import recheck            # recheck 가 run 을 부른다 — 위에서 부르면 순환
@@ -523,7 +523,7 @@ def _overviews(pick: list, bmap: dict) -> dict[str, list[str]]:
                        "location": loc.get("linkedinText") if isinstance(loc, dict) else loc})
     print(f"· 회사 개괄 {len(people)}명 조사 (웹)")
     got = overview.write(people)
-    print(f"  └ 받음 {sum(1 for v in got.values() if v)}/{len(people)}")
+    print(f"  └ 받음 카드 {sum(1 for v in got.values() if v.get('card'))} · 노션 {sum(1 for v in got.values() if v.get('notion'))} / {len(people)}")
     return got
 
 
@@ -747,7 +747,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
             f"\n*{live.get('서비스명')}*  {co}  ·  창업 {live.get('창업 개월') or '?'}개월차\n"
             + (f"🔄 다시 올림 · {rs.get('old') or '?'} → {rs.get('new') or '?'}\n" if rs else "")
             + f"{m['brief']}\n"
-            + "".join(f"{x}\n" for x in ov.get(k, []))
+            + "".join(f"{x}\n" for x in ov.get(k, {}).get("card", []))
             + f"<{live.get('LinkedIn URL')}|링크드인> · "
             f"<https://www.notion.so/{str(live['_page_id']).replace('-', '')}|노션>"
         )
@@ -790,6 +790,15 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
                       company=bmap[k]["company"], brief=bmap[k]["brief"],
                       homepage=live.get("Homepage"), url=live.get("LinkedIn URL"))
         posted += 1
+        # 상세 개괄은 노션 행 본문에 — 카드가 나간 사람만. 문(overview)은 노션 쓰기라 on 이어야 열린다.
+        #    실패해도 카드는 이미 나갔다 — 세기만 한다(다음 실행이 같은 키로 다시 시도하지 않는다: 그날 조사는 그날 것).
+        notes = ov.get(k, {}).get("notion")
+        if notes:
+            ost = g.out(gk, "overview", {"name": live.get("서비스명"), "n": len(notes)},
+                        lambda notes=notes, pid=live["_page_id"]: notion.append(
+                            pid, f"🏢 회사 개괄 (자동 웹 조사 · {ledger.today()})", notes).require())
+            if ost == "failed":
+                print(f"  ⚠️  {live.get('서비스명')} 노션 개괄 실패: {g.row(gk, 'overview')['error']}")
     print(f"· 스레드에 {posted}/{len(pick)}명 올림")
     daily_report(g, pool=len(pool), picked=posted)
     return 0 if posted == len(pick) else 2

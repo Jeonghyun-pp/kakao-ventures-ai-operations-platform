@@ -286,20 +286,30 @@ class Overview(unittest.TestCase):
 
     def test_overview_lines_are_appended_and_failure_is_not_fatal(self):
         rows = [row("p1", "https://www.linkedin.com/in/a", "Catch"), row("p2", "https://www.linkedin.com/in/b", "Catch")]
-        got = {"in/a": ["· 유튜브 채널 대행 — 에이전시", "· 투자·수치 확인 안 됨"]}
+        got = {"in/a": {"card": ["· 유튜브 채널 대행 — 에이전시", "· 투자·수치 확인 안 됨"],
+                        "notion": ["뭘 만드나: 유튜브 대행 (출처: https://x.kr)"]}}
         from unittest import mock
         from skills.linkedin import recheck
         with mock.patch.object(recheck, "raw_by_key", lambda: {}), \
                 case(rows, cfg={"linkedin.card_overview": True},
-                     **{"overview.write": lambda people: {p["key"]: got.get(p["key"], []) for p in people}}) as c:
+                     **{"overview.write": lambda people: {p["key"]: got.get(p["key"], {}) for p in people}}) as c:
             self.assertEqual(run.card(n=2), 0)
         replies = [p[1] for p in c.slack.posts if p[0] == "net" and p[2]]
         self.assertEqual(len(replies), 2)
         a = next(r for r in replies if "이름p1" in r)
         self.assertIn("· 유튜브 채널 대행 — 에이전시\n· 투자·수치 확인 안 됨\n<https://www.linkedin.com/in/a|링크드인>", a)
+        self.assertEqual([(pid, b) for pid, _, b in c.notion.appended], [("p1", ["뭘 만드나: 유튜브 대행 (출처: https://x.kr)"])])   # 노션은 받은 사람만
 
     def test_parse_keeps_three_bullets_and_strips_slack_mentions(self):
         from skills.linkedin import overview
         raw = "머리말\n· 하나 <!channel>\n· 둘 @here\n· 셋\n· 넷"
         self.assertEqual(overview.parse(raw), ["· 하나", "· 둘", "· 셋"])
         self.assertEqual(overview.parse("형식 아님"), [])
+        two = "[카드]\n· 카드줄\n[노션]\n- 뭘 만드나: X (출처: https://a.kr)\n- 투자: 확인 안 됨"
+        self.assertEqual((overview.parse(two), overview.parse_notion(two)),
+                         (["· 카드줄"], ["뭘 만드나: X (출처: https://a.kr)", "투자: 확인 안 됨"]))
+
+    def test_rich_text_links_urls(self):
+        from kv_transport import notion
+        r = notion.rich("근거 (출처: https://a.kr/x) 끝")
+        self.assertEqual([x["text"].get("link", {}).get("url") for x in r], [None, "https://a.kr/x", None])

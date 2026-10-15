@@ -31,11 +31,23 @@ def _input(p: dict) -> str:
             f"소개: {flat(p.get('about'), 600)}\n위치: {flat(p.get('location'), 80)}")
 
 
-def parse(raw: str) -> list[str]:
-    """`· ` 로 시작하는 줄만, 앞에서 MAX_LINES 개. 형식이 아니면 빈 목록 — 카드는 개괄 없이 나간다."""
-    out = []
+def _section(raw: str, name: str) -> list[str]:
+    """`[이름]` 머리 아래 줄들. 머리가 없으면(옛 형식) 전체."""
+    lines, cur, seen = [], None, False
     for line in raw.splitlines():
-        line = line.strip()
+        t = line.strip()
+        if t.startswith("[") and t.endswith("]"):
+            cur, seen = t[1:-1].strip(), True
+            continue
+        if cur == name or not seen:
+            lines.append(t)
+    return lines if seen or name == "카드" else []
+
+
+def parse(raw: str) -> list[str]:
+    """카드 줄 — `[카드]` 아래 `· ` 로 시작하는 줄만, 앞에서 MAX_LINES 개. 형식이 아니면 빈 목록 — 카드는 개괄 없이 나간다."""
+    out = []
+    for line in _section(raw, "카드"):
         if line.startswith(("·", "•", "- ")):
             text = _SLACK_CTRL.sub("", line.lstrip("·•- ")).strip()
             if text:
@@ -45,17 +57,25 @@ def parse(raw: str) -> list[str]:
     return out
 
 
-def one(p: dict) -> list[str]:
+def parse_notion(raw: str) -> list[str]:
+    """노션 줄 — `[노션]` 아래 `- ` 항목. 노션 rich_text 한 칸 상한(2000자) 안으로."""
+    return [line.lstrip("-•· ").strip()[:1900] for line in _section(raw, "노션")
+            if line.startswith(("-", "•", "·")) and line.lstrip("-•· ").strip()][:12]
+
+
+def one(p: dict) -> dict[str, list[str]]:
+    """{"card": 카드 3줄, "notion": 노션 항목}. 실패하면 둘 다 빈 목록."""
     guide = (Path(__file__).parent / "overview.md").read_text(encoding="utf-8")
     try:
-        return parse(claude.web_research(f"{guide}\n\n# 대상\n{_input(p)}\n", system=_SYSTEM, timeout_sec=TIMEOUT_SEC))
+        raw = claude.web_research(f"{guide}\n\n# 대상\n{_input(p)}\n", system=_SYSTEM, timeout_sec=TIMEOUT_SEC)
     except claude.SessionError as e:
         print(f"  ⚠️  개괄 실패 {p.get('name')}: {e}")
-        return []
+        return {"card": [], "notion": []}
+    return {"card": parse(raw), "notion": parse_notion(raw)}
 
 
-def write(people: list[dict]) -> dict[str, list[str]]:
-    """{key: [줄…]}. 동시에 부른다 — 하루 5명, 한 명에 1~1.5분이라 줄 세우면 카드가 7분 늦는다."""
+def write(people: list[dict]) -> dict[str, dict[str, list[str]]]:
+    """{key: {"card": [...], "notion": [...]}}. 동시에 부른다 — 하루 5명, 한 명에 1~1.5분이라 줄 세우면 카드가 7분 늦는다."""
     if not people:
         return {}
     with ThreadPoolExecutor(max_workers=min(5, len(people))) as ex:

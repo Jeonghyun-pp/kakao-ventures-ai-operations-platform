@@ -80,6 +80,10 @@ class Notion:
         self.updated.append((page_id, props))
         return Fetched.measured(True)
 
+    def append(self, page_id, heading, bullets):
+        self.appended = getattr(self, "appended", []) + [(page_id, heading, bullets)]
+        return Fetched.measured("blk")
+
 
 class Case:
     """with Case(...) as c: 안에서 run.* 이 전부 가짜를 본다."""

@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import functools
+import re
 import time
 
 import requests
@@ -329,6 +330,36 @@ def update(page_id: str, db_key: str, props: dict) -> Fetched:
     if bad:
         return Fetched.unknown(f"readback_mismatch:{bad}", page_id=page_id)
     return Fetched.measured(page_id)
+
+
+_URL = re.compile(r"https?://[^\s)\]>,]+")
+
+
+def rich(text: str) -> list[dict]:
+    """글 → rich_text. URL 은 링크로 — 노션은 글 속 URL 을 저절로 링크로 바꾸지 않는다."""
+    out, i = [], 0
+    for m in _URL.finditer(text):
+        if m.start() > i:
+            out.append({"type": "text", "text": {"content": text[i:m.start()]}})
+        out.append({"type": "text", "text": {"content": m.group(0), "link": {"url": m.group(0)}}})
+        i = m.end()
+    if i < len(text):
+        out.append({"type": "text", "text": {"content": text[i:]}})
+    return out
+
+
+def append(page_id: str, heading: str, bullets: list[str]) -> Fetched:
+    """페이지 본문 끝에 소제목 + 글머리 목록을 붙인다. 붙인 소제목을 **되읽어** 확인한다 — 200 은 저장을 뜻하지 않는다."""
+    blocks = [{"object": "block", "type": "heading_3", "heading_3": {"rich_text": rich(heading)}}] + [
+        {"object": "block", "type": "bulleted_list_item", "bulleted_list_item": {"rich_text": rich(b)}} for b in bullets]
+    try:
+        r = _req("PATCH", f"/blocks/{page_id}/children", json_body={"children": blocks})
+        first = (r.get("results") or [{}])[0].get("id")
+        if not first or _req("GET", f"/blocks/{first}").get("type") != "heading_3":
+            return Fetched.unknown(f"append 되읽기 실패 {page_id}")
+    except NotionError as e:
+        return Fetched.unknown(f"append:{e}")
+    return Fetched.measured(first)
 
 
 def archive(page_id: str) -> Fetched:
