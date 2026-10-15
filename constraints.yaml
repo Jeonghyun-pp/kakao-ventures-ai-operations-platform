@@ -153,6 +153,18 @@ bplan:
   backup_keep: 7
   drop_after_days: 7           # 같은 이메일에게 드랍 초안은 1주일에 하나 [옛 결정 — 영구로 막으면 3개월 뒤 재접수에 답이 안 간다]
 
+bplan_label:
+  # 블라인드 라벨링(skills/bplan/blind.py) [사용자 결정 2026-10-14 — 정답이 모자라 매일 review_test 로 받는다]
+  # 🔴 비플랜 본 문(bplan.outbound)과 따로다. 카드는 review_test 에만 간다(blind.CH 고정). 노션·메일엔 안 쓴다
+  outbound: "slack"            # off 기록만 · slack 카드·폼 답글만 실제로
+  since: "2026-01-01T00:00:00" # 이 접수시각(KST) 이후만 — 지금 접수와 성격이 비슷하고 덱이 다 읽힌다
+  per_day: 35                  # [사용자 지정] 하루 몇 장
+  salt: "2026-10-14"           # 무작위 순서의 씨앗. 바꾸면 순서가 통째로 바뀐다 — 바꾸지 않는다
+  reason_days: 3               # 라벨 뒤 이 기간까지 스레드 이유를 다시 읽는다(늦게 다는 경우)
+  reaction_yes: [o, white_check_mark, heavy_check_mark, "+1"]          # ⭕ 볼만
+  reaction_no: [x, heavy_multiplication_x, negative_squared_cross_mark] # ❌ 아님
+  reaction_maybe: [thinking_face, question, grey_question]              # 🤔 애매
+
 drive:
   # 덱 읽기(kv_transport/drive.py). 시트와 같은 서비스계정, 스코프만 drive.readonly.
   timeout_sec: 60              # 덱은 수 MB — 시트보다 넉넉히
@@ -182,6 +194,9 @@ linkedin:
   report_slack: "on"
   # [사용자 결정 2026-08-19] 1티어는 전수 훑기가 목적이라 Wait·Cut 도 보낸다. 정렬은 Catch → Trend → Wait → Cut.
   card_tiers: [Catch, Trend, Wait, Cut]
+  # 카드에 회사 개괄 3줄 [사용자 피드백 2026-10-15 "회사 법인명 웹/링크드인에 검색해서 개괄 간단히"].
+  #    올릴 사람만(하루 5명) claude 웹 조사 — 사람당 1~1.5분, 동시에. 실패하면 그 사람만 개괄 없이 나간다.
+  card_overview: true
   # 재고 기준선(backlog_cap: 100)은 2026-09-29 에 없앴다 [사용자 결정] — 재고가 많다고 안 사면 카드가 늙은 재고만 돈다.
   #    지출 상한은 축의 주기·페이지 수(skills/linkedin/axes.py)가 맡는다.
   # 연결 요청 메모 상한(connect_note_chars: 300)은 2026-09-29 에 없앴다 — 짧은 초안을 안 쓴다. 문안은 outreach.md(Reviewer C 심사역 실무 문안) 하나.

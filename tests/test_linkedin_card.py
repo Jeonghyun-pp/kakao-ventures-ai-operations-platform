@@ -279,3 +279,27 @@ class ScreenFront(unittest.TestCase):
             run.card(n=1)
         replies = [p[1] for p in c.slack.posts if p[0] == "net" and p[2]]
         self.assertTrue(replies and "이름new" in replies[0], replies)
+
+
+class Overview(unittest.TestCase):
+    """[2026-10-15] 회사 개괄 3줄이 문안 아래에 붙는다. 실패하면 그 사람만 빠지고 카드는 나간다."""
+
+    def test_overview_lines_are_appended_and_failure_is_not_fatal(self):
+        rows = [row("p1", "https://www.linkedin.com/in/a", "Catch"), row("p2", "https://www.linkedin.com/in/b", "Catch")]
+        got = {"in/a": ["· 유튜브 채널 대행 — 에이전시", "· 투자·수치 확인 안 됨"]}
+        from unittest import mock
+        from skills.linkedin import recheck
+        with mock.patch.object(recheck, "raw_by_key", lambda: {}), \
+                case(rows, cfg={"linkedin.card_overview": True},
+                     **{"overview.write": lambda people: {p["key"]: got.get(p["key"], []) for p in people}}) as c:
+            self.assertEqual(run.card(n=2), 0)
+        replies = [p[1] for p in c.slack.posts if p[0] == "net" and p[2]]
+        self.assertEqual(len(replies), 2)
+        a = next(r for r in replies if "이름p1" in r)
+        self.assertIn("· 유튜브 채널 대행 — 에이전시\n· 투자·수치 확인 안 됨\n<https://www.linkedin.com/in/a|링크드인>", a)
+
+    def test_parse_keeps_three_bullets_and_strips_slack_mentions(self):
+        from skills.linkedin import overview
+        raw = "머리말\n· 하나 <!channel>\n· 둘 @here\n· 셋\n· 넷"
+        self.assertEqual(overview.parse(raw), ["· 하나", "· 둘", "· 셋"])
+        self.assertEqual(overview.parse("형식 아님"), [])

@@ -22,7 +22,7 @@ from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, 
 from kvlib.gate import Gate
 from kv_transport import apify, notion, slack
 
-from . import axes, brief, judge, names, outreach, profile
+from . import axes, brief, judge, names, outreach, overview, profile
 
 TASK = "linkedin"
 DB = "ch_링크드인"
@@ -507,6 +507,26 @@ def _screened() -> dict[str, dict]:
     return {pid: r for pid, r in _last(SCREENED, "page_id").items() if r["ts"] > resurf.get(pid, {}).get("ts", "")}
 
 
+def _overviews(pick: list, bmap: dict) -> dict[str, list[str]]:
+    """올릴 사람의 회사 개괄 {key: 줄}. 꺼져 있거나 실패하면 빈 값 — 카드는 그대로 나간다."""
+    if not _cfg("card_overview"):
+        return {}
+    from . import recheck            # recheck 가 run 을 부른다 — 위에서 부르면 순환
+    raw = recheck.raw_by_key()
+    people = []
+    for _, k, live in pick:
+        it = raw.get(k) or raw.get(profile.normalize_url(str(live.get("LinkedIn URL") or ""))) or {}
+        loc = it.get("location")
+        people.append({"key": k, "name": live.get("서비스명"), "company": bmap[k]["company"],
+                       "headline": it.get("headline") or live.get("Author Headline"), "current": it.get("currentPosition") or [],
+                       "past": profile.past_positions(it) if it else "", "about": it.get("about"),
+                       "location": loc.get("linkedinText") if isinstance(loc, dict) else loc})
+    print(f"· 회사 개괄 {len(people)}명 조사 (웹)")
+    got = overview.write(people)
+    print(f"  └ 받음 {sum(1 for v in got.values() if v)}/{len(people)}")
+    return got
+
+
 def _fresh(live: dict) -> str:
     """정렬 날짜 = 값을 마지막으로 잰 날. 산 날(Captured At)이거나 recheck 로 다시 긁은 날(Last Checked) 중 늦은 쪽."""
     return max(str(live.get("Captured At") or ""), str(live.get("Last Checked") or ""))
@@ -716,6 +736,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
         _alert("card", f"남은 사람 {left_n}명 — {left_d}일치다. 바닥나기 전에 기준을 손봐야 한다.",
                key="card:low", head="🟡 *linkedin card* 재고 부족")
     bmap = {k: screened[live["_page_id"]] for _, k, live in pick}
+    ov = _overviews(pick, bmap)
 
     lines = [f"*오늘의 링크드인 {len(pick)}명*"]
     for _, k, live in pick:
@@ -726,7 +747,8 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
             f"\n*{live.get('서비스명')}*  {co}  ·  창업 {live.get('창업 개월') or '?'}개월차\n"
             + (f"🔄 다시 올림 · {rs.get('old') or '?'} → {rs.get('new') or '?'}\n" if rs else "")
             + f"{m['brief']}\n"
-            f"<{live.get('LinkedIn URL')}|링크드인> · "
+            + "".join(f"{x}\n" for x in ov.get(k, []))
+            + f"<{live.get('LinkedIn URL')}|링크드인> · "
             f"<https://www.notion.so/{str(live['_page_id']).replace('-', '')}|노션>"
         )
     # 🔴 헤더 하나 + 사람별 스레드 답글.

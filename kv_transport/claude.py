@@ -117,6 +117,27 @@ def run_session(prompt: str, *, system: str | None = None, tools: str | None = N
     return out
 
 
+def web_research(prompt: str, *, system: str, timeout_sec: int) -> str:
+    """claude -p 한 번 — **웹만** 본다 (2026-10-15, 링크드인 카드 회사 개괄).
+
+    run_session 은 WebSearch·WebFetch 를 상시 금지한다(`claude.forbidden_tools`). 이 호출만 그 둘을 연다 —
+    도구는 둘뿐(`--tools`)이고 파일·셸은 목록에 없다. `dontAsk` 라 목록 밖은 묻지 않고 거부한다(권한 프롬프트에 멈추지 않게).
+    웹 페이지 글은 바깥 사람이 쓴 것이다 — 그 안의 지시가 할 수 있는 일은 검색·읽기뿐이다."""
+    n = _calls_today()
+    if n >= constraints.get("claude.daily_calls_block"):
+        raise SessionError(f"오늘 claude 호출 {n}회 — 차단선 도달")
+    cmd = [_bin(), "-p", "--strict-mcp-config", "--tools", "WebSearch,WebFetch",
+           "--permission-mode", "dontAsk", "--allowedTools", "WebSearch,WebFetch",
+           "--append-system-prompt", system]
+    r = _spawn(cmd, prompt, timeout_sec)
+    out = (r.stdout or "").strip()
+    if not out or r.returncode != 0:
+        _record(False, "empty_output" if not out else f"rc{r.returncode}")
+        raise SessionError(f"rc={r.returncode}: {(r.stderr or out)[:200]}")
+    _record(True)
+    return out
+
+
 def read_file(path: Path, prompt: str, *, system: str, timeout_sec: int) -> str:
     """claude -p 한 번 — **파일 하나만** 읽힌다 (2026-10-14, 비플랜 이미지 덱).
 
