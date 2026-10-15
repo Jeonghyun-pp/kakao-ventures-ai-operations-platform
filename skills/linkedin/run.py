@@ -527,11 +527,21 @@ def _screen(pool: list, need: int, screened: dict, *, record: bool) -> str:
 
     🔴 판정과 문안을 한 호출로 받는다 — 통과자의 문안은 장부에 있어 올릴 때 다시 부르지 않는다.
     """
-    ok = sum(1 for t in pool if screened.get(t[2]["_page_id"], {}).get("verdict") in brief.PASS)
-    todo = [t for t in pool if t[2]["_page_id"] not in screened]
     step = max(need * 2, 10)
-    while ok < need and todo:
-        chunk, todo = todo[:step], todo[step:]
+    while True:
+        # 🔴 **풀 앞에서부터** 센다 — 풀 어디든 판정된 통과자가 need 명이면 멈추던 때는(10-15 발견) 맨 앞의 새로 산
+        #    Catch 가 판정을 못 받아 안 나가고, 뒤쪽의 옛 판정자만 매일 나갔다. 앞에서 need 명이 찰 때까지의 미판정자만 부른다.
+        ok, todo = 0, []
+        for t in pool:
+            if ok >= need:
+                break
+            r = screened.get(t[2]["_page_id"])
+            if r is None:
+                todo.append(t)
+            ok += bool(r) and r.get("verdict") in brief.PASS
+        if not todo:
+            return ""
+        chunk = todo[:step]
         b = brief.write([_card_input(k, live) for _, k, live in chunk])
         if not b.is_measured:
             return b.reason
@@ -542,8 +552,10 @@ def _screen(pool: list, need: int, screened: dict, *, record: bool) -> str:
             screened[pid] = rec
             if record:
                 ledger.append(TASK, x["key"], SCREENED, page_id=pid, **rec)
-            ok += x["verdict"] in brief.PASS
-    return ""
+        if not any(t[2]["_page_id"] in screened for t in chunk):
+            # 같은 덩어리를 영원히 다시 부르지 않는다 — 판정 못 받은 사람은 오늘 안 나가고 다음 실행에서 다시 판정한다
+            print(f"  ⚠️  문안 판정이 {len(chunk)}명에게서 안 돌아왔다 — 오늘은 판정된 사람으로만 고른다")
+            return ""
 
 
 def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_only: bool = False) -> int:

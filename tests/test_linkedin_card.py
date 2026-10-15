@@ -267,3 +267,15 @@ class TenureCut(unittest.TestCase):
         stealth = {"회사": "Stealth Startup"}
         self.assertEqual(axes.card_reject({**stealth, "Tenure Months": 20}), "")
         self.assertIn("스텔스 재직", axes.card_reject({**stealth, "Tenure Months": 25}))
+
+
+class ScreenFront(unittest.TestCase):
+    """[2026-10-15] 판정은 풀 앞에서부터 — 뒤쪽 옛 판정자가 need 를 채워 맨 앞 새 Catch 가 안 나가던 버그."""
+
+    def test_fresh_unscreened_catch_at_front_is_screened_and_posted(self):
+        rows = [row("old", "https://www.linkedin.com/in/old", "Trend"), row("new", "https://www.linkedin.com/in/new", "Catch")]
+        with case(rows) as c:
+            ledger.append("linkedin", "in/old", run.SCREENED, page_id="old", verdict="창업", company="Old", brief="옛 판정")
+            run.card(n=1)
+        replies = [p[1] for p in c.slack.posts if p[0] == "net" and p[2]]
+        self.assertTrue(replies and "이름new" in replies[0], replies)
