@@ -163,3 +163,40 @@ class Cursor(unittest.TestCase):
                 pass
         self.assertEqual(c.rows("axis")[-1]["next_page"], 3)                               # p1·p2 샀고 p3 실패
 
+
+
+class Cadence(unittest.TestCase):
+    """[2026-10-15] 주기는 주(월요일 기준)로 센다 — 09-29(화) 수동 실행이 10-05(월) 정기 실행을 밀어냈다."""
+
+    def _due(self, last, today, every=7):
+        with Case(notion=Notion({run.DB: []}), **{"axes.AXES": {"ax": {"every_days": every, "pages": 1, "rewind": False, "payload": {}}}}):
+            ledger.append("linkedin", "ax", run.AXIS_EV, ran_on=last, next_page=2)
+            return run._due("ax", today)
+
+    def test_manual_midweek_run_does_not_skip_next_monday(self):
+        self.assertTrue(self._due("2026-09-29", "2026-10-05"))      # 화 → 다음 월
+        self.assertFalse(self._due("2026-10-12", "2026-10-15"))     # 같은 주
+
+    def test_biweekly_counts_weeks(self):
+        self.assertFalse(self._due("2026-10-05", "2026-10-12", 14))
+        self.assertTrue(self._due("2026-10-05", "2026-10-19", 14))
+
+
+class Wrap(unittest.TestCase):
+    """[2026-10-15] 목록 끝에 닿으면 1페이지로 — 10-12 s-stealth 가 p19 에서 빈 페이지를 샀다."""
+
+    def test_empty_page_rewinds_cursor(self):
+        c, _ = case([], {}, **{"axes.AXES": {"ax": {"every_days": 7, "pages": 3, "rewind": False, "payload": {}}}})
+        with c:
+            run.collect()
+        st = c.rows("axis")[-1]
+        self.assertEqual((st["next_page"], st["wrapped"]), (1, True))
+
+    def test_last_page_by_total_rewinds_cursor(self):
+        items = [{"id": "a", "_meta": {"pagination": {"totalElements": 30}}}, {"id": "b"}]
+        c, ap = case(items, {"a": "Catch", "b": "Catch"}, **{"axes.AXES": {"ax": {"every_days": 7, "pages": 5, "rewind": False, "payload": {}}}})
+        with c:
+            run.collect()
+        self.assertEqual(ap.calls, 2)                                                      # 30명 = 2페이지, 3번째는 안 산다
+        self.assertEqual(c.rows("axis")[-1]["next_page"], 1)
+        self.assertEqual([p["서비스명"] for _, p in c.notion.created], ["a", "b"])           # 마지막 페이지 사람도 착지

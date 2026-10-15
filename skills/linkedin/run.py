@@ -185,8 +185,10 @@ def _due(axis: str, today: str) -> bool:
     last = st.get("ran_on")
     if not last:
         return True
-    gap = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(last, "%Y-%m-%d")).days
-    return gap >= axes.AXES[axis]["every_days"]
+    # 🔴 주기는 **주(월요일 기준)로** 센다. 날짜 차이로 세면 손으로 한 번 돌린 날이 다음 정기 실행을 밀어낸다 —
+    #    09-29(화) 수동 실행 → 10-05(월)은 6일째라 "차례 없음", 한 주를 통째로 안 샀다.
+    monday = lambda d: datetime.strptime(d, "%Y-%m-%d").toordinal() // 7          # 서수 1 = 월요일 → 같은 주면 같은 몫
+    return (monday(today) - monday(last)) * 7 >= axes.AXES[axis]["every_days"] // 7 * 7
 
 
 def _next_page(axis: str) -> int:
@@ -255,6 +257,7 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
     unknowns: list[tuple[str, str]] = []
     for a, n, start in plan:
         total = None                       # 이 축의 모수 (첫 페이지가 알려준다)
+        wrapped = False
         reached = start                    # 실제로 산(또는 오늘 이미 산) 마지막 페이지 다음
         for i in range(n):
             page, got = start + i, {}
@@ -294,12 +297,18 @@ def collect(*, only_axis: str | None = None, pages: int | None = None,
                     continue
                 fresh[ks[0]] = {**it, "_axis": a, "_keys": ks}
                 seen.update(ks)          # 같은 실행 안에서도 두 번 안 잡히게
+            # 🔴 목록 끝에 닿으면 처음으로 돌아간다 — 끝에서 멈추면 빈 페이지만 산다(10-12 s-stealth p19 0건).
+            #    이번 실행은 여기서 멈춘다 — 다음 차례가 1페이지부터.
+            #    처음부터 다시 읽으면 그사이 새로 생긴 사람만 장부를 통과한다.
+            if not items or (total and page * axes.PER_PAGE >= min(total, axes.COMMON["maxItems"])):
+                reached, wrapped = 1, page          # 어디서 끝났나 — 상태 줄의 '본 페이지'
+                break
         # 커서 전진 — 착지 성공 여부와 무관하게 "여기까지 샀다"는 사실이다.
         # 🔴 **실제로 산 데까지만** 민다. 09-29 s-stealth 15페이지 중 7번째에서 502 로 멈췄는데
         #    커서가 start+n 으로 넘어가 못 산 9페이지(모수의 절반)를 영영 건너뛸 뻔했다.
         ledger.append(TASK, a, AXIS_EV, ran_on=today,
                       next_page=(1 if axes.AXES[a]["rewind"] else reached), run=run_id,
-                      total=total, seen_pages=reached - 1)
+                      total=total, seen_pages=wrapped or reached - 1, wrapped=bool(wrapped))
 
     if unknowns:
         print(f"🔴 미상 {len(unknowns)}건")

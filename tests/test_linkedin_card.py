@@ -253,3 +253,17 @@ class LegacyAll(unittest.TestCase):
         with case(rows) as c:
             run.card(n=5)
         self.assertEqual([p for p, props in c.notion.updated if props == {"Status": "Legacy"}], ["p1"])
+
+
+class TenureCut(unittest.TestCase):
+    """[2026-10-15] 재직 컷은 ✅ 를 가르지 못했다(3개월 컷이 ✅ 22명 중 13명을 버렸다) — 창업 직함·스텔스 모두 24개월까지."""
+
+    def test_founder_and_stealth_pass_up_to_24_months(self):
+        from skills.linkedin import axes
+        founder = {"Author Headline": "Co-Founder & CEO at Aco", "회사": "Aco"}
+        self.assertEqual(axes.card_reject({**founder, "Tenure Months": 18}), "")
+        self.assertEqual(axes.card_reject({**founder, "Tenure Months": 24}), "")
+        self.assertEqual(axes.card_reject({**founder, "Tenure Months": 25}), "세 갈래 어디에도 안 걸림")
+        stealth = {"회사": "Stealth Startup"}
+        self.assertEqual(axes.card_reject({**stealth, "Tenure Months": 20}), "")
+        self.assertIn("스텔스 재직", axes.card_reject({**stealth, "Tenure Months": 25}))

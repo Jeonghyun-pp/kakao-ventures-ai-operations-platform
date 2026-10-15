@@ -159,7 +159,7 @@ AXES: dict[str, dict] = {
 _AXES_2026_09 = {
     # 축 A — 스텔스. 🔴 재직·규모를 일부러 안 건다(스텔스 2년차도 팔로업 대상).
     "s-stealth": {
-        "every_days": 7, "pages": 1, "rewind": False,
+        "every_days": 7, "pages": 2, "rewind": False,
         "payload": {"searchQuery": "Stealth Startup", "locations": ["South Korea"],
                     **_EXCL},
     },
@@ -174,7 +174,7 @@ _AXES_2026_09 = {
     },
     # 축 C1 — 최근 입사 · 직함으로.
     "s-recent-title": {
-        "every_days": 7, "pages": 1, "rewind": False,
+        "every_days": 7, "pages": 3, "rewind": False,
         "payload": {"currentJobTitles": _TITLES, "locations": ["South Korea"],
                     **_EARLY, **_EXCL},
     },
@@ -182,9 +182,21 @@ _AXES_2026_09 = {
     # 🔴 C1 과 한 축에 못 합친다. 직함과 분류를 한 쿼리에 넣으면 AND 라 **더 좁아진다.**
     #    OR 로 만들려면 따로 사서 합쳐야 한다.
     "s-recent-class": {
-        "every_days": 7, "pages": 1, "rewind": False,
+        "every_days": 7, "pages": 3, "rewind": False,
         "payload": {"locations": ["South Korea"],
                     **_EARLY, **_FOUNDER_CLASS, **_EXCL},
+    },
+    # 페이지 수 [사용자 결정 2026-10-15 "많이 사도 된다"] — 주 11페이지 ≈ $2.2 → 월 ≈ $9.5 (+ recheck ≈ $6.3, 상한 $29 안).
+    #    기준: 주 착지 ≥ 카드 소모(주 25장). 10-12 실측 1페이지 ≈ 7명 착지 — 전엔 축마다 1페이지라 넣는 양 < 쓰는 양이었다.
+    # 축 D — 연쇄 창업자 [사용자 결정 2026-10-15]. ✅ 공통점 1순위(연쇄창업 ✅ 12/25 = 48% · 기저 35%)를
+    #    판정이 아니라 **살 때** 잡는다 — 과거 직함도 창업 직함이면 서버가 걸러 준다.
+    # 🔴 재직 2년 이하(`1`·`2`)를 건다. 안 걸면 6년 된 회사 대표가 섞인다(10-15 시험: 재직 17~78개월, 40세+ 7/14).
+    #    걸고 다시 사면 17~29개월 · 40세+ 3/9 · 모수 2,588 → 841.
+    #    _EARLY(1년 미만)는 안 쓴다 — ✅ 연쇄창업자의 재직은 대부분 4~18개월이다.
+    "s-serial": {
+        "every_days": 7, "pages": 3, "rewind": False,
+        "payload": {"currentJobTitles": _TITLES, "pastJobTitles": _TITLES, "locations": ["South Korea"],
+                    "companyHeadcount": ["A", "B"], "yearsAtCurrentCompanyIds": ["1", "2"], **_EXCL},
     },
 }
 AXES.update(_AXES_2026_09)
@@ -294,10 +306,15 @@ _CARD_EXCL_SENIOR = ("director", "vice president", "전무", "상무", "본부�
 #      RECENT_MONTHS 6→3: -35 (Catch 8명 포함)
 #    → 200명대 초반. `본업 공백` 체크가 개월 수와 무관하게 통과시키던 우회를 막았다 —
 #      체크는 있는데 `공백 개월` 이 비어 있으면 여전히 통과한다(모르는 건 감점이 아니다).
-RECENT_MONTHS = 3        # 창업자 직함 + 현 직장 재직 3개월 이내 (서버는 1년 미만까지만 걸린다)
+# 🔴 [사용자 결정 2026-10-15] RECENT_MONTHS 3→24 · STEALTH_MAX_MONTHS 12→24. 위 값은 Catch 수(AI 판정)로 정했는데
+#    정답(✅)으로 다시 재니 재직 기간은 ✅ 를 가르지 못했다 — 반응 63장(✅ 22)에 컷별로 적용:
+#      3·12개월 ✅ 9/22 살림 · 통과군 ✅율 33%  |  12 → 15/22 · 34%  |  18 → 21/22 · 36%  |  24 → 21/22 · 35%
+#    3개월 컷은 거르는 힘 없이 ✅ 13명을 버렸다. 24 = s-serial 축의 서버 조건(재직 2년 이하)과 같은 선.
+#    Reviewer B·Reviewer C 확인은 사후 공유로 [같은 결정].
+RECENT_MONTHS = 24       # 창업자 직함 + 현 직장 재직 24개월 이내
 GAP_MONTHS = 3           # 최근 3개월 내 경력단절 — 체크박스에도 같은 상한
 MAX_TENURE = 36          # 현 직장 재직 3년 초과 제외 (60 이었을 때 실측 Catch 0/105)
-STEALTH_MAX_MONTHS = 12  # 스텔스라도 재직 1년 초과면 제외 (2년차 스텔스는 극초기가 아니다)
+STEALTH_MAX_MONTHS = 24  # 스텔스라도 재직 24개월 초과면 제외 (3년차 스텔스는 극초기가 아니다)
 MAX_AGE = 39             # [사용자 결정 2026-09-29] 추정 40세 이상 제외. 추정 불가는 통과(모르는 건 감점이 아니다)
 
 
