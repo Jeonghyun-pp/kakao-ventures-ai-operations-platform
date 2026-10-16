@@ -51,7 +51,9 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
 매일 11:00 card     평일만. 반응 정답 동기화(label) → 재고 + 다시 올라온 사람 → 판정 순 4명 + 판정 하위(Wait·Cut)에서 탐색 1명
                     (탐색은 표시 안 함 — 위만 올리면 하위 판정이 맞는지 영영 모른다) → 헤더 + 사람별 스레드
                     → 하루 보고서(파일 + review_test 요약)
-10분마다  followup  ✅ → outreach.md 문안에 {이름}(성 뺀 한글 이름)·{발신자}(누른 분) 채워 스레드에 → 극초기 승격
+10분마다  followup  ✅ → outreach.md 문안(Reviewer A 심사역 문안, 10/16)에 {이름}(성 뺀 한글 이름)·{발신자}(누른 분)·{맞춤}·{궁금} 채워 스레드에 → 극초기 승격
+                    {맞춤} = pitch.py: 최신 프로필 + 카드 때 웹 개괄(posted.overview) → claude 가 칸 구절(제품·성과·이력)+원문 근거 →
+                    코드가 근거·숫자·끝말 대조 → Reviewer A 문장 틀에 끼움. 근거는 문안 아래(보내기 전 확인). 실패해도 첫 문장으로 나간다
                     7일째 결론: ❌ 있으면 reaction_no · 없으면 expiry · 하루 한 번 최근 4주 늦은 반응 훑기
 매일 10:00 remind   ✅ 누른 날 + 2일(주말·공휴일이면 다음 평일, 목·금 → 월) → #그물망 본문에 "@누른분 김가람(회사) 님께 연락 보내셔야 합니다"
                     이름은 names.py 가 한글로(`가람 김` 는 규칙, 영문은 claude, 확신 없으면 원문 병기). 한 사람 한 번. [사용자 결정 2026-09-29]
@@ -101,7 +103,8 @@ judge.py       판정 — 줄 단위(judge_lines). collect 와 replay 가 같은
 ../../kvlib/judgments.py   판정 저장 · label(노션 Tier) · replay · diff — 네 스킬 공용
 axes.py        수집 축(Apify 질의)과 사후 조건(reject) · 카드 기준(card_reject)
 profile.py     Apify 원본 → 키·경력·신호
-brief.py       카드 두 문장 + 회사명 (claude)     outreach.py  연락 문안 채우기 (모델 없음, 원문 outreach.md)
+brief.py       카드 두 문장 + 회사명 (claude)     outreach.py  연락 문안 채우기 (원문 outreach.md)
+pitch.py       연락 문안 맞춤 문단 (claude, 프롬프트 pitch.md) — 틀 고정·구절만, 원문 대조
 names.py       ✅ 리마인드에 쓸 한글 이름 (규칙 → claude)
 recheck.py     재확인 — 감시 목록 원칙 · 지문 비교 · 다시 재고로     features.py  카드의 특징(코드, 고정 목록)
 learn.py       주간 학습 — 특징 표 · 수정안 · 사람 이름 유출 검사
@@ -111,7 +114,7 @@ learn.py       주간 학습 — 특징 표 · 수정안 · 사람 이름 유출
 criteria.md    Tier 기준 — 사람이 깎는다
 ../../people.yaml   심사역 명부(슬랙 ID → 성함). 메일과 같은 파일
 ```
-`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · followup_days · stock_warn_days · outreach_batch · remind_* · learn_weeks · learn_min_n · recheck_days · recheck_batch · recheck_max. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
+`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · followup_days · stock_warn_days · outreach_batch · outreach_pitch · remind_* · learn_weeks · learn_min_n · recheck_days · recheck_batch · recheck_max. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
 
 ## 알아둘 것 (지우지 않은 결정)
 

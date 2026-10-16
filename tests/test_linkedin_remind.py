@@ -98,18 +98,25 @@ class Remind(unittest.TestCase):
 
 
 class Template(unittest.TestCase):
-    def test_fills_both_slots_from_outreach_md(self):
+    def test_fills_slots_from_outreach_md(self):
         from skills.linkedin import outreach
-        t = outreach.write("민수", "Reviewer B")
-        self.assertTrue(t.startswith("안녕하세요 민수님, 처음 인사드립니다.\n카카오벤처스 Reviewer B 심사역입니다."))
+        t = outreach.write("민수", "Reviewer B", "링크드인에서 Aco 소식을 접하고 연락드립니다.", "Aco가 만들어가는 이야기가 궁금합니다.")
+        self.assertTrue(t.startswith("안녕하세요 민수님, 처음 인사드립니다.\n카카오벤처스 Reviewer B 심사역입니다.\n링크드인에서 Aco 소식을"))
+        self.assertIn("벤처캐피탈입니다. Aco가 만들어가는 이야기가 궁금합니다. 괜찮으시면", t)
         self.assertTrue(t.endswith("카카오벤처스 Reviewer B 드림"))
+        self.assertNotIn("{", t)
+
+    def test_no_close_drops_the_sentence_and_its_space(self):
+        from skills.linkedin import outreach
+        t = outreach.write("민수", "Reviewer B", "링크드인에서 민수님 프로필을 보고 연락드립니다.")
+        self.assertIn("벤처캐피탈입니다. 괜찮으시면", t)
 
     def test_broken_template_fails_loudly(self):
         from unittest import mock
         from skills.linkedin import outreach
         with mock.patch.object(outreach, "_MD", mock.Mock(read_text=lambda **k: "```\n안녕하세요\n```")):
             with self.assertRaises(ValueError):
-                outreach.write("a", "b")
+                outreach.write("a", "b", "c")
 
     def test_remind_reuses_name_chosen_at_press(self):
         with case(THU, ko={"in/a": ("다른이름", "이름", True)}) as c:

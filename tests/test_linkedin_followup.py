@@ -40,6 +40,41 @@ class Followup(unittest.TestCase):
         self.assertEqual(c.rows("resolved")[0]["uid"], "U1")      # 리마인드가 핑할 사람
         self.assertEqual(c.rows("resolved")[0]["name_ko"], "김가람")  # 리마인드가 같은 이름을 쓴다
 
+    def test_pitch_fills_message_and_evidence_goes_below(self):
+        """[2026-10-16] 맞춤 문단은 문안 안에, 근거는 코드 블록 밖(보내기 전 확인용)에. 카드 때 남긴 웹 개괄이 pitch 로 간다."""
+        seen = {}
+
+        def fake(it, given, web):
+            seen.update(it=it, given=given, web=web)
+            return {"text": "링크드인에서 Aco 소식을 접하고 연락드립니다. 회의 통역 제품인데, 이력이 인상 깊었습니다.",
+                    "close": "Aco가 만들어가는 이야기가 궁금합니다.", "kept": ["product", "past"],
+                    "dropped": {"proof": "비어 있음"}, "evidence": ["Built X"]}
+        raw = {"in/a": {"headline": "CEO @ Aco"}}
+        with case({"par": [{"ts": "m1", "reactions": [YES]}]}, cfg={"linkedin.outreach_pitch": True},
+                  **{"pitch.latest_by_key": lambda: raw, "pitch.write": fake}) as c:
+            ledger.append("linkedin", "in/a", run.POSTED, ch="net", slack_ts="m1", parent="par", day="2026-09-23", page_id="p1",
+                          name="A", company="Aco", url="https://www.linkedin.com/in/a", overview=["뭘 만드나: 통역 (출처: https://a.co)"])
+            run.followup()
+        msg = [p for p in c.slack.posts if p[2] == "par"][0][1]
+        body, after = msg.split("```")[1], msg.split("```")[2]
+        self.assertIn("심사역입니다.\n링크드인에서 Aco 소식을 접하고 연락드립니다. 회의 통역 제품인데", body)
+        self.assertIn("벤처캐피탈입니다. Aco가 만들어가는 이야기가 궁금합니다. 괜찮으시면", body)
+        self.assertNotIn("Built X", body)
+        self.assertIn("> Built X", after)
+        self.assertEqual((seen["given"], seen["web"]), ("가람", ["뭘 만드나: 통역 (출처: https://a.co)"]))
+        self.assertEqual((c.rows("outreach")[0]["pitch"], c.rows("outreach")[0]["pitch_dropped"]), (["product", "past"], ["proof"]))
+
+    def test_pitch_off_or_no_raw_still_posts_with_first_sentence(self):
+        for cfg, raw in (({"linkedin.outreach_pitch": False}, {"in/a": {}}), ({"linkedin.outreach_pitch": True}, {})):
+            with self.subTest(cfg=cfg), case({"par": [{"ts": "m1", "reactions": [YES]}]}, cfg=cfg,
+                                             **{"pitch.latest_by_key": lambda raw=raw: raw,
+                                                "pitch.write": lambda *a: self.fail("claude 를 부르면 안 된다")}) as c:
+                posted()
+                run.followup()
+            msg = [p for p in c.slack.posts if p[2] == "par"][0][1]
+            self.assertIn("심사역입니다.\n링크드인에서 가람님 프로필을 보고 연락드립니다.\n카카오벤처스는", msg)
+            self.assertNotIn("근거", msg)
+
     def test_old_rows_with_slack_ts_in_ts_column_still_match(self):
         """09-25 전 장부 195줄은 슬랙 ts 가 `ts` 칸에 있다 — 읽기는 둘 다 본다."""
         with case({"par": [{"ts": "m1", "reactions": [YES]}]}) as c:

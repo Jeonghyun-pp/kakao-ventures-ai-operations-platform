@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
@@ -22,7 +23,7 @@ from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, 
 from kvlib.gate import Gate
 from kv_transport import apify, notion, slack
 
-from . import axes, brief, judge, names, outreach, overview, profile
+from . import axes, brief, judge, names, outreach, overview, pitch, profile
 
 TASK = "linkedin"
 DB = "ch_링크드인"
@@ -780,6 +781,7 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
                 print(f"  🔴 {live.get('서비스명')} 답글 실패: {g.row(gk, 'card')['error']}")
             continue
         # 착지 먼저, 장부 나중. ts 를 못 남기면 반응을 영영 못 찾는다.
+        notes = ov.get(k, {}).get("notion")
         ledger.append(TASK, k, CARDED)
         ledger.append(TASK, k, POSTED, ch=ch, slack_ts=g.row(gk, "card")["result"], parent=parent["ts"],
                       **({"gk": gk} if rs else {}), **({"explore": True} if k == probe else {}),
@@ -788,11 +790,12 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
                       # 🔴 claude 가 찾은 회사명. 극초기 승격의 title 이 된다 —
                       #    자동화가 사람 이름을 회사명 칸에 넣던 문제를 여기서 끊는다.
                       company=bmap[k]["company"], brief=bmap[k]["brief"],
-                      homepage=live.get("Homepage"), url=live.get("LinkedIn URL"))
+                      homepage=live.get("Homepage"), url=live.get("LinkedIn URL"),
+                      # 웹 개괄을 남긴다 — ✅ 연락 문안(pitch)이 다시 조사하지 않고 쓴다
+                      **({"overview": notes} if notes else {}))
         posted += 1
         # 상세 개괄은 노션 행 본문에 — 카드가 나간 사람만. 문(overview)은 노션 쓰기라 on 이어야 열린다.
         #    실패해도 카드는 이미 나갔다 — 세기만 한다(다음 실행이 같은 키로 다시 시도하지 않는다: 그날 조사는 그날 것).
-        notes = ov.get(k, {}).get("notion")
         if notes:
             ost = g.out(gk, "overview", {"name": live.get("서비스명"), "n": len(notes)},
                         lambda notes=notes, pid=live["_page_id"]: notion.append(
@@ -823,8 +826,28 @@ def _late_posts(open_posts: dict) -> dict[str, dict]:
             and (r.get("day") or "") >= since and r.get("parent")}
 
 
+def _pitches(people: list[tuple[str, dict]], ko: dict) -> dict[str, dict]:
+    """{key: pitch 결과} — 연락 문안의 맞춤 문단. 재료는 최신 프로필 원본 + 카드 때 남긴 웹 개괄(posted.overview).
+    🔴 문안을 막지 않는다 — 꺼져 있거나 원본이 없거나 claude 가 죽으면 첫 문장만으로 나간다.
+    동시에 부른다 — 한 명에 30~60초라 줄 세우면 ✅ 가 몰린 날 10분 주기를 넘긴다."""
+    def bare(k: str) -> dict:
+        return pitch.compose({}, {}, ko[k][1], [])
+    if not people:
+        return {}
+    if not _cfg("outreach_pitch"):
+        return {k: bare(k) for k, _ in people}
+    raw = pitch.latest_by_key()
+
+    def one(kr: tuple[str, dict]) -> dict:
+        k, r = kr
+        it = raw.get(k) or raw.get(profile.normalize_url(str(r.get("url") or "")))
+        return pitch.write(it, ko[k][1], r.get("overview") or []) if it else bare(k)
+    with ThreadPoolExecutor(max_workers=min(5, len(people))) as ex:
+        return dict(zip((k for k, _ in people), ex.map(one, people)))
+
+
 def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
-    """✅ 를 걷어 연락 문안(outreach.md, Reviewer C 심사역 실무 문안)을 그 스레드에 올린다.
+    """✅ 를 걷어 연락 문안(outreach.md, Reviewer A 심사역 문안 + 프로필 맞춤 문단)을 그 스레드에 올린다.
 
     🔴 사람이 보낸다. 심사역 개인 링크드인 계정으로 나가는 메시지라 우리가 못 보낸다 —
        글만 써서 올리고 복사해서 쓰시게 한다.
@@ -922,15 +945,18 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
 
     # 한글 이름 — 문안 인사(성 뺀 이름)와 리마인드(전체)가 같은 값을 쓴다. 장부에 남겨 리마인드가 다시 묻지 않는다
     ko = names.to_korean([{"key": k, "name": r.get("name"), "headline": r.get("brief")} for k, r, _ in picked])
+    pitches = _pitches([(k, r) for k, r, _ in picked], ko)
     done = 0
     for who, members in groups.items():
         for k, r in members:
             full, given, sure = ko[k]
+            pt = pitches[k]
             orig = r.get("name") or ""
             text = (f"*{full}* 연락 문안"
                     + (f" — {who} 심사역 이름" if who else " — 🔴 발신자 이름을 채워주세요")
                     + ("" if sure or full == orig else f"  _(원문 {orig} — 이름 확인)_")
-                    + f"\n```{outreach.write(given, who or 'OOO')}```")
+                    + f"\n```{outreach.write(given, who or 'OOO', pt['text'], pt['close'])}```"
+                    + ("\n근거 (보내기 전 확인)\n" + "\n".join(f"> {q}" for q in pt["evidence"]) if pt["evidence"] else ""))
             if dry:
                 print(f"\n--- {r.get('name')} ({who or '발신자 미상'}) ---\n{text}")
                 continue
@@ -940,7 +966,8 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
             if st != "done":
                 fails.append(f"post {k}: {(g.row(gk, 'outreach') or {}).get('error', st)}")
                 continue
-            ledger.append(TASK, k, OUTREACH, slack_ts=g.row(gk, "outreach")["result"], by=who, name=r.get("name"))
+            ledger.append(TASK, k, OUTREACH, slack_ts=g.row(gk, "outreach")["result"], by=who, name=r.get("name"),
+                          pitch=pt["kept"], pitch_dropped=sorted(pt["dropped"]))      # 맞춤 칸이 몇 개 남았나 — 나중에 잰다
             pr = _promote(k, r, g)
             ledger.append(TASK, k, RESOLVED, by="reaction_yes", who=who, name=r.get("name"),
                           promoted=pr, uid=uids.get(k),     # uid: 리마인드가 핑할 사람
