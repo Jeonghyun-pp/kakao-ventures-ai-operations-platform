@@ -30,6 +30,8 @@ FORM = {"product": (40, lambda t: not re.search(r"[다요신.]$", t), "명사로
         "past":    (70, lambda t: t.endswith("신"), "~신으로 끝남")}                  # "{이력} 이력도"
 _STEALTH = re.compile(r"stealth|스텔스|비공개", re.I)
 _PRAISE = re.compile(r"유망|혁신|대단|훌륭|놀라운")
+# 슬랙 제어 글(멘션)과 백틱 — 프로필 원문이 #그물망에 핑을 터뜨리거나 코드 블록을 깨지 못하게 (overview._SLACK_CTRL 과 같은 원칙)
+_UNSAFE = re.compile(r"<[!@#][^>]*>|@(?:channel|here|everyone)|`")
 _LEGAL = re.compile(r",?\s*(inc\.?|co\.?,?\s*ltd\.?|ltd\.?|llc|corp\.?|주식회사|\(주\))\s*$", re.I)   # 인사말에 법인 꼬리는 안 붙인다
 # 숫자 + 단위. 앞이 영문자면 숫자로 안 본다 — `B2B`·`Qwen3` 가 20억·3 으로 읽히지 않게
 _NUM = re.compile(r"(?<![a-z0-9.,])(\d+(?:[.,]\d+)*)\s*(천|만|억|조|k|m|bn|b)?(?![a-z0-9])")
@@ -166,8 +168,8 @@ def compose(got: dict, it: dict, given: str, web: list[str]) -> dict:
         if why:
             dropped[s] = why + (f" — {str(got[s].get('text') or '')[:60]}" if isinstance(got.get(s), dict) else "")
         else:
-            kept[s] = got[s]["text"].strip()
-            evidence.append(got[s]["quote"].strip())
+            kept[s] = _UNSAFE.sub("", str(got[s]["text"])).strip()
+            evidence.append(_UNSAFE.sub("", str(got[s]["quote"])).strip())
     return {"company": company, "text": paragraph(company, given, kept), "close": closing(company, str(got.get("josa") or "")),
             "kept": list(kept), "dropped": dropped, "evidence": evidence}
 

@@ -826,22 +826,32 @@ def _late_posts(open_posts: dict) -> dict[str, dict]:
             and (r.get("day") or "") >= since and r.get("parent")}
 
 
-def _pitches(people: list[tuple[str, dict]], ko: dict) -> dict[str, dict]:
+def _pitches(people: list[tuple[str, dict]], ko: dict, *, model: bool = True) -> dict[str, dict]:
     """{key: pitch 결과} — 연락 문안의 맞춤 문단. 재료는 최신 프로필 원본 + 카드 때 남긴 웹 개괄(posted.overview).
-    🔴 문안을 막지 않는다 — 꺼져 있거나 원본이 없거나 claude 가 죽으면 첫 문장만으로 나간다.
+    🔴 문안을 막지 않는다 — 꺼져 있거나 원본이 없거나 claude 가 죽거나 **무슨 예외든** 나면 그 사람만 첫 문장으로 나간다.
+       한 사람의 이상한 출력이 그 회차 ✅ 문안 전체를 막으면 안 된다.
+    🔴 dry(문 off)에선 claude 를 안 부른다 — 장부에 아무것도 안 남아 대기 ✅ 마다 10분에 한 번씩 다시 부르게 된다.
     동시에 부른다 — 한 명에 30~60초라 줄 세우면 ✅ 가 몰린 날 10분 주기를 넘긴다."""
     def bare(k: str) -> dict:
         return pitch.compose({}, {}, ko[k][1], [])
     if not people:
         return {}
-    if not _cfg("outreach_pitch"):
+    if not (model and _cfg("outreach_pitch")):
         return {k: bare(k) for k, _ in people}
-    raw = pitch.latest_by_key()
+    try:
+        raw = pitch.latest_by_key()
+    except Exception as e:                                                   # noqa: BLE001 — 문안은 나가야 한다
+        print(f"  ⚠️  프로필 원본 읽기 실패({e}) — 첫 문장만")
+        return {k: bare(k) for k, _ in people}
 
     def one(kr: tuple[str, dict]) -> dict:
         k, r = kr
-        it = raw.get(k) or raw.get(profile.normalize_url(str(r.get("url") or "")))
-        return pitch.write(it, ko[k][1], r.get("overview") or []) if it else bare(k)
+        try:
+            it = raw.get(k) or raw.get(profile.normalize_url(str(r.get("url") or "")))
+            return pitch.write(it, ko[k][1], r.get("overview") or []) if it else bare(k)
+        except Exception as e:                                               # noqa: BLE001 — 그 사람만 첫 문장
+            print(f"  ⚠️  맞춤 문단 실패 {r.get('name')}: {type(e).__name__}: {e} — 첫 문장만")
+            return bare(k)
     with ThreadPoolExecutor(max_workers=min(5, len(people))) as ex:
         return dict(zip((k for k, _ in people), ex.map(one, people)))
 
@@ -945,7 +955,7 @@ def followup(*, dry_run: bool = False, gate: Gate | None = None) -> int:
 
     # 한글 이름 — 문안 인사(성 뺀 이름)와 리마인드(전체)가 같은 값을 쓴다. 장부에 남겨 리마인드가 다시 묻지 않는다
     ko = names.to_korean([{"key": k, "name": r.get("name"), "headline": r.get("brief")} for k, r, _ in picked])
-    pitches = _pitches([(k, r) for k, r, _ in picked], ko)
+    pitches = _pitches([(k, r) for k, r, _ in picked], ko, model=not dry)
     done = 0
     for who, members in groups.items():
         for k, r in members:

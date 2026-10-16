@@ -75,6 +75,24 @@ class Followup(unittest.TestCase):
             self.assertIn("심사역입니다.\n링크드인에서 가람님 프로필을 보고 연락드립니다.\n카카오벤처스는", msg)
             self.assertNotIn("근거", msg)
 
+    def test_any_pitch_error_falls_back_for_that_person_only(self):
+        def boom(*a):
+            raise TypeError("text 가 문자열이 아님")
+        with case({"par": [{"ts": "m1", "reactions": [YES]}]}, cfg={"linkedin.outreach_pitch": True},
+                  **{"pitch.latest_by_key": lambda: {"in/a": {"headline": "h"}}, "pitch.write": boom}) as c:
+            posted()
+            self.assertEqual(run.followup(), 0)
+        self.assertIn("링크드인에서 가람님 프로필을 보고 연락드립니다.", [p for p in c.slack.posts if p[2] == "par"][0][1])
+        self.assertEqual(len(c.rows("outreach")), 1)
+
+    def test_dry_run_does_not_call_model(self):
+        with case({"par": [{"ts": "m1", "reactions": [YES]}]}, cfg={"linkedin.outreach_pitch": True},
+                  **{"pitch.latest_by_key": lambda: {"in/a": {"headline": "h"}},
+                     "pitch.write": lambda *a: self.fail("dry 에서 claude 를 부르면 안 된다")}) as c:
+            posted()
+            run.followup(dry_run=True)
+        self.assertIn("프로필을 보고 연락드립니다", c.out.getvalue())
+
     def test_old_rows_with_slack_ts_in_ts_column_still_match(self):
         """09-25 전 장부 195줄은 슬랙 ts 가 `ts` 칸에 있다 — 읽기는 둘 다 본다."""
         with case({"par": [{"ts": "m1", "reactions": [YES]}]}) as c:

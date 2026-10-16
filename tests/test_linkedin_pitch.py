@@ -71,6 +71,18 @@ class Check(unittest.TestCase):
         got = pitch.compose({**GOOD, "company": "Saaample"}, IT, "가람", WEB)
         self.assertEqual(got["company"], "Sample AI")
 
+    def test_slack_mentions_and_backticks_are_stripped(self):
+        """근거는 코드 블록 밖에 붙는다 — 프로필 원문의 멘션이 #그물망에 핑을 터뜨리면 안 된다."""
+        it = {**IT, "about": IT["about"] + " <!channel> ping `x`"}
+        got = pitch.compose({**GOOD, "past": slot("예시치 CTO로 인수까지 함께하신 `코드`", "<!channel> ping `x`")}, it, "가람", WEB)
+        self.assertNotIn("<!channel>", " ".join(got["evidence"]))
+        self.assertNotIn("`", got["text"] + " ".join(got["evidence"]))
+
+    def test_non_string_slot_values_do_not_crash(self):
+        got = pitch.compose({**GOOD, "product": {"text": 123, "quote": "Real-time AI for global meetings"},
+                             "proof": "문자열", "past": {"text": None}}, IT, "가람", WEB)
+        self.assertEqual(got["kept"], [])
+
     def test_claude_failure_leaves_first_sentence(self):
         got = pitch.compose({}, IT, "가람", [])
         self.assertEqual((got["text"], got["kept"]), ("링크드인에서 Sample AI 소식을 접하고 연락드립니다.", []))
