@@ -14,7 +14,7 @@ from . import route, rules
 
 SKIP = {rules.BPLAN_INTAKE, rules.INTERNAL, rules.WEBFLOW}
 # 🔴 모델 행동은 route.decide 에서 끌어온다 — 여기 따로 적어 두면 기준이 바뀔 때 둘이 갈린다(10-08 결정이 그렇게 어긋났다).
-_AS = {"archive": "archive", "reply": "reply", "forward": "handoff", "slack": "handoff"}
+_AS = {"archive": "archive", "reply": "reply", "forward": "handoff", "slack": "handoff", "fwd_mail": "handoff", "intake": "handoff"}
 
 
 def model_action(category: str) -> str:

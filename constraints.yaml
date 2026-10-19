@@ -259,8 +259,9 @@ mail_observe:
   #    전엔 코드 상수(route.POST_CH)와 이 값 두 군데라 한쪽만 바꾸면 반쪽만 실채널로 갔다. 실채널("bplan" = #Squad-비플랜)로 바꾸는 건 슬랙 공유를 켜는 날 사람이 한다.
   slack_channel: "test"
   # 🔴 문(outbound)이 'on' 이 아니어도 실제로 하는 종류 — **허용 목록**이다. 기본은 비었다. 단계적으로 켤 때 하나씩 넣는다(첫 후보: archive).
-  #    쓸 수 있는 종류: archive · draft · intake · post · forward · handoff · ack · clarify · remind. 🔴 send 는 넣어도 무시된다 — 발송은 send_branches 뒤만.
+  #    쓸 수 있는 종류: archive · draft · intake · fwd_mail · post · forward · handoff · ack · clarify · remind. 🔴 send 는 넣어도 무시된다 — 발송은 send_branches 뒤만.
   open_kinds: []
+  sender_name: "에반"          # 심사역 포워드 인사말의 이름("투자팀 인턴 ○○입니다"). 🔴 인수인계 때 바꾼다
   # 하루 보고 요약을 슬랙에 올린다 [사용자 결정 2026-09-21]. 위의 outbound 와 별개다 — 보고서만 먼저 열었다.
   report_slack: "on"
   report_channel: "test"       # review_test. 전체 표는 ~/kv-data/mail/reports/<날짜>.md

@@ -314,6 +314,8 @@ def report(con, since: str) -> tuple[str, str]:
         kinds = {a.split(":")[0] for a in acts.get(r["id"], ())}
         if "post" in kinds:                                      # 슬랙에 물었을 건 — 사람이 결정한다
             return "슬랙에 물었을 것 · " + ", ".join(acts[r["id"]])
+        if "fwd_mail" in kinds:                                  # 심사역 지명 → 그 심사역에게 포워드(초안). 받는 사람·원문을 사람이 본다
+            return "심사역 지명 → 포워드 · " + ", ".join(acts[r["id"]])
         if "intake" in kinds:                                    # 폼 오류 → 비플랜 시트. 무엇을 넣었는지·약속 회신을 사람이 본다
             return "폼 오류 → 비플랜 · " + ", ".join(acts[r["id"]])
         if kinds & {"send", "draft"}:                            # 회신이 나갈(나갔을) 건 — 문안·수신자를 사람이 본다

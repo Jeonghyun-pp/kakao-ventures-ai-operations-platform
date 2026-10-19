@@ -42,6 +42,8 @@ import base64
 import json
 import re
 import time
+from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape as _html_escape
@@ -521,6 +523,51 @@ def _draft(msg: dict, body: str, to: str, *, subject: str) -> Fetched:
             for h in ((got.get("message") or {}).get("payload") or {}).get("headers") or []}
     if to.lower() not in (hdrs.get("to") or "").lower():
         return Fetched.unknown(f"readback_mismatch:수신자가 다르다 (원함 {to}, 저장 {hdrs.get('to')})")
+    return Fetched.measured(did)
+
+
+def forward_draft(msg: dict, to: list[str], intro: str, attachments: list[dict] | None = None) -> Fetched:
+    """원래 메일을 포워드하는 **초안**(Fwd: 제목 · 인사말 + 원문 머리 + 본문 · 첨부 그대로). 보내지 않는다. 되읽어 수신자를 확인한다.
+    🔴 수신자는 호출부가 명시한다(명부의 회사 메일). 원래 메일 스레드에 붙여 hello 쪽에서도 이어서 보인다."""
+    to = [t for t in to if t]
+    if not to:
+        return Fetched.unknown("수신자가 비어 있다 — 추측하지 않는다")
+    subj = msg.get("subject") or ""
+    head = ("---------- Forwarded message ---------\n"
+            f"From: {msg.get('sender_raw') or msg.get('sender') or ''}\nDate: {msg.get('date') or ''}\n"
+            f"Subject: {subj}\nTo: {', '.join(msg.get('to') or [])}\n")
+    body = f"{intro.rstrip()}\n\n{head}\n{msg.get('body') or ''}"
+    mime = MIMEMultipart("mixed")
+    mime["To"] = ", ".join(to)
+    mime["Subject"] = subj if subj.lower().startswith(("fwd:", "fw:")) else f"Fwd: {subj}"
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(body, "plain", "utf-8"))
+    alt.attach(MIMEText(_to_gmail_html(body), "html", "utf-8"))
+    mime.attach(alt)
+    for a in attachments or []:
+        main, _, sub = (a.get("mime") or "application/octet-stream").partition("/")
+        part = MIMEBase(main or "application", sub or "octet-stream")
+        part.set_payload(a["data"])
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=a["name"])
+        mime.attach(part)
+    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+    try:
+        message = {"raw": raw}
+        if msg.get("thread_id"):
+            message["threadId"] = msg["thread_id"]
+        made = _req("POST", "/drafts", json_body={"message": message})
+        did = made.get("id")
+        if not did:
+            return Fetched.unknown(f"초안 id 가 안 왔다: {str(made)[:120]}")
+        got = _get(f"/drafts/{did}", params={"format": "metadata"})
+    except AuthDead as e:
+        return Fetched.unknown(f"auth_dead:{e}")
+    except GmailError as e:
+        return Fetched.unknown(f"gmail:{e}")
+    hdrs = {h["name"].lower(): h["value"] for h in ((got.get("message") or {}).get("payload") or {}).get("headers") or []}
+    if got.get("id") != did or any(t.lower() not in (hdrs.get("to") or "").lower() for t in to):
+        return Fetched.unknown(f"readback_mismatch:초안 {did} 수신자 {hdrs.get('to')}")
     return Fetched.measured(did)
 
 

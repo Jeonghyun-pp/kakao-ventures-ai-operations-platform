@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from kvlib import constraints
+from kvlib import constraints, people
 from kv_transport import slack
 
 from . import rules
@@ -224,6 +224,14 @@ def decide(msg: dict, hit: dict) -> dict:
         return {"action": "archive", "note": "끝난 건의 후속 — 회신 없이 아카이빙"}
 
     if cat == rules.INBOUND_KO:
+        # 🔴 [사용자 결정 2026-10-19] 심사역을 실명으로 지목한 투자 문의 → 폼 안내 대신 **그 심사역에게 메일 포워드**(초안).
+        #    "덱·투자 관련은 폼으로만"(10-15)의 유일한 예외. 지명 규칙은 kvlib.people.named(호칭이 붙어야 지명) 하나다.
+        #    명부에 회사 메일이 있는 사람만 — 메일이 없으면 보낼 곳이 없으니 폼 안내로 간다.
+        named = [p for p in people.named(f"{msg.get('subject') or ''}\n{(msg.get('body') or '')[:constraints.get('gmail.named_partner_body_chars')]}")
+                 if p.get("email")]
+        if named:
+            return {"action": "fwd_mail", "to": [p["email"] for p in named], "partners": [p["names"][0] for p in named],
+                    "note": "심사역 지명 → " + "·".join(p["names"][0] for p in named) + " 심사역에게 메일 포워드"}
         # 🔴 [사용자 결정 2026-10-15] 홈페이지(웹플로우) 문의는 노션 「홈페이지 문의 › 투자 문의」 템플릿.
         #    일반 템플릿의 "자동 회신 메일을 통해서 이미 한번 확인하셨겠지만" 은 홈페이지 문의자에게 맞지 않는다 — 자동 회신을 안 받았다.
         if msg.get("webflow_kind") is not None:

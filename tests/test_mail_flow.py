@@ -384,7 +384,7 @@ class Mention(unittest.TestCase):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", encoding="utf-8") as f:
             f.write('- { names: [홍길동, 길동], email: gd@example.com, slack_id: "U123" }\n- { names: [앤, reviewer-three], email: a@example.com, slack_id: "" }\n')
             f.flush()
-            with mock.patch.object(flow, "PEOPLE", Path(f.name)):
+            with mock.patch.object(flow.people, "load", lambda: __import__("yaml").safe_load(Path(f.name).read_text(encoding="utf-8"))):
                 self.assertEqual(flow.mention("홍길동 심사역님 연사 참여 요청"), "<@U123>")
                 self.assertEqual(flow.mention("cc gd@example.com"), "<@U123>")
                 self.assertEqual(flow.mention("앤님께 전달 부탁드립니다"), "*앤*")               # ID 가 없으면 이름만
