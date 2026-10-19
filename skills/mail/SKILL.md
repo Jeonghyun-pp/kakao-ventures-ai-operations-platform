@@ -15,12 +15,12 @@ schedule:
 ```
 constraints.yaml  mail_observe.outbound
   off     아무것도 안 한다. 무엇을 했을지만 actions 에 dry 로 적는다                     ← 지금
-  slack   슬랙 글만 실제로 올린다(질문·리마인드·인계·포워드 → forward_channel/POST_CH). 초안·아카이브·발송은 dry
+  slack   슬랙 글만 실제로 올린다(질문·리마인드·인계·포워드 → slack_channel). 초안·아카이브·발송은 dry
   on      메일함에도 쓴다(초안·아카이브). 발송은 그 위에 send_branches 허용 목록을 또 지난다 — 목록 밖 갈래는 초안까지
 
 열려 있는 것   mail_observe.report_slack: on  → 아침 요약(저녁 ops digest 한 통으로 묶임)이 report_channel(test) 로. 이것뿐이다
 ```
-**켜는 순서(사람이 한다)**: `outbound: slack` → `forward_channel: bplan`(실채널) → `outbound: on` → `send_branches: [INBOUND_KO]`(보고서가 "켜도 된다"를 낸 갈래 하나씩).
+**켜는 순서(사람이 한다)**: `outbound: slack` → `slack_channel: bplan`(실채널) → `outbound: on` → `send_branches: [INBOUND_KO]`(보고서가 "켜도 된다"를 낸 갈래 하나씩).
 되돌리기는 같은 줄을 되돌리는 것. 각 단계에서 새로 나가는 것은 정확히 하나씩이다.
 
 발송 코드는 `kv_transport/gmail_send.py` 한 파일이고 부르는 곳은 `flow.py` 뿐이다(`check_intent` A8 · 변이 테스트 10/10).
@@ -65,7 +65,7 @@ API 500 같은 일시 오류로 멈추면 다시 부르면 이어진다(9/22: �
 |---|---|---|---|
 | `reply` | INBOUND_KO·EN(콜드 투자 문의) | `send_branches` 에 있으면 발송, 없으면 **초안** (flow._reply) | `send:dry`+`draft:dry` |
 | `archive` | 광고·영업·출자·채용·폼 오류·사칭·시스템 안내 | 아카이브(멱등 — 이미 없으면 성공) | `archive:dry` |
-| `forward` | 제휴 · UNKNOWN | `forward_channel` 에 게시 + 스레드에 전문. 제휴 거절 회신은 초안까지(영원히 수동) | `forward:dry` |
+| `forward` | 제휴 · UNKNOWN | `slack_channel` 에 게시 + 스레드에 전문. 제휴 거절 회신은 초안까지(영원히 수동) | `forward:dry` |
 | `slack` | 행사·섭외 · 신뢰 경로 | 그래프: 질문 → **대기** → ⭕/❌/답글 → 초안·아카이브·인계(🙋) → 리마인드 | `post:dry` |
 | `protect` | 접수 알림 · 사내 발신 | 안 함 | — |
 | `escalate` | 주소 없는 웹플로우 | 도달하지 않는다 — 모델 어휘에 WEBFLOW 가 없어 내용으로 분류되고, 회신이면 no-reply 검사에서 `skipped` | — |

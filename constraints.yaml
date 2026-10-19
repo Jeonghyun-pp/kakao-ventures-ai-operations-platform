@@ -255,9 +255,12 @@ mail_observe:
   partnership_decline_days: 7  # 국내 제휴 제안은 이만큼 기다렸다가 거절 초안 [사용자 결정 2026-10-13]. 그사이 사람이 답하면 건너뛴다
   remind_days: 2               # 질문·인계 글에 이만큼 반응이 없으면 스레드에 한 줄. 무응답을 거절로 바꾸지 않는다
   remind_max: 3
-  # 제휴·분류 애매(UNKNOWN) 메일을 올리는 채널(flow._forward). 옛 시스템은 #Squad-비플랜 의 이메일 주소로 가는 초안을 만들었다 —
-  #    새 시스템은 채널에 바로 올린다. 실채널("bplan")로 바꾸는 건 전환일에 사람이 한다.
-  forward_channel: "test"
+  # 🔴 메일이 슬랙에 올리는 **모든** 글의 채널 — 섭외·신뢰 경로 질문(route 'slack')과 애매·채용·사칭 공유(flow._forward) [2026-10-15 한 값으로 합침].
+  #    전엔 코드 상수(route.POST_CH)와 이 값 두 군데라 한쪽만 바꾸면 반쪽만 실채널로 갔다. 실채널("bplan" = #Squad-비플랜)로 바꾸는 건 슬랙 공유를 켜는 날 사람이 한다.
+  slack_channel: "test"
+  # 🔴 문(outbound)이 'on' 이 아니어도 실제로 하는 종류 — **허용 목록**이다. 기본은 비었다. 단계적으로 켤 때 하나씩 넣는다(첫 후보: archive).
+  #    쓸 수 있는 종류: archive · draft · intake · post · forward · handoff · ack · clarify · remind. 🔴 send 는 넣어도 무시된다 — 발송은 send_branches 뒤만.
+  open_kinds: []
   # 하루 보고 요약을 슬랙에 올린다 [사용자 결정 2026-09-21]. 위의 outbound 와 별개다 — 보고서만 먼저 열었다.
   report_slack: "on"
   report_channel: "test"       # review_test. 전체 표는 ~/kv-data/mail/reports/<날짜>.md

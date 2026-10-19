@@ -48,6 +48,10 @@ class Hands:
     def archive(self, mid):
         self.calls.append(("archive", mid)); return True
 
+    def submitted(self, email):
+        """비플랜 접수 명단 — 기본은 아무도 안 냈다. 테스트가 바꿔 끼운다."""
+        return self.sheet.get(email, []) if hasattr(self, "sheet") else []
+
 
 def gate(value, **over):
     """문과, 필요하면 다른 설정값도 바꿔 끼운다: gate("on", send_branches=["INBOUND_KO"])."""
@@ -320,6 +324,21 @@ class SendCase(unittest.TestCase):
             self.flow(Hands()).act_all()
         self.assertIn("영원히 수동", self.sends()["a"][1]["blocked"])                  # 허용 목록에 있어도 초안까지다
 
+    def test_already_submitted_gets_no_form_guide(self):
+        """[2026-10-15] 이미 폼으로 낸 사람에게 폼 안내를 또 만들지 않는다(실측: Startup A 9/12 접수 → 10/15 폼 안내가 나갔다)."""
+        h = Hands(); h.sheet = {"f@example.com": ["2026-09-12"]}
+        with gate("on", **self.ON):
+            self.flow(h).act_all()
+        self.assertEqual(h.calls, [])
+        self.assertIn("이미 폼 접수(2026-09-12)", self.sends()["a"][1]["why"])
+
+    def test_unreadable_roster_makes_nothing(self):
+        """명단을 못 읽은 날은 모르는 채로 폼 안내를 만들지 않는다 — 아무것도 안 적고 다음 실행에."""
+        h = Hands(); h.submitted = lambda e: (_ for _ in ()).throw(RuntimeError("시트 403"))
+        with gate("on", **self.ON):
+            self.flow(h).act_all()
+        self.assertEqual((h.calls, self.sends()), ([], {}))
+
     def test_send_time_gates_block_without_sending(self):
         for setup, word in ((lambda h: h.legacy.add("a"), "현행 시스템"), (lambda h: setattr(h, "after", 1), "대화가 진행")):
             h = Hands()
@@ -445,9 +464,30 @@ class ActCase(unittest.TestCase):
         with gate("slack"):
             self.flow(h).act_all()
         posts = [c for c in h.calls if c[0] == "post"]
-        self.assertEqual([c[1] for c in posts], ["test"])                               # forward_channel 기본값 — 제휴는 슬랙에 안 올린다(10-13)
+        self.assertEqual([c[1] for c in posts], ["test"])                               # slack_channel 기본값 — 제휴는 슬랙에 안 올린다(10-13)
         self.assertTrue(any(c[0] == "thread" for c in h.calls))                         # 전문은 스레드에
         self.assertEqual((self.acts()[("pt", "draft")], self.acts()[("ad", "archive")]), ("dry", "dry"))
+
+    def test_open_kinds_opens_only_what_is_listed(self):
+        """[2026-10-15] 문이 off 여도 open_kinds 에 넣은 종류만 실제로 한다. 첫 단계 = 아카이브만."""
+        h = Hands()
+        with gate("off", open_kinds=["archive"]):
+            self.flow(h).act_all()
+        self.assertEqual([c[0] for c in h.calls], ["archive"])                          # 아카이브만 실제로
+        a = self.acts()
+        self.assertEqual((a[("ad", "archive")], a[("uk", "forward")], a[("pt", "draft")]), ("done", "dry", "dry"))
+
+    def test_open_kinds_never_opens_send_or_dry_run(self):
+        h = Hands()
+        with gate("off", open_kinds=["archive", "send", "draft"], send_branches=["PARTNERSHIP"]):
+            self.flow(h).act_all()
+        self.assertFalse(any(c[0] == "send" for c in h.calls))                         # send 는 목록에 있어도 안 열린다
+        h2 = Hands()
+        self.con.execute("DELETE FROM actions")
+        with gate("off", open_kinds=["archive"]):
+            f = self.flow(h2); f.force = "off"                                          # --dry-run
+            f.act_all()
+        self.assertEqual(h2.calls, [])
 
     def test_open_gate_acts_once(self):
         h = Hands()

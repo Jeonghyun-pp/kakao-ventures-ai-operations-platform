@@ -64,15 +64,18 @@ class Decide(unittest.TestCase):
 
     def test_trusted_ref_goes_to_slack_not_reply(self):
         act = decide(rules.TRUSTED_REF)
-        self.assertEqual((act["action"], act["kind"], act["ch"]), ("slack", "trusted_ref", route.POST_CH))
+        self.assertEqual((act["action"], act["kind"], act["ch"]), ("slack", "trusted_ref", route.constraints.get("mail_observe.slack_channel")))
 
     def test_event_goes_to_slack(self):
         act = decide(rules.EVENT_SPEAKER)
         self.assertEqual((act["action"], act["kind"]), ("slack", "event"))
 
-    def test_post_channel_is_test(self):
-        """🔴 게시 채널 키가 아직 test 다. --no-slack 을 빼도 실채널로 가지 않는다."""
-        self.assertEqual(route.POST_CH, "test")
+    def test_one_slack_channel_for_everything(self):
+        """🔴 [2026-10-15] 섭외 질문과 공유 글이 **같은 설정 하나**를 본다. 아직 test 다 — 실채널은 슬랙 공유를 켜는 날 사람이 바꾼다."""
+        ch = route.constraints.get("mail_observe.slack_channel")
+        self.assertEqual(ch, "test")
+        self.assertEqual({decide(c)["ch"] for c in (rules.TRUSTED_REF, rules.EVENT_SPEAKER)}, {ch})
+        self.assertFalse(hasattr(route, "POST_CH"))                                    # 두 번째 출처가 다시 생기지 않게
 
     def test_partnership_declines_after_days(self):
         """[사용자 결정 2026-10-13] 국내 제휴 제안 → 7일 뒤 거절. 영원히 수동이라 초안까지다."""

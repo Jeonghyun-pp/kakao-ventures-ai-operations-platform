@@ -33,8 +33,6 @@ _TPL = Path(__file__).resolve().parent / "templates"
 
 GOOGLE_FORM = "https://forms.gle/EXAMPLE_FORM_6c44ce733004"
 
-# 🔴 슬랙 게시 대상 채널 키. 지금은 test(review-test) 고, 실채널은 사람이 지시할 때만.
-POST_CH = "test"
 slack.register("bplan", "C0000AEB349")     # #Squad-비플랜 — 봇 초대 필요
 
 # 🔴 분류가 무엇이든, 무수정률이 얼마든 **영원히** 사람이 보낸다.
@@ -242,14 +240,14 @@ def decide(msg: dict, hit: dict) -> dict:
         #      ⭕ → 접수 안내 초안   ❌ → 아카이브   무반응 → 리마인드(mail_observe.remind_*). 거절로 바꾸지 않는다 [2026-09-21]
         lead = "신뢰 경로로 들어온 투자 건입니다."
         ask = "⭕ 접수 안내 · ❌ 거절"
-        return {"action": "slack", "ch": POST_CH, "kind": "trusted_ref",
+        return {"action": "slack", "ch": constraints.get("mail_observe.slack_channel"), "kind": "trusted_ref",
                 "lead": lead, "ask": ask,
                 "note": "신뢰 경로 → #Squad-비플랜 판단 요청  🔴 영원히 수동"}
 
     if cat == rules.EVENT_SPEAKER:
         lead = "행사·섭외 문의가 왔습니다."
         ask = "⭕ 참여 검토 · ❌ 거절"
-        return {"action": "slack", "ch": POST_CH, "kind": "event",
+        return {"action": "slack", "ch": constraints.get("mail_observe.slack_channel"), "kind": "event",
                 "lead": lead, "ask": ask,
                 "note": "행사·섭외 → #Squad-비플랜"}
 

@@ -11,7 +11,7 @@
     slack   슬랙 글만 실제로 올린다(질문·리마인드·인계·포워드). 초안·아카이브는 여전히 dry   ← 시험은 여기서
     on      메일함에도 쓴다(초안·아카이브·발송). 발송은 그 위에 `send_branches` 허용 목록을 또 지난다 — 목록 밖 갈래는 초안까지다(A8 · `act_all`)
 
-게시 채널은 `route.POST_CH`(지금 test)다.
+게시 채널은 `mail_observe.slack_channel` 하나다(지금 test).
 
 ## 왜 부작용이 멈추는 노드 앞에 있나
 
@@ -103,6 +103,18 @@ class Flow(Gate):
         g.add_edge("ack", END)
         self._cp = sqlite3.connect(db_file, check_same_thread=False)    # 체크포인트는 같은 DB 파일에 — 백업이 한 덩어리다
         self.app = g.compile(checkpointer=SqliteSaver(self._cp))
+
+    def out(self, key: str, kind: str, detail: dict, do) -> str:
+        """문 하나 위에 **허용 목록**(mail_observe.open_kinds) — 목록에 있는 종류만 문이 'on' 이 아니어도 실제로 한다 [2026-10-15].
+        🔴 send 는 목록에 있어도 열지 않는다 — 발송은 send_branches·_blocked 를 지나는 길 하나뿐이다."""
+        opened = kind != "send" and kind in (constraints.get("mail_observe.open_kinds") or ())
+        if not opened or self.force == "off" or self.level() == "on":     # --dry-run(force=off) 은 목록보다 세다
+            return super().out(key, kind, detail, do)
+        prev, self.force = self.force, "on"
+        try:
+            return super().out(key, kind, detail, do)
+        finally:
+            self.force = prev
 
     def close(self) -> None:
         self._cp.close()
@@ -234,7 +246,7 @@ class Flow(Gate):
     def _forward(self, mid: str, m: dict, row, cat: str, act: dict) -> None:
         """옛 시스템은 슬랙 이메일 주소로 가는 **초안**을 만들었다. 여기선 채널에 **바로** 올린다 — 누를 사람이 없어도 도착한다.
         제휴의 거절 회신(`also_reply`)은 지금처럼 초안까지다(영원히 수동)."""
-        ch = constraints.get("mail_observe.forward_channel")
+        ch = constraints.get("mail_observe.slack_channel")
         ping = mention(f"{m['subject']}\n{m['body'][:constraints.get('gmail.named_partner_body_chars')]}")
         text = route._post_text(m, act["note"].split("  ")[0], ping=ping, summary=row["reason"])
         self.out(mid, "forward", {"ch": ch, "text": text, "category": cat}, lambda: self._say(ch, text, m, mid))
@@ -255,10 +267,19 @@ class Flow(Gate):
             return                                                       # 아직 기다리는 중 — 아무것도 안 적는다. 다음 실행에 다시 본다
         own = {a.lower() for a in constraints.get("mail_observe.own_addresses")}
         to = (act.get("to") or "").lower()
+        submitted: list[str] = []
+        if cat == rules.INBOUND_KO:
+            try:
+                submitted = self.io.submitted(to)
+            except Exception:
+                return                                                   # 명단을 못 읽었다 — 확인 못 한 채 폼 안내를 만들지 않는다. 다음 실행에
+
         webflow = row["webflow_kind"] is not None
         why = (
             # [사용자 결정 2026-10-15] 덱·투자 관련은 폼으로만 받는다 — 후속·재문의여도 폼 안내다. 같은 사람에게 두 번은 아래 수신자 검사가 막는다
             "후속·재문의 — 폼 안내를 또 보내지 않는다" if follow == "yes" and cat != rules.INBOUND_KO else
+            # 🔴 [2026-10-15] 이미 폼으로 낸 사람에게 폼 안내를 또 보내지 않는다(실측: Startup A·Startup B·Example Startup에게 나갔다). 명단은 비플랜 응답 시트
+            f"이미 폼 접수({', '.join(done[-2:])})" if cat == rules.INBOUND_KO and (done := submitted) else
             # ponytail: no-reply 류는 나열이다(열린 집합). 놓쳐도 반송될 뿐이고, 주 방어는 "수신자 = DB 에 기록된 발신자"다
             "보낼 수 없는 수신자" if not to or to in own or re.search(r"no-?reply|donotreply|mailer-daemon", to) else
             "같은 수신자에게 이미 보냈거나 보낼 것이다" if self.con.execute(
@@ -441,6 +462,16 @@ class RealIO:
 
     def archive(self, mid: str) -> bool:
         return self.gmail.archive(mid).require()
+
+    def submitted(self, email: str) -> list[str]:
+        """비플랜 응답 시트에서 이 이메일의 접수일들. 실행마다 시트를 한 번만 읽는다. 못 읽으면 raise — 모르는 상태로 폼 안내를 만들지 않는다."""
+        if not hasattr(self, "_submitted"):
+            from skills.bplan import run as bplan
+            subs, _ = bplan._read_sheet()
+            self._submitted: dict[str, list[str]] = {}
+            for x in subs:
+                self._submitted.setdefault(x["email"], []).append(x["ts"][:10])
+        return self._submitted.get((email or "").strip().lower(), [])
 
     def has_deck_attachment(self, mid: str) -> bool:
         return intake.has_deck_attachment(self.gmail.attachments(mid))
