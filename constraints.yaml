@@ -260,7 +260,14 @@ mail_observe:
   slack_channel: "test"
   # 🔴 문(outbound)이 'on' 이 아니어도 실제로 하는 종류 — **허용 목록**이다. 기본은 비었다. 단계적으로 켤 때 하나씩 넣는다(첫 후보: archive).
   #    쓸 수 있는 종류: archive · draft · intake · fwd_mail · post · forward · handoff · ack · clarify · remind. 🔴 send 는 넣어도 무시된다 — 발송은 send_branches 뒤만.
-  open_kinds: []
+  open_kinds: ["archive"]      # [사용자 결정 2026-10-20] 1단계 — 아카이브만, 그것도 아래 open_categories 의 카테고리만
+  # 🔴 open_kinds 로 연 종류를 **카테고리로 다시 좁힌다** — 허용 목록. 여기 적힌 종류는 적힌 카테고리만 실제로 하고 나머지는 dry 다.
+  #    적히지 않은 종류는 open_kinds 대로(전부). 1단계는 사람이 논의할 게 없는 메일만: 기계 알림 · 단체 발송(구독해지·대량 수신) · 끝난 건의 감사 답장.
+  #    2단계 후보(FOREIGN_COLD · VENDOR_PITCH · LP_CUSTODY)는 모델이 내용으로 가르는 갈래라 1~2주 사람 브리핑과 맞춰 본 뒤에 넣는다.
+  #    아카이브는 되돌릴 수 있지만 잘못 빠지면 아무도 못 본다 — 그래서 하루 보고서·슬랙 요약에 「자동 아카이브」 목록이 붙는다(observe.report).
+  open_categories:
+    archive: ["SYSTEM_NOTICE", "AD_NOISE", "MASS_BLAST", "CLOSED_FOLLOWUP"]
+  report_after_hour: 10        # 하루 보고서는 KST 이 시각 뒤 첫 실행에서 한 번 [2026-10-20 — 관찰이 매시간 돌게 되어 자정 직후 실행이 빈 보고서를 내지 않게]
   sender_name: "에반"          # 심사역 포워드 인사말의 이름("투자팀 인턴 ○○입니다"). 🔴 인수인계 때 바꾼다
   # 하루 보고 요약을 슬랙에 올린다 [사용자 결정 2026-09-21]. 위의 outbound 와 별개다 — 보고서만 먼저 열었다.
   report_slack: "on"

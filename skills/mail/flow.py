@@ -95,8 +95,11 @@ class Flow(Gate):
 
     def out(self, key: str, kind: str, detail: dict, do) -> str:
         """문 하나 위에 **허용 목록**(mail_observe.open_kinds) — 목록에 있는 종류만 문이 'on' 이 아니어도 실제로 한다 [2026-10-15].
-        🔴 send 는 목록에 있어도 열지 않는다 — 발송은 send_branches·_blocked 를 지나는 길 하나뿐이다."""
-        opened = kind != "send" and kind in (constraints.get("mail_observe.open_kinds") or ())
+        🔴 send 는 목록에 있어도 열지 않는다 — 발송은 send_branches·_blocked 를 지나는 길 하나뿐이다.
+        🔴 mail_observe.open_categories 에 종류가 있으면 그 종류는 **적힌 카테고리만** 연다(기본 거부) [2026-10-20] — 카테고리 없는 기록도 닫힌 채다."""
+        scoped = (constraints.get("mail_observe.open_categories") or {}).get(kind)
+        opened = (kind != "send" and kind in (constraints.get("mail_observe.open_kinds") or ())
+                  and (scoped is None or detail.get("category") in scoped))
         if not opened or self.force == "off" or self.level() == "on":     # --dry-run(force=off) 은 목록보다 세다
             return super().out(key, kind, detail, do)
         prev, self.force = self.force, "on"

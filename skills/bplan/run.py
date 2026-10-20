@@ -729,7 +729,10 @@ def run_all(*, dry_run: bool = False) -> int:
     """매일 09:20 — sync → 판정 → 행동(문 뒤) → 보고서 → 백업. sync 가 온전하지 않아도 판정은 간다(서로 독립)."""
     rc = 0
     try:
-        rc = sync(dry_run=dry_run, limit=0, since=None)
+        with lock.hold("bplan-sync"):          # 매시간 sync 와 같은 자물쇠 — 둘이 겹치면 같은 접수로 노션 행이 두 번 생길 수 있다
+            rc = sync(dry_run=dry_run, limit=0, since=None)
+    except lock.Busy as e:
+        print(f"  · sync 건너뜀 — {e} (그 실행이 같은 일을 한다)")
     except Degraded as e:
         print(f"🔴 sync 온전하지 않다: {e} — 판정은 계속한다")
         rc = 2
@@ -745,6 +748,19 @@ def run_all(*, dry_run: bool = False) -> int:
     if not (bdir / f"bplan-{datetime.now(timezone.utc):%Y-%m-%d}.sqlite").exists():
         store.backup(g.con, bdir, "bplan", _cfg("backup_keep"))
     return 2 if j["stopped"] else rc
+
+
+def _alert(cmd: str, msg: str) -> None:
+    """🔴 스케줄로 도는 sync 가 실패하면 로그 파일에만 남는다 — 그러면 접수가 조용히 쌓인다 [2026-10-20 sync 를 스케줄에 올리며].
+    sync 의 HARD-GATE(사람이 dry-run 을 읽는다)를 대신하는 것이 이 경보다. 하루 한 번(종류마다) — 매시간 같은 실패를 보내면 채널이 무시된다."""
+    today = ledger.today()
+    if any(r.get("key") == cmd and r.get("day") == today for r in ledger.rows(TASK, ev="alerted")):
+        return
+    r = report.post(TASK, f"🔴 *bplan {cmd}* — {msg}\n로그: `tail -40 ~/kv-data/_logs/com.kv.bplan.{cmd}.log`", _send)
+    if r == "게시함":
+        ledger.append(TASK, cmd, "alerted", day=today, msg=msg[:200])
+    else:
+        print(f"  🔴 경보도 못 보냈다: {r}")
 
 
 def status() -> int:
@@ -777,12 +793,23 @@ def main(argv: list[str] | None = None) -> int:
     df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
     a = p.parse_args(argv)
     try:
-        if a.cmd == "run":
-            with lock.hold("bplan-run"):
-                return run_all(dry_run=a.dry_run)
-        if a.cmd == "sync":
-            with lock.hold("bplan-sync"):
-                return sync(dry_run=a.dry_run, limit=a.limit, since=a.since)
+        if a.cmd in ("run", "sync"):
+            try:
+                with lock.hold(f"bplan-{a.cmd}"):
+                    rc = run_all(dry_run=a.dry_run) if a.cmd == "run" else sync(dry_run=a.dry_run, limit=a.limit, since=a.since)
+            except Degraded as e:
+                rc, why = 2, str(e)
+            except lock.Busy:
+                raise                                   # 다른 실행이 같은 일을 하고 있다 — 실패가 아니다
+            except Exception as e:                      # noqa: BLE001 — 알리고 그대로 죽는다
+                if not a.dry_run:
+                    _alert(a.cmd, f"멈췄다: {type(e).__name__}: {str(e)[:200]}")
+                raise
+            else:
+                why = f"종료코드 {rc}"
+            if rc and not a.dry_run:
+                _alert(a.cmd, f"온전하지 않다 — {why}." + (" 접수가 노션에 안 들어갔거나 접수 메일이 인박스에 남았을 수 있다" if a.cmd == "sync" else " sync 나 판정 중 하나가 멈췄다"))
+            return rc
         if a.cmd == "status":
             return status()
         if a.cmd == "judge":

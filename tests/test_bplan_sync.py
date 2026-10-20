@@ -90,3 +90,39 @@ class Sync(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScheduledAlert(unittest.TestCase):
+    """[2026-10-20] sync 를 스케줄에 올리며 — 실패는 로그가 아니라 사람에게 닿아야 한다. dry-run·다른 실행이 잡고 있음은 알리지 않는다."""
+
+    def setUp(self):
+        from unittest import mock
+        import contextlib, io
+        self.sent = []
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.enterContext(mock.patch.object(run, "_alert", lambda cmd, msg: self.sent.append((cmd, msg))))
+        self.enterContext(mock.patch.object(run.lock, "hold", lambda name: contextlib.nullcontext()))
+        self.mock = mock
+
+    def main_with(self, argv, **behaviour):
+        with self.mock.patch.object(run, "sync", **behaviour):
+            try:
+                return run.main(argv)
+            except RuntimeError:
+                return "raised"
+
+    def test_degraded_sync_alerts(self):
+        self.assertEqual(self.main_with(["sync"], side_effect=run.Degraded("시트를 못 읽었다")), 2)
+        self.assertEqual([c for c, _ in self.sent], ["sync"])
+        self.assertIn("시트를 못 읽었다", self.sent[0][1])
+
+    def test_nonzero_and_crash_alert(self):
+        self.assertEqual(self.main_with(["sync"], return_value=1), 1)
+        self.assertEqual(self.main_with(["sync"], side_effect=RuntimeError("boom")), "raised")
+        self.assertEqual(len(self.sent), 2)
+
+    def test_clean_dry_and_busy_do_not_alert(self):
+        self.assertEqual(self.main_with(["sync"], return_value=0), 0)
+        self.assertEqual(self.main_with(["sync", "--dry-run"], return_value=1), 1)
+        self.assertEqual(self.main_with(["sync"], side_effect=run.lock.Busy("잡고 있다")), 3)
+        self.assertEqual(self.sent, [])

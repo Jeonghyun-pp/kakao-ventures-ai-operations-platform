@@ -56,7 +56,8 @@ class Hands:
 def gate(value, **over):
     """문과, 필요하면 다른 설정값도 바꿔 끼운다: gate("on", send_branches=["INBOUND_KO"])."""
     real = flow.constraints.get
-    table = {"mail_observe.outbound": value, **{f"mail_observe.{k}": v for k, v in over.items()}}
+    # 허용 목록(open_kinds)은 기본 비움 — 시험은 라이브 설정이 아니라 문 자체를 본다 [2026-10-20 라이브에 archive 를 열며]
+    table = {"mail_observe.outbound": value, "mail_observe.open_kinds": [], **{f"mail_observe.{k}": v for k, v in over.items()}}
     return mock.patch.object(flow.constraints, "get", lambda k: table[k] if k in table else real(k))
 
 
@@ -446,7 +447,8 @@ class ActCase(unittest.TestCase):
 
     def test_closed_gate_records_only(self):
         h = Hands()
-        n = self.flow(h).act_all()
+        with gate("off"):
+            n = self.flow(h).act_all()
         self.assertEqual(h.calls, [])
         self.assertEqual(self.acts(), {("ad", "archive"): "dry", ("pt", "draft"): "dry", ("pt", "send"): "dry", ("uk", "forward"): "dry"})
         self.assertEqual((n["archive"], n["forward"]), (1, 1))
@@ -476,6 +478,27 @@ class ActCase(unittest.TestCase):
         self.assertEqual([c[0] for c in h.calls], ["archive"])                          # 아카이브만 실제로
         a = self.acts()
         self.assertEqual((a[("ad", "archive")], a[("uk", "forward")], a[("pt", "draft")]), ("done", "dry", "dry"))
+
+    def test_open_categories_narrow_an_opened_kind(self):
+        """[2026-10-20] open_categories 에 적힌 종류는 적힌 카테고리만 연다 — 목록 밖 카테고리는 dry 로 남는다(기본 거부)."""
+        cat = self.con.execute("SELECT category FROM judgments WHERE message_id='ad' AND run='live'").fetchone()[0]
+        h = Hands()
+        with gate("off", open_kinds=["archive"], open_categories={"archive": ["SYSTEM_NOTICE"]}):
+            self.flow(h).act_all()
+        self.assertEqual(h.calls, [])
+        self.assertEqual(self.acts()[("ad", "archive")], "dry")
+        with gate("off", open_kinds=["archive"], open_categories={"archive": [cat]}):
+            self.flow(h).act_all()
+        self.assertEqual([c[0] for c in h.calls], ["archive"])
+        self.assertEqual(self.acts()[("ad", "archive")], "done")
+
+    def test_open_categories_leave_unlisted_kinds_alone(self):
+        """적히지 않은 종류는 open_kinds 대로 — 카테고리 목록이 다른 종류를 막지 않는다."""
+        h = Hands()
+        with gate("off", open_kinds=["forward"], open_categories={"archive": []}):
+            self.flow(h).act_all()
+        self.assertEqual(self.acts()[("uk", "forward")], "done")
+        self.assertEqual(self.acts()[("ad", "archive")], "dry")
 
     def test_open_kinds_never_opens_send_or_dry_run(self):
         h = Hands()
