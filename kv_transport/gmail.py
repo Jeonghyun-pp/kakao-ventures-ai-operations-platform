@@ -397,6 +397,23 @@ def thread_tail(thread_id: str, msg_id: str) -> Fetched:
                              if "DRAFT" not in (m.get("labelIds") or [])])
 
 
+def thread_before(thread_id: str, msg_id: str) -> Fetched:
+    """그 메시지 **앞에** 스레드에 있던 메시지들 `[{id, labels}]`(초안 제외), 오래된 순.
+    "폼이 안 된다"는 답장엔 사업 내용이 없고 덱은 첫 메일에 붙어 있다(2026-10-20 실측) — 폼 오류 접수가 앞 메일을 읽는다."""
+    try:
+        res = _get(f"/threads/{thread_id}", params={"format": "minimal"})
+    except AuthDead as e:
+        return Fetched.unknown(f"auth_dead:{e}")
+    except GmailError as e:
+        return Fetched.unknown(f"gmail:{e}")
+    msgs = res.get("messages") or []
+    order = [m["id"] for m in msgs]
+    if msg_id not in order:
+        return Fetched.unknown(f"스레드에 그 메시지가 없다: {msg_id}")
+    return Fetched.measured([{"id": m["id"], "labels": m.get("labelIds") or []} for m in msgs[:order.index(msg_id)]
+                             if "DRAFT" not in (m.get("labelIds") or [])])
+
+
 def headers_of(msg_id: str, names: list[str]) -> Fetched:
     """헤더 몇 개만(metadata). 본문을 안 받는다 — 제목만 필요할 때 full 은 낭비다."""
     try:

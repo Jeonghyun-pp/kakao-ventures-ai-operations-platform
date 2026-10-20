@@ -61,8 +61,9 @@ def mail_link(mid: str) -> str:
     return f"https://mail.google.com/mail/u/0/#all/{mid}"
 
 
-def build_row(headers: list[str], fields: dict, msg: dict, *, has_attachment: bool) -> list:
-    """시트 헤더 순서의 한 줄. 헤더를 못 맞추면 resolve_columns 가 멈춘다(비플랜과 같은 규칙)."""
+def build_row(headers: list[str], fields: dict, msg: dict, *, deck_mid: str | None) -> list:
+    """시트 헤더 순서의 한 줄. 헤더를 못 맞추면 resolve_columns 가 멈춘다(비플랜과 같은 규칙).
+    `deck_mid` = 덱 첨부가 붙은 메일(이 메일이거나 같은 스레드의 앞 메일). 표식은 언제나 이 메일 — 드랍 초안이 여기에 답장한다."""
     idx = resolve_columns(headers)
     row: list = [""] * len(headers)
     received = datetime.fromtimestamp(msg["internal_date"] / 1000, _KST).replace(tzinfo=None, microsecond=0)
@@ -72,7 +73,7 @@ def build_row(headers: list[str], fields: dict, msg: dict, *, has_attachment: bo
             continue
         row[i] = fields.get(k, "")
     row[idx["이메일"]] = (fields.get("이메일") or msg.get("sender") or "").lower()
-    deck = ([mail_link(msg["id"])] if has_attachment else []) + list(fields.get("덱링크") or [])
+    deck = ([mail_link(deck_mid)] if deck_mid else []) + list(fields.get("덱링크") or [])
     row[idx["사업계획서"]] = ", ".join(deck)
     mark = MAIL_MARK.format(mid=msg["id"])
     row[idx["추가내용"]] = f"{fields.get('추가내용', '')}\n\n{mark}".strip()
@@ -87,7 +88,7 @@ def existing(rows: list[list[str]], mid: str) -> list[str] | None:
     return None
 
 
-def deliver(msg: dict, fields: dict, *, has_attachment: bool) -> dict:
+def deliver(msg: dict, fields: dict, *, deck_mid: str | None) -> dict:
     """시트에 한 줄. 이미 있으면 그 줄. 되읽은 줄의 접수키를 돌려준다 — 비플랜 노션 행과 맞춰 볼 키다."""
     url, ws = secrets.get("SPREADSHEET_URL"), secrets.get("WORKSHEET_NAME")
     rows = sheets.values(url, ws).require()
@@ -96,7 +97,7 @@ def deliver(msg: dict, fields: dict, *, has_attachment: bool) -> dict:
     got = existing(rows, msg["id"])
     status = "already"
     if got is None:
-        f = sheets.append_row(url, ws, build_row(headers, fields, msg, has_attachment=has_attachment))
+        f = sheets.append_row(url, ws, build_row(headers, fields, msg, deck_mid=deck_mid))
         if not f.is_measured:
             raise RuntimeError(f"시트에 못 썼거나 썼는지 모른다: {f.reason}")
         got, status = f.require(), "appended"

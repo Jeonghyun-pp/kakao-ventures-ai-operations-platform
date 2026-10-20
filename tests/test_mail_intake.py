@@ -70,7 +70,7 @@ class Extract(unittest.TestCase):
 
 class Row(unittest.TestCase):
     def setUp(self):
-        self.row = intake.build_row(HEADERS, FIELDS, MSG, has_attachment=True)
+        self.row = intake.build_row(HEADERS, FIELDS, MSG, deck_mid=MSG["id"])
         self.idx = bplan.resolve_columns(HEADERS)
 
     def test_same_shape_as_a_form_response(self):
@@ -92,7 +92,7 @@ class Row(unittest.TestCase):
         self.assertIsNone(notion["경쟁사"])                                                 # 빈 칸은 안 싣는다 — 폼 응답과 같은 규칙
 
     def test_email_falls_back_to_sender(self):
-        row = intake.build_row(HEADERS, {**FIELDS, "이메일": ""}, MSG, has_attachment=False)
+        row = intake.build_row(HEADERS, {**FIELDS, "이메일": ""}, MSG, deck_mid=None)
         self.assertEqual(row[self.idx["이메일"]], "person-33174d5a8e30@example.com")
         self.assertEqual(row[self.idx["사업계획서"]], "")                                    # 첨부도 링크도 없으면 비운다
 
@@ -107,7 +107,7 @@ class Deliver(unittest.TestCase):
         with mock.patch.object(intake.secrets, "get", lambda k: k), \
              mock.patch.object(intake.sheets, "values", lambda u, w: Fetched.measured(sheet)), \
              mock.patch.object(intake.sheets, "append_row", append):
-            return intake.deliver(MSG, FIELDS, has_attachment=True), appended
+            return intake.deliver(MSG, FIELDS, deck_mid=MSG["id"]), appended
 
     def test_appends_once_and_returns_the_bplan_key(self):
         got, appended = self.run_with([HEADERS])
@@ -115,7 +115,7 @@ class Deliver(unittest.TestCase):
         self.assertEqual((got["status"], got["key"]), ("appended", "person-33174d5a8e30@example.com|2026-10-12T11:56:29"))
 
     def test_never_twice_reads_the_sheet_not_the_ledger(self):
-        first = render(intake.build_row(HEADERS, FIELDS, MSG, has_attachment=True))
+        first = render(intake.build_row(HEADERS, FIELDS, MSG, deck_mid=MSG["id"]))
         got, appended = self.run_with([HEADERS, first])
         self.assertEqual((got["status"], appended), ("already", []))
 
@@ -136,15 +136,18 @@ class BplanSide(unittest.TestCase):
 
 
 class IntakeHands(Hands):
-    def __init__(self):
+    def __init__(self, earlier=(), decks=None):
         super().__init__()
-        self.intakes = []
+        self.intakes, self.earlier, self.decks = [], list(earlier), decks
 
     def has_deck_attachment(self, mid):
-        return True
+        return True if self.decks is None else mid in self.decks
 
-    def intake(self, m, fields, has_attachment):
-        self.intakes.append(m["id"]); self.calls.append(("intake", m["id"]))
+    def earlier_from_sender(self, m):
+        return self.earlier
+
+    def intake(self, m, fields, deck_mid):
+        self.intakes.append((m["id"], deck_mid)); self.calls.append(("intake", m["id"]))
         return {"status": "appended", "key": "k"}
 
 
@@ -185,12 +188,51 @@ class FlowCase(unittest.TestCase):
         h = IntakeHands()
         with gate("on"):
             self.flow(h).act_all(); self.flow(h).act_all()
-        self.assertEqual(h.intakes, [MSG["id"]])                                             # 두 번 돌아도 한 줄
+        self.assertEqual(h.intakes, [(MSG["id"], MSG["id"])])                                # 두 번 돌아도 한 줄
         draft = [c for c in h.calls if c[0] == "draft"]
         self.assertEqual(len(draft), 1)
         self.assertTrue(draft[0][3].startswith("안녕하세요 김대표"))
         self.assertEqual(h.calls.index(("intake", MSG["id"])) < h.calls.index(draft[0]), True)   # 시트가 먼저, 약속은 그 뒤
         self.assertFalse(any(c[0] == "send" for c in h.calls))                               # 영원히 수동
+
+    def test_reads_the_founders_earlier_mail_in_the_thread(self):
+        """2026-10-20 코러스에이아이: 덱은 첫 메일에, 이번 메일은 "폼이 오류 난다"뿐. 이번 메일만 읽으면 빈 줄이 들어간다."""
+        first = mail("1a13a6f1b1cd71de", sender=MSG["sender"], subject="투자 관련 상담 문의 드립니다.",
+                     body="코러스에이아이 사업계획서를 첨부드립니다", ms=1791000000000)
+        h = IntakeHands(earlier=[first], decks={first["id"]})
+        seen = []
+        with gate("on"):
+            self.flow(h, llm=lambda p, s: seen.append(p) or json.dumps(FIELDS)).act_all()
+        self.assertIn("사업계획서를 첨부드립니다", seen[0])                                    # 앞 메일 본문까지 옮겨 적는다
+        self.assertEqual(h.intakes, [(MSG["id"], first["id"])])                             # 덱 칸은 덱이 붙은 메일 · 표식은 이번 메일
+
+    def test_promise_is_not_blocked_as_a_followup_to_our_form_guide(self):
+        """폼 오류 메일은 대개 우리 폼 안내에 단 답장이다 — 후속(FOLLOWUP: yes)·같은 수신자 검사가 약속 회신을 막으면 안 된다."""
+        self.con.execute("UPDATE judgments SET followup='yes' WHERE message_id=?", (MSG["id"],))
+        self.con.execute("INSERT INTO actions(key, kind, status, detail, created) VALUES('earlier-guide','send','dry',?,'2026-10-15T00:00:00Z')",
+                         (json.dumps({"to": MSG["sender"]}),))
+        self.con.commit()
+        h = IntakeHands()
+        with gate("on"):
+            self.flow(h).act_all()
+        self.assertEqual(len([c for c in h.calls if c[0] == "draft"]), 1)
+
+    def test_old_record_without_deck_is_extracted_again(self):
+        """10/20 전 기록은 이번 메일만 읽고 뽑았다(deck_mid 없음) — 다시 뽑아 앞 메일의 덱을 찾는다."""
+        self.con.execute("INSERT INTO actions(key, kind, status, detail, created) VALUES(?, 'intake', 'dry', ?, '2026-10-20T01:00:00Z')",
+                         (MSG["id"], json.dumps({"fields": FIELDS, "has_attachment": False})))
+        self.con.commit()
+        first = mail("1a13a6f1b1cd71de", sender=MSG["sender"], body="덱 첨부", ms=1791000000000)
+        h = IntakeHands(earlier=[first], decks={first["id"]})
+        with gate("on"):
+            self.flow(h).act_all()
+        self.assertEqual((self.extracts, h.intakes), (1, [(MSG["id"], first["id"])]))
+
+    def test_no_deck_anywhere_leaves_deck_empty(self):
+        h = IntakeHands(decks=set())
+        with gate("on"):
+            self.flow(h).act_all()
+        self.assertEqual(h.intakes, [(MSG["id"], None)])
 
     def test_no_company_no_write_no_promise(self):
         h = IntakeHands()

@@ -217,26 +217,29 @@ class Flow(Gate):
         ① 폼 칸은 한 번만 뽑아 actions 에 남긴다 — 문이 닫혀 있어도(dry) 무엇을 넣었을지 보인다.
         ② 시트 쓰기는 문(`out`) 뒤. SLACK_KINDS 밖이라 'on' 에서만 실제로 쓴다.
         ③ 회신은 "보내주신 자료로 검토하겠다"는 약속이라 **시트에 들어간 뒤에만**(dry 면 회신도 dry). 기업명을 못 뽑으면 둘 다 안 하고 사람에게.
+        ④ 같은 스레드에서 **같은 사람이 먼저 보낸 메일**까지 읽는다 — "폼이 안 된다"는 답장엔 내용이 없고 덱은 첫 메일에 붙어 있다
+           [2026-10-20 코러스에이아이: 이번 메일만 읽으면 빈 줄이 들어간다]. 덱 칸은 덱이 실제로 붙은 메일을 가리킨다.
         """
         rec = self.row(mid, "intake") or {}
         if rec.get("status") == "skipped":
             return
-        fields, has_att = rec.get("fields"), rec.get("has_attachment")
-        if not fields:
+        fields, deck = rec.get("fields"), rec.get("deck_mid")
+        if not fields or "deck_mid" not in rec:                          # 옛 기록(10/20 전)은 이번 메일만 읽고 뽑았다 — 다시 뽑는다
             if not self.llm:
                 return                                                   # 뽑을 손이 없다 — 다음 실행에
-            fields = intake.extract(m, self.llm)
+            msgs = self.io.earlier_from_sender(m) + [m]
+            fields = intake.extract({**m, "body": "\n\n---\n\n".join(x.get("body") or "" for x in msgs)}, self.llm)
             if fields is None:
                 self.put(mid, "intake", "skipped", {"category": cat, "why": "기업명을 못 뽑았다 — 사람이 본다"})
                 n["skipped"] += 1
                 return
-            has_att = self.io.has_deck_attachment(mid)
-        status = self.out(mid, "intake", {"category": cat, "fields": fields, "has_attachment": has_att},
-                          lambda: self.io.intake(m, fields, has_att))
+            deck = next((x["id"] for x in msgs if self.io.has_deck_attachment(x["id"])), None)
+        status = self.out(mid, "intake", {"category": cat, "fields": fields, "deck_mid": deck},
+                          lambda: self.io.intake(m, fields, deck))
         n["intake"] += status in ("done", "dry")
         if status in ("done", "dry") and (self.row(mid, "send") or {}).get("status") not in ("done", "skipped"):
             body = route.tpl("form_error_ko", ceo=intake.ceo_name(fields))
-            self._reply(mid, m, row, cat, follow, {**act, "action": "reply", "body": body}, n)
+            self._reply(mid, m, row, cat, follow, {**act, "action": "reply", "body": body, "promise": True}, n)
 
     def _forward(self, mid: str, m: dict, row, cat: str, act: dict) -> None:
         """옛 시스템은 슬랙 이메일 주소로 가는 **초안**을 만들었다. 여기선 채널에 **바로** 올린다 — 누를 사람이 없어도 도착한다.
@@ -270,14 +273,17 @@ class Flow(Gate):
                 return                                                   # 명단을 못 읽었다 — 확인 못 한 채 폼 안내를 만들지 않는다. 다음 실행에
 
         webflow = row["webflow_kind"] is not None
+        # 폼 오류 회신은 폼 안내가 아니라 **이번 요청에 대한 약속**이다 — 폼 오류 메일은 대개 우리 폼 안내에 단 답장이라
+        # 후속·같은 수신자 검사가 늘 막는다[2026-10-20 코러스에이아이]. 그 둘만 빼고 나머지 검사는 그대로 탄다
+        promise = act.get("promise", False)
         why = (
             # [사용자 결정 2026-10-15] 덱·투자 관련은 폼으로만 받는다 — 후속·재문의여도 폼 안내다. 같은 사람에게 두 번은 아래 수신자 검사가 막는다
-            "후속·재문의 — 폼 안내를 또 보내지 않는다" if follow == "yes" and cat != rules.INBOUND_KO else
+            "후속·재문의 — 폼 안내를 또 보내지 않는다" if follow == "yes" and cat != rules.INBOUND_KO and not promise else
             # 🔴 [2026-10-15] 이미 폼으로 낸 사람에게 폼 안내를 또 보내지 않는다(실측: Startup A·Startup B·Example Startup에게 나갔다). 명단은 비플랜 응답 시트
             f"이미 폼 접수({', '.join(done[-2:])})" if cat == rules.INBOUND_KO and (done := submitted) else
             # ponytail: no-reply 류는 나열이다(열린 집합). 놓쳐도 반송될 뿐이고, 주 방어는 "수신자 = DB 에 기록된 발신자"다
             "보낼 수 없는 수신자" if not to or to in own or re.search(r"no-?reply|donotreply|mailer-daemon", to) else
-            "같은 수신자에게 이미 보냈거나 보낼 것이다" if self.con.execute(
+            "같은 수신자에게 이미 보냈거나 보낼 것이다" if not promise and self.con.execute(
                 "SELECT 1 FROM actions WHERE kind='send' AND status!='skipped' AND key!=?"   # 🔴 실패·진행 중도 '잡힌 것'이다 (모르는 상태는 막는 쪽)
                 " AND json_extract(detail,'$.to')=?", (mid, to)).fetchone() else
             # 🔴 웹플로우 알림은 서로 다른 문의자가 한 대화에 묶인다 — 대화 진행으로 판단하면 안 된다
@@ -474,5 +480,11 @@ class RealIO:
     def has_deck_attachment(self, mid: str) -> bool:
         return intake.has_deck_attachment(self.gmail.attachments(mid))
 
-    def intake(self, m: dict, fields: dict, has_attachment: bool) -> dict:
-        return intake.deliver(m, fields, has_attachment=has_attachment)
+    def earlier_from_sender(self, m: dict) -> list[dict]:
+        """같은 스레드에서 같은 사람이 이 메일 **앞에** 보낸 메일들(오래된 순). 우리가 보낸 것(SENT)은 뺀다."""
+        before = self.gmail.thread_before(m["thread_id"], m["id"]).require()
+        msgs = [self.gmail.message(x["id"]).require() for x in before if "SENT" not in x["labels"]]
+        return [x for x in msgs if (x.get("sender") or "").lower() == (m.get("sender") or "").lower()]
+
+    def intake(self, m: dict, fields: dict, deck_mid: str | None) -> dict:
+        return intake.deliver(m, fields, deck_mid=deck_mid)
