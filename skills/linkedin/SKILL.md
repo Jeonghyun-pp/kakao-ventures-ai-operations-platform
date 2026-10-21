@@ -50,6 +50,9 @@ constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다
                     → claude 50명 배치 판정 · **사람별 저장**(judgments: 모델이 본 줄·낸 줄·기준 해시) → 전량 노션 착지
 매일 11:00 card     평일만. 반응 정답 동기화(label) → 재고 + 다시 올라온 사람 → 판정 순 4명 + 판정 하위(Wait·Cut)에서 탐색 1명
                     (탐색은 표시 안 함 — 위만 올리면 하위 판정이 맞는지 영영 모른다) → 헤더 + 사람별 스레드
+                    고르기 전 이미 본 팀 거르기(10/21): 고를 사람의 회사명(+claude 다른 표기)을 스타트업 DB(패밀리 포함) 제목과 대조 →
+                    맞으면 빼고 Legacy, 다음 사람이 채운다(known.py, 못 읽으면 멈춤). 고른 뒤 노션 본문 검색(claude.ai 노션 커넥터) →
+                    `⚠️ 노션 기존 기록` 표시만(history.py, 실패해도 나감 · 전원 실패면 하루 한 번 알림)
                     → 하루 보고서(파일 + review_test 요약)
 10분마다  followup  ✅ → outreach.md 문안(Reviewer A 심사역 문안, 10/16)에 {이름}(성 뺀 한글 이름)·{발신자}(누른 분)·{맞춤}·{궁금} 채워 스레드에 → 극초기 승격
                     {맞춤} = pitch.py: 최신 프로필 + 카드 때 웹 개괄(posted.overview) → claude 가 칸 구절(제품·성과·이력)+원문 근거 →
@@ -105,6 +108,7 @@ axes.py        수집 축(Apify 질의)과 사후 조건(reject) · 카드 기�
 profile.py     Apify 원본 → 키·경력·신호
 brief.py       카드 두 문장 + 회사명 (claude)     outreach.py  연락 문안 채우기 (원문 outreach.md)
 pitch.py       연락 문안 맞춤 문단 (claude, 프롬프트 pitch.md) — 틀 고정·구절만, 원문 대조
+known.py       스타트업 DB 회사명 대조 (claude 다른 표기 known.md + 노션 필터)   history.py  노션 본문 검색 표시 (커넥터, history.md)
 names.py       ✅ 리마인드에 쓸 한글 이름 (규칙 → claude)
 recheck.py     재확인 — 감시 목록 원칙 · 지문 비교 · 다시 재고로     features.py  카드의 특징(코드, 고정 목록)
 learn.py       주간 학습 — 특징 표 · 수정안 · 사람 이름 유출 검사
@@ -114,7 +118,7 @@ learn.py       주간 학습 — 특징 표 · 수정안 · 사람 이름 유출
 criteria.md    Tier 기준 — 사람이 깎는다
 ../../people.yaml   심사역 명부(슬랙 ID → 성함). 메일과 같은 파일
 ```
-`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · followup_days · stock_warn_days · outreach_batch · outreach_pitch · remind_* · learn_weeks · learn_min_n · recheck_days · recheck_batch · recheck_max. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
+`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · followup_days · stock_warn_days · outreach_batch · outreach_pitch · card_known · card_history · remind_* · learn_weeks · learn_min_n · recheck_days · recheck_batch · recheck_max. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
 
 ## 알아둘 것 (지우지 않은 결정)
 

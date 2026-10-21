@@ -138,6 +138,32 @@ def web_research(prompt: str, *, system: str, timeout_sec: int) -> str:
     return out
 
 
+def notion_search(prompt: str, *, system: str, timeout_sec: int) -> str:
+    """claude -p 한 번 — **노션 본문 검색 하나만** 연다 (2026-10-21, 링크드인 카드 "노션 기존 기록").
+
+    노션 공식 API 는 본문을 못 찾는다(제목·칸 필터뿐) — 회의록 본문에만 있는 이름(Example Startup 전 대표)은
+    claude.ai 노션 커넥터 검색으로만 찾힌다. 그래서 이 호출만 `--strict-mcp-config` 를 빼서 커넥터를 살린다.
+    🔴 대신 허용은 `notion-search` 하나다 — `dontAsk` 라 목록 밖(노션 쓰기·지메일·파일·셸)은 묻지 않고 거부한다.
+       금지 목록(forbidden_tools)도 그대로 건다. 커넥터는 이 맥 사용자 계정 것이라, 인증이 풀리면 도구가 안 보인다 —
+       호출부가 그 출력을 실패로 다룬다."""
+    n = _calls_today()
+    if n >= constraints.get("claude.daily_calls_block"):
+        raise SessionError(f"오늘 claude 호출 {n}회 — 차단선 도달")
+    cmd = [_bin(), "-p", "--permission-mode", "dontAsk", "--allowedTools", NOTION_SEARCH_TOOL,
+           "--disallowedTools", ",".join(constraints.get("claude.forbidden_tools")),
+           "--append-system-prompt", system]
+    r = _spawn(cmd, prompt, timeout_sec)
+    out = (r.stdout or "").strip()
+    if not out or r.returncode != 0:
+        _record(False, "empty_output" if not out else f"rc{r.returncode}")
+        raise SessionError(f"rc={r.returncode}: {(r.stderr or out)[:200]}")
+    _record(True)
+    return out
+
+
+NOTION_SEARCH_TOOL = "mcp__claude_ai_Notion__notion-search"
+
+
 def read_file(path: Path, prompt: str, *, system: str, timeout_sec: int) -> str:
     """claude -p 한 번 — **파일 하나만** 읽힌다 (2026-10-14, 비플랜 이미지 덱).
 

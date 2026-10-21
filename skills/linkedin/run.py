@@ -23,7 +23,7 @@ from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, 
 from kvlib.gate import Gate
 from kv_transport import apify, notion, slack
 
-from . import axes, brief, judge, names, outreach, overview, pitch, profile
+from . import axes, brief, history, judge, known, names, outreach, overview, pitch, profile
 
 TASK = "linkedin"
 DB = "ch_링크드인"
@@ -35,6 +35,7 @@ RESOLVED = "resolved"      # 카드의 결론. by = reaction_yes(✅) · reactio
 OUTREACH = "outreach"      # 콜드 메시지 초안을 스레드에 올림
 REMINDED = "reminded"      # ✅ N일 뒤 누른 분에게 "연락하세요" 핑
 PROMOTED = "promoted"      # 극초기 DB 로 승격
+KNOWN = "known"            # 스타트업 DB 에 이미 있는 팀이라 카드에서 뺐다(Legacy) — 무엇과 맞았는지
 SCREENED = "screened"      # 문안 단계 창업 판정 (brief.VERDICTS) — 카드·재고가 같이 본다
 SNAPSHOT = "reaction_snapshot"   # 결론과 별도로 다시 읽은 반응(소급·learn). 정답 접기가 본다
 SWEPT = "late_swept"       # 늦은 반응 훑기를 한 날 — 하루 한 번
@@ -528,6 +529,35 @@ def _overviews(pick: list, bmap: dict) -> dict[str, dict[str, list[str]]]:
     return got
 
 
+def _histories(pick: list, bmap: dict, known_of: dict, g: Gate) -> dict[str, list[dict]]:
+    """올릴 사람의 노션 기존 기록 {key: [{url, title, where, why}]} — 표시만(history.py). 🔴 무슨 일이 나도 카드를 막지 않는다.
+    전원 실패면 하루 한 번 알린다 — 커넥터 인증이 풀리면 조용히 꺼진 채로 남는다(그게 이 장치의 가장 흔한 고장이다)."""
+    if not _cfg("card_history") or not pick:
+        return {}
+    try:
+        from . import recheck            # recheck 가 run 을 부른다 — 위에서 부르면 순환
+        raw = recheck.raw_by_key()
+        people = []
+        for _, k, live in pick:
+            it = raw.get(k) or raw.get(profile.normalize_url(str(live.get("LinkedIn URL") or ""))) or {}
+            co = bmap[k]["company"]
+            people.append({"key": k, "name": live.get("서비스명"), "company": "" if co == brief.NO_COMPANY else co,
+                           "aliases": (known_of.get(k) or {}).get("aliases") or [], "page_id": live["_page_id"],
+                           "headline": it.get("headline") or live.get("Author Headline"),
+                           "past": profile.past_positions(it) if it else ""})
+        print(f"· 노션 기존 기록 {len(people)}명 검색 (본문)")
+        got = history.write(people)
+    except Exception as e:                                                   # noqa: BLE001 — 표시 장치가 카드를 막지 않는다
+        print(f"  ⚠️  노션 기존 기록 검색 실패({type(e).__name__}: {e}) — 표시 없이 나간다")
+        got = {}
+    ok = {k: v for k, v in got.items() if v is not None}
+    print(f"  └ 검색 {len(ok)}/{len(pick)}명 · 기록 있음 {sum(1 for v in ok.values() if v)}명")
+    if not ok and g.level() != "off":
+        _alert("card", "노션 기존 기록 검색이 전원 실패했다 — claude.ai 노션 커넥터 인증을 확인해야 한다(`claude mcp list`). 카드는 표시 없이 나갔다.",
+               key="card:history", head="🟡 *linkedin card* 노션 기존 기록 검색 꺼짐")
+    return ok
+
+
 def _fresh(live: dict) -> str:
     """정렬 날짜 = 값을 마지막으로 잰 날. 산 날(Captured At)이거나 recheck 로 다시 긁은 날(Last Checked) 중 늦은 쪽."""
     return max(str(live.get("Captured At") or ""), str(live.get("Last Checked") or ""))
@@ -722,10 +752,38 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
         return 4
     # 판정을 못 받은 사람은 오늘 안 올린다 — 다음 실행에서 다시 판정한다
     ready = [t for t in pool if t[2]["_page_id"] in screened]
-    pick = ready[:n - 1] if explore else ready[:n]
-    low = sorted((t for t in ready if t[0] >= EXPLORE_FROM and t not in pick), key=lambda t: _fresh(t[2]), reverse=True)
-    probe = low[0][1] if explore and low else None
-    pick = pick + low[:1] if probe else ready[:n]
+
+    def choose(ready: list) -> tuple[list, str | None]:
+        pick = ready[:n - 1] if explore else ready[:n]
+        low = sorted((t for t in ready if t[0] >= EXPLORE_FROM and t not in pick), key=lambda t: _fresh(t[2]), reverse=True)
+        probe = low[0][1] if explore and low else None
+        return (pick + low[:1] if probe else ready[:n]), probe
+
+    # 🔴 스타트업 DB 대조 [사용자 피드백 2026-10-21 "만났던 팀들이 넘 많이 나오네요"] — 고르기 **전에** 고를 사람만 대조하고,
+    #    걸리면 빼고 다시 고른다(그 자리를 다음 사람이 채운다). 회사명은 위 판정이 정한 것. 못 읽으면 멈춘다 — 못 거른 채 내보내지 않는다.
+    pick, probe = choose(ready)
+    known_of: dict[str, dict] = {}
+    while _cfg("card_known"):
+        todo = [t for t in pick if t[1] not in known_of]
+        if not todo:
+            break
+        kf = known.check([(k, screened[live["_page_id"]]["company"]) for _, k, live in todo])
+        if not kf.is_measured:
+            print(f"🔴 {kf.reason} — 이미 본 팀을 못 거른다. 멈춘다")
+            return 1
+        known_of.update(kf.require())
+        bad = [t for t in todo if known_of[t[1]]["hits"]]
+        if not bad:
+            break
+        for _, k, live in bad:
+            hits = known_of[k]["hits"]
+            print(f"· 이미 본 팀이라 뺐다 — {live.get('서비스명')} ({screened[live['_page_id']]['company']}) = 스타트업 DB {known.label(hits)}")
+            if record:
+                ledger.append(TASK, k, KNOWN, page_id=live["_page_id"], company=screened[live["_page_id"]]["company"],
+                              hits=[h["title"] for h in hits], family=any(h["family"] for h in hits))
+        _to_legacy([(live, "이미 본 팀(스타트업 DB)") for _, _, live in bad], 0, record=record)
+        ready = [t for t in ready if t not in bad]
+        pick, probe = choose(ready)
     if not pick:
         print("  ⚠️  문안을 받은 사람이 없다 (다음 실행에서 재시도)")
         return 2
@@ -737,7 +795,11 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
         _alert("card", f"남은 사람 {left_n}명 — {left_d}일치다. 바닥나기 전에 기준을 손봐야 한다.",
                key="card:low", head="🟡 *linkedin card* 재고 부족")
     bmap = {k: screened[live["_page_id"]] for _, k, live in pick}
-    ov = _overviews(pick, bmap)
+    # 웹 개괄과 노션 기존 기록은 서로 기다리지 않는다 — 둘 다 사람당 1분 안팎이다
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fo = ex.submit(_overviews, pick, bmap)
+        fh = ex.submit(_histories, pick, bmap, known_of, g)
+        ov, hist = fo.result(), fh.result()
 
     lines = [f"*오늘의 링크드인 {len(pick)}명*"]
     for _, k, live in pick:
@@ -749,6 +811,9 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
             + (f"🔄 다시 올림 · {rs.get('old') or '?'} → {rs.get('new') or '?'}\n" if rs else "")
             + f"{m['brief']}\n"
             + "".join(f"{x}\n" for x in ov.get(k, {}).get("card", []))
+            # 단서까지 보인다 — 제목만으론 왜 붙었는지 모른다(10/21 dry: 같은 회사 전 공동창업자 페이지 제목이 그 사람 이름이었다)
+            + "".join(f"⚠️ 노션 기존 기록: <{h['url']}|{h['title'] or '페이지'}> ({h['where']})"
+                      + (f" — {h['why'][:60]}" if h.get("why") else "") + "\n" for h in hist.get(k) or [])
             + f"<{live.get('LinkedIn URL')}|링크드인> · "
             f"<https://www.notion.so/{str(live['_page_id']).replace('-', '')}|노션>"
         )
@@ -792,7 +857,8 @@ def card(*, n: int = 5, dry_run: bool = False, gate: Gate | None = None, screen_
                       company=bmap[k]["company"], brief=bmap[k]["brief"],
                       homepage=live.get("Homepage"), url=live.get("LinkedIn URL"),
                       # 웹 개괄을 남긴다 — ✅ 연락 문안(pitch)이 다시 조사하지 않고 쓴다
-                      **({"overview": notes} if notes else {}))
+                      **({"overview": notes} if notes else {}),
+                      **({"history": [{"url": h["url"], "title": h["title"]} for h in hist[k]]} if hist.get(k) else {}))
         posted += 1
         # 상세 개괄은 노션 행 본문에 — 카드가 나간 사람만. 문(overview)은 노션 쓰기라 on 이어야 열린다.
         #    실패해도 카드는 이미 나갔다 — 세기만 한다(다음 실행이 같은 키로 다시 시도하지 않는다: 그날 조사는 그날 것).

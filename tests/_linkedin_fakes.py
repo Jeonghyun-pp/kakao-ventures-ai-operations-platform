@@ -89,7 +89,7 @@ class Case:
     """with Case(...) as c: 안에서 run.* 이 전부 가짜를 본다."""
 
     def __init__(self, *, notion=None, slack=None, today=THU, cfg=None, **more):
-        self.notion, self.slack, self.today, self.more, self.cfg = notion or Notion({}), slack or Slack(), today, more, {"ops.digest_slack": "off", "linkedin.card_overview": False, "linkedin.outreach_pitch": False, **(cfg or {})}   # 스킬 단독 동작을 잰다 — 묶음은 test_ops 가
+        self.notion, self.slack, self.today, self.more, self.cfg = notion or Notion({}), slack or Slack(), today, more, {"ops.digest_slack": "off", "linkedin.card_overview": False, "linkedin.outreach_pitch": False, "linkedin.card_known": False, "linkedin.card_history": False, **(cfg or {})}   # 스킬 단독 동작을 잰다 — 묶음은 test_ops 가
         self.out = io.StringIO()
 
     def __enter__(self):

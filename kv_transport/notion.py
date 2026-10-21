@@ -225,11 +225,12 @@ def _u16(s: str) -> int:
 
 # ---------------------------------------------------------------- 읽기
 
-def query(db_id: str, props: list[str], *, page_size: int = 100, max_pages: int = 200) -> Fetched:
+def query(db_id: str, props: list[str], *, page_size: int = 100, max_pages: int = 200, filter: dict | None = None) -> Fetched:
     """행을 읽는다. **props 는 필수** — 전량 읽기를 통로가 제공하지 않는다.
 
     옛 시스템은 filter_properties 를 안 써서 행마다 246칸을 통째로 받았다.
     응답이 수백 KB 라 ChunkedEncodingError 가 가장 흔한 자리이기도 했다.
+    `filter` 는 노션 필터 그대로 — 큰 DB 에서 몇 행만 찾을 때(링크드인 카드의 스타트업 DB 대조, 2026-10-21).
     """
     if not props:
         raise ValueError(
@@ -242,7 +243,7 @@ def query(db_id: str, props: list[str], *, page_size: int = 100, max_pages: int 
     pages = 0
     try:
         while True:
-            body = {"page_size": page_size}
+            body = {"page_size": page_size, **({"filter": filter} if filter else {})}
             if cursor:
                 body["start_cursor"] = cursor
             data = _req("POST", f"/databases/{db_id}/query", json_body=body,
