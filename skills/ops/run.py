@@ -15,6 +15,7 @@ from kv_transport import slack
 from . import status
 
 TASK = "ops"
+_KST = timezone(timedelta(hours=9))                                  # "하루"는 사람이 보는 시계로(ledger.today 와 같다)
 
 
 def _cfg(k: str):
@@ -112,12 +113,22 @@ def health() -> int:
     return 0
 
 
-def digest() -> int:
-    """하루 한 통 + 현황판 파일. 스킬별 요약 슬랙은 report.daily 가 여기로 넘긴다."""
+def digest(now: datetime | None = None) -> int:
+    """하루 한 통 + 현황판 파일. 스킬별 요약 슬랙은 report.daily 가 여기로 넘긴다.
+    🔴 매시간 불리고 digest_after_hour 뒤 **슬랙이 실패하지 않은** 첫 실행에서만 보낸다 — 18:30 한 번이면 맥이 잠깐 깬 순간 망이 없어
+    열흘에 엿새 안 나갔다(2026-10-21 점검). 보냈으면 그날은 표시 파일로 다시 안 보낸다."""
+    now = now or datetime.now(_KST)
+    mark, today = paths.data_root() / "_reports" / ".digest-posted", now.date().isoformat()
+    if now.hour < int(_cfg("digest_after_hour")) or (mark.exists() and mark.read_text(encoding="utf-8").strip() == today):
+        print(f"· 하루 한 통: {'이미 보냄' if now.hour >= int(_cfg('digest_after_hour')) else '아직 시각 전'} — 건너뜀")
+        return 0
     st = status.gather()
     out = status.write_dashboard(st)
     print(status.render_text(st))
-    print(f"· 현황판 {out} | 슬랙 {report.post(TASK, status.digest_text(st), _send)}")
+    res = report.post(TASK, status.digest_text(st), _send)
+    if not res.startswith("실패"):
+        mark.parent.mkdir(parents=True, exist_ok=True); mark.write_text(today + "\n", encoding="utf-8")
+    print(f"· 현황판 {out} | 슬랙 {res}")
     return 0
 
 

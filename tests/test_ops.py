@@ -1,6 +1,8 @@
 """ops — 스냅샷은 안 변한 파일을 하드링크하고, 빈 원본은 거부하고, 보존은 오늘 백업이 있을 때만 허용 목록 안에서 지운다."""
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import tempfile
 import time
@@ -77,6 +79,25 @@ class Bundle(unittest.TestCase):
         with mock.patch.object(report.constraints, "get", lambda k: cfg[k] if k in cfg else real(k)):
             self.assertEqual(report.daily("x", "요약", lambda ch, t: sent.append(t)), "게시함")
         self.assertEqual(sent, ["🔴 경보", "요약"])
+
+    def test_digest_posts_once_after_hour_and_retries_failure(self):
+        """매시간 불려도 하루 한 번 — 시각 전엔 안 보내고, 실패하면 다음 시간에 다시, 성공하면 그날은 끝."""
+        from skills.ops import run
+        from datetime import datetime
+        calls, result = [], ["실패(망)"]
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(run.paths, "data_root", lambda: Path(d)), \
+                mock.patch.object(run, "_cfg", lambda k: 18 if k == "digest_after_hour" else None), \
+                mock.patch.object(run.status, "gather", lambda: {}), mock.patch.object(run.status, "write_dashboard", lambda st: "x"), \
+                mock.patch.object(run.status, "render_text", lambda st: ""), mock.patch.object(run.status, "digest_text", lambda st: ""), \
+                mock.patch.object(run.report, "post", lambda *a: calls.append(1) or result[0]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            at = lambda h, day=21: datetime(2026, 10, day, h, 30, tzinfo=run._KST)
+            run.digest(at(17)); self.assertEqual(len(calls), 0)                          # 시각 전 — 안 보낸다
+            run.digest(at(18)); self.assertEqual(len(calls), 1)                          # 실패 — 표시 안 남김
+            result[0] = "게시함"; run.digest(at(19)); self.assertEqual(len(calls), 2)    # 다시 시도해 성공
+            run.digest(at(20)); self.assertEqual(len(calls), 2)                          # 그날은 끝
+            run.digest(at(18, 22)); self.assertEqual(len(calls), 3)                      # 다음 날 다시
 
     def test_status_gathers_gaps_and_renders(self):
         from skills.ops import status
