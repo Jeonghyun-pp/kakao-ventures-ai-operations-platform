@@ -37,7 +37,10 @@ API 로 바꾸지 않는다 — 비용 축이 "쿼터"에서 "돈"으로 바뀌�
 """
 from __future__ import annotations
 
+import html
+import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -56,6 +59,10 @@ _WHEN = re.compile(r"(매일|월|화|수|목|금|토|일)\s+(\d{1,2}):(\d{2})")
 #    맥이 자는 동안은 안 돈다. 깨어나면 launchd 가 **한 번만** 몰아서 발화한다
 #    (밀린 횟수만큼 반복하지 않는다).
 _EVERY = re.compile(r"(\d+)\s*분마다")
+# 🔴 잡의 PATH 는 **설치한 셸의 PATH** 를 그대로 싣는다. launchd·cron 의 기본 PATH(/usr/bin:/bin…)엔 홈브루가 없다 —
+#    2026-10-21 09:20 bplan run 이 덱 PDF 에서 `pdftotext`(poppler, /opt/homebrew/bin)를 못 찾아 판정·보고서·백업이 통째로 멈췄다.
+#    claude 처럼 도구마다 절대경로를 찾는 대신 여기 한 곳에서 환경을 맞춘다 — 다음에 들어올 외부 도구도 같이 풀린다.
+_PATH = os.environ.get("PATH", "/usr/bin:/bin")
 _WEEKDAY = {"월": 1, "화": 2, "수": 3, "목": 4, "금": 5, "토": 6, "일": 0}
 
 
@@ -125,6 +132,7 @@ def plist(job: dict) -> str:
   </array>
   <key>WorkingDirectory</key><string>{ROOT}</string>
 {when}
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{html.escape(_PATH)}</string></dict>
   <key>RunAtLoad</key><false/>
   <key>StandardOutPath</key><string>{log}</string>
   <key>StandardErrorPath</key><string>{log}</string>
@@ -143,7 +151,7 @@ def cron_line(job: dict) -> str:
         wd = "*" if job["weekday"] is None else job["weekday"]          # 우리 요일표(일=0)가 cron 과 같다
         when = f"{job['minute']} {job['hour']} * * {wd}"
     log = Path.home() / "kv-data" / "_logs" / f"{job['label']}.log"
-    return (f"{when} cd {ROOT} && .venv/bin/python -m skills.{job['skill']}.run {' '.join(job['argv'])}"
+    return (f"{when} cd {ROOT} && PATH={shlex.quote(_PATH)} .venv/bin/python -m skills.{job['skill']}.run {' '.join(job['argv'])}"
             f" >> {log} 2>&1  # {job['label']}")
 
 
