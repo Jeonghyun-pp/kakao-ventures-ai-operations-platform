@@ -47,6 +47,7 @@ ASK = (rules.EVENT_SPEAKER, rules.TRUSTED_REF)                  # route.decide �
 YES_DRAFT = {"trusted_ref": "trusted_direct_ko"}                # ⭕ 에 나가는 초안. event 의 ⭕ 는 사람이 잇는다(일정 조율은 범위 밖)
 # 🔴 'slack' 단계에서 실제로 하는 종류 — **허용 목록**이다. 여기 없는 종류(초안·아카이브, 그리고 앞으로 생길 무엇이든)는
 #    'on' 이 아니면 기록만 한다. 금지 목록으로 두면 새 종류를 만들며 깜빡했을 때 그게 그대로 나간다.
+HUMAN_NO = "HUMAN_NO"                                             # 슬랙 ❌ — 사람이 정한 아카이브의 표지. 위와 같은 이유로 이름이 있어야 열린다
 ANSWERED = "ANSWERED"                                             # 분류 갈래가 아니라 "답장을 보낸 투자 문의" 아카이브의 표지 — open_categories 가 이 이름으로 연다
 SLACK_KINDS = ("post", "handoff", "clarify", "ack", "forward")   # + remind1..N
 
@@ -166,7 +167,8 @@ class Flow(Gate):
             self.out(s["mid"], "draft", {"to": m["sender"], "template": tpl, "note": s.get("note")},
                       lambda: self.io.draft_reply(s["mid"], m["sender"], body))
         elif s["decision"] == "no":
-            self.out(s["mid"], "archive", {}, lambda: self.io.archive(s["mid"]))     # 현행과 같다: ❌ 는 회신 없이 아카이브
+            # 현행과 같다: ❌ 는 회신 없이 아카이브. 카테고리 자리에 "사람이 거절" 표지 — 없으면 open_categories 가 막는다(기본 거부) [2026-10-22]
+            self.out(s["mid"], "archive", {"category": HUMAN_NO}, lambda: self.io.archive(s["mid"]))
         else:
             note = f" (조건: {s['note']})" if s.get("note") else ""
             self._thread(s["mid"], "handoff", f"⭕ 로 결정됐습니다{note}. 회신과 일정 조율은 자동화 범위 밖입니다 — "

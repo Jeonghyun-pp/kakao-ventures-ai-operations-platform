@@ -88,14 +88,25 @@ class FlowCase(unittest.TestCase):
         """🔴 기본값(off)에서는 어떤 손도 안 불린다. 무엇을 했을지만 남는다."""
         self.assertEqual(flow.constraints.get("mail_observe.outbound"), "off")     # 리포의 실제 기본값
         h = Hands(reactions=["x"])
-        f = self.flow(h)
-        r = f.advance()
-        self.assertEqual((r["asked"], r["decided"], r["waiting"]), (2, 0, 2))      # 인바운드(ko)는 묻지 않는다
-        f.decide("tr", "yes", by="manual")
-        f.decide("ev", "no", by="manual")
+        with gate("off"):                                                          # 허용 목록(open_kinds)은 비운 채 — 문 자체를 본다
+            f = self.flow(h)
+            r = f.advance()
+            self.assertEqual((r["asked"], r["decided"], r["waiting"]), (2, 0, 2))  # 인바운드(ko)는 묻지 않는다
+            f.decide("tr", "yes", by="manual")
+            f.decide("ev", "no", by="manual")
         self.assertEqual(h.calls, [])
         self.assertEqual(self.acts(), {("ev", "post"): "dry", ("tr", "post"): "dry", ("tr", "draft"): "dry", ("ev", "archive"): "dry",
                                        ("ko", "send"): "dry", ("ko", "draft"): "dry"})   # 인바운드는 묻지 않고 폼 안내를 '보냈을 것' — 갈래가 안 열려 초안까지
+
+    def test_human_no_archives_only_when_its_mark_is_open(self):
+        """[2026-10-22] ❌ 아카이브는 HUMAN_NO 표지를 단다 — open_categories 에 있으면 실제로, 없으면 기록만(기본 거부)."""
+        for mid, cats, want in (("ev", ["HUMAN_NO"], [("archive", "ev")]), ("tr", ["AD_NOISE"], [])):   # 결정은 흐름마다 한 번 — 둘을 나눠 쓴다
+            h = Hands()
+            with gate("off", open_kinds=["archive"], open_categories={"archive": cats}):
+                f = self.flow(h)
+                f.advance()
+                f.decide(mid, "no", by="manual")
+            self.assertEqual([c[:2] for c in h.calls if c[0] == "archive"], want, cats)
 
     def test_slack_level_posts_but_never_touches_the_mailbox(self):
         """🔴 시험용 단계. 슬랙 글은 실제로 올라가고, ❌·⭕ 가 와도 아카이브·초안은 기록만 한다."""
