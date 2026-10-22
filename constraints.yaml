@@ -271,7 +271,8 @@ mail_observe:
   #    2단계 후보(FOREIGN_COLD · VENDOR_PITCH · LP_CUSTODY)는 모델이 내용으로 가르는 갈래라 1~2주 사람 브리핑과 맞춰 본 뒤에 넣는다.
   #    아카이브는 되돌릴 수 있지만 잘못 빠지면 아무도 못 본다 — 그래서 하루 보고서·슬랙 요약에 「자동 아카이브」 목록이 붙는다(observe.report).
   open_categories:
-    archive: ["SYSTEM_NOTICE", "AD_NOISE", "MASS_BLAST", "CLOSED_FOLLOWUP", "ANSWERED"]   # ANSWERED = 답장을 실제로 보낸 투자 문의(flow.act_all) [사용자 결정 2026-10-22]
+    archive: ["SYSTEM_NOTICE", "AD_NOISE", "MASS_BLAST", "CLOSED_FOLLOWUP", "ANSWERED",   # ANSWERED = 답장을 실제로 보낸 투자 문의(flow.act_all) [사용자 결정 2026-10-22]
+              "FOREIGN_COLD", "LP_CUSTODY"]   # 2단계 [사용자 결정 2026-10-22] 사람 정답 5/5·브리핑 11/11 · LP 는 사용자 규칙. VENDOR_PITCH 는 아직 — 사람 정답 1건이 투자 문의였다(ExampleVendor)
   report_after_hour: 10        # 하루 보고서는 KST 이 시각 뒤 첫 실행에서 한 번 [2026-10-20 — 관찰이 매시간 돌게 되어 자정 직후 실행이 빈 보고서를 내지 않게]
   sender_name: "에반"          # 심사역 포워드 인사말의 이름("투자팀 인턴 ○○입니다"). 🔴 인수인계 때 바꾼다
   # 하루 보고 요약을 슬랙에 올린다 [사용자 결정 2026-09-21]. 위의 outbound 와 별개다 — 보고서만 먼저 열었다.
