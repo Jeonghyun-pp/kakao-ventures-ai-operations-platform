@@ -18,6 +18,7 @@ from tests.test_mail_flow import Hands, gate
 from tests.test_mail_observe import Reader, mail
 
 ROSTER = [{"names": ["김민준", "제로", "Zero"], "email": "reviewer-a@example.vc", "slack_id": "UZ"},
+          {"names": ["이서준", "마이크", "ReviewerSix"], "email": "reviewer-b@example.vc", "slack_id": "UM"},
           {"names": ["정시우"], "email": "", "slack_id": ""}]
 BODY = "김민준 심사역님께서 정리하신 AI 에이전트 기준을 보고 연락드립니다. 김민준 심사역님께 전달 부탁드립니다. 20분 통화가 가능할까요?"
 
@@ -36,6 +37,13 @@ class Route(unittest.TestCase):
         self.assertEqual(decide("투자 검토 부탁드립니다")["action"], "reply")
         self.assertEqual(decide("제로베이스에서 시작한 회사입니다")["action"], "reply")      # 호칭 없는 부분일치는 지명이 아니다
         self.assertEqual(decide("정시우 수석심사역님께 전달 부탁드립니다")["action"], "reply")  # 명부에 메일이 없으면 보낼 곳이 없다
+
+
+    def test_names_sharing_one_honorific_are_all_named(self):
+        """[2026-10-22 Startup F] "이서준·김민준 심사역님" — 호칭은 뒤에 하나뿐이어도 둘 다 지명이다. 나열의 뒷말이 명부 사람이 아니면 아니다."""
+        for body in ("안녕하세요, 이서준·김민준 심사역님 & 투자팀 담당자님", "이서준, 김민준 심사역님께"):
+            self.assertEqual(sorted(decide(body)["to"]), ["reviewer-a@example.vc", "reviewer-b@example.vc"], body)
+        self.assertEqual(decide("ReviewerSix, 대표님께 소개드립니다")["action"], "reply")
 
 
 class Draft(unittest.TestCase):

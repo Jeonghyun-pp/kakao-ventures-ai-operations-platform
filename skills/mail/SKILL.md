@@ -20,6 +20,8 @@ constraints.yaml  mail_observe.outbound
 
 열려 있는 것   mail_observe.report_slack: on  → 아침 요약(저녁 ops digest 한 통으로 묶임)이 report_channel(test) 로
               mail_observe.open_kinds: [archive] + open_categories.archive  → 기계 알림·단체 발송·끝난 건의 감사 답장만 실제로 아카이브 [2026-10-20 1단계]
+                + 답장을 실제로 보낸 투자 문의(ANSWERED): 보낸편지함에 그 사람 앞 메일이 그 뒤에 있으면 원본·나눠 보낸 메일까지 [2026-10-22]
+                  초안만으론 안 치운다(안 보내면 원본이 남아야 한다)
                 아카이브한 메일은 하루 보고서 「🗄️ 아카이브한 메일」 절과 슬랙 요약 끝줄에 제목으로 남는다 — 잘못 빠진 것은 사람이 거기서 찾는다
                 2단계(외국인 콜드·영업·출자 수탁)는 1~2주 사람 브리핑과 맞춰 본 뒤 open_categories 에 한 줄씩. 그 밖은 지금도 전부 dry
 ```

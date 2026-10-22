@@ -296,6 +296,23 @@ class SendCase(unittest.TestCase):
         self.assertIn("수신자", s["nr"][1]["why"])
         self.assertEqual((r["would_send"], r["skipped"], r["sent"]), (1, 4, 0))
 
+    def test_answered_inquiry_is_archived_with_its_split_mails(self):
+        """[사용자 결정 2026-10-22] 그 사람에게 그 뒤 **실제로 보낸** 메일이 있으면 원본과 나눠 보낸 메일이 함께 빠진다.
+        초안만으로는 안 치우고, 답한 뒤 새로 온 메일은 남는다. 아카이브 문은 ANSWERED 를 연 카테고리 목록으로만 열린다."""
+        h = Hands()
+        with gate("off", open_kinds=["archive"], open_categories={"archive": ["ANSWERED"]}):
+            self.flow(h).act_all()
+        self.assertFalse([c for c in h.calls if c[0] == "archive"])                  # 보낸 메일이 없다 — 초안(dry)뿐
+        self.con.execute("INSERT INTO messages(id, thread_id, internal_ms, direction, sender, subject, raw_json) VALUES"
+                         " ('out1','a',25,'out','deals@example.vc','Re: 투자 문의',?)", (json.dumps({"to": ["F@example.com"]}),))
+        with gate("off", open_kinds=["archive"], open_categories={"archive": ["ANSWERED"]}):
+            self.flow(h).act_all()
+        self.assertEqual(sorted(c[1] for c in h.calls if c[0] == "archive"), ["a", "a2"])   # fu(30) 는 답장(25) 뒤에 왔다 — 남는다
+        with gate("off", open_kinds=["archive"], open_categories={"archive": ["AD_NOISE"]}):
+            self.con.execute("DELETE FROM actions WHERE kind='archive'"); h.calls.clear()
+            self.flow(h).act_all()
+        self.assertFalse([c for c in h.calls if c[0] == "archive"])                  # 목록에 없으면 dry
+
     def test_open_gate_but_empty_branch_list_drafts_instead_of_sending(self):
         """🔴 허용 목록의 기본은 빈 목록이다. 문만 열면 **초안**까지다 — 현행과 같은 동작. 발송은 갈래를 목록에 넣어야 한다."""
         h = Hands()
