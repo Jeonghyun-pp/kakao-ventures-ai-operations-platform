@@ -66,7 +66,16 @@ cd ~/kv
 ./.venv/bin/python -m skills.bplan.run act [--dry-run]           # 판정 있는 접수에 행동 — 문 뒤
 ./.venv/bin/python -m skills.bplan.run followup [--dry-run]
 ./.venv/bin/python -m skills.bplan.run label | replay [--limit N] [--criteria 파일] | diff --b r-<sha> | status
+./.venv/bin/python -m skills.bplan.run blind send [-n N] [--dry-run] | collect | report   # 블라인드 라벨링(아래)
 ```
+
+## 블라인드 라벨링 [2026-10-14 사용자 결정]
+
+노션 to do 의 keep 2% 는 실제 비율이 아니라 "누가 옮긴 비율"이다(일괄 드랍·덜 본 건이 섞였을 수 있다). 그래서 사람이 따로 단다.
+`blind send` 가 2026-01-01 이후 접수(1,057건)를 **고정된 무작위 순서**로 하루 35장 review_test 에 올린다 — 서비스·팀 원문 + 덱 링크, 나머지 폼은 스레드.
+🔴 모델 점수·요약은 카드에 없다(라벨이 모델에 끌려가면 모델을 재는 자로 못 쓴다). ⭕ 볼만 · ❌ 아님 · 🤔 애매, 이유는 스레드에 한 줄.
+`collect` 가 반응·이유를 `blind_labels` 에 모으고, `report` 가 분포와 노션 to do 대조(🚩 To Drop 인데 볼만)를 `reports/blind-<날짜>.md` 로 낸다.
+문은 `constraints.yaml bplan_label.outbound`(본 문과 따로) · 채널은 review_test 고정 · 노션·메일엔 안 쓴다. 첫 100건은 순수 무작위 — 표본을 기울일지는 그 결과로 정한다.
 
 ## 스케줄 [사용자 결정 2026-10-20]
 

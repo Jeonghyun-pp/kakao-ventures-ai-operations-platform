@@ -355,8 +355,8 @@ def port() -> int:
     if existing.is_measured:
         existing_names = {r["법인(서비스)"] for r in existing.require() if r.get("법인(서비스)")}
     else:
-        print(f"  ⚠️  극초기 DB 조회 실패: {existing.reason} — 중복 체크 없이 진행")
-        existing_names = set()
+        print(f"  ⚠️  극초기 DB 조회 실패: {existing.reason} — 중복을 확인할 수 없어 포팅 중단")
+        return 0
 
     new = [t for t in targets if t.get("서비스명") not in existing_names]
     if not new:

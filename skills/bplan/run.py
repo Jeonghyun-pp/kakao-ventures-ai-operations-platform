@@ -15,7 +15,7 @@ from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, 
 from kvlib.gate import Gate
 from kv_transport import claude, drive, gmail, notion, sheets, slack
 
-from . import judge
+from . import blind, judge
 
 TASK = "bplan"
 DB_KEY = "bplan"
@@ -791,6 +791,9 @@ def main(argv: list[str] | None = None) -> int:
     fu = sub.add_parser("followup", help="카드 스레드의 ⭕/❌/🙋 를 읽어 잇는다 · 리마인드"); fu.add_argument("--dry-run", action="store_true")
     rp = sub.add_parser("replay"); rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
     df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
+    bl = sub.add_parser("blind", help="블라인드 라벨링 — review_test 카드(send) · 반응 수집(collect) · 보고(report)")
+    bl.add_argument("op", choices=("send", "collect", "report"))
+    bl.add_argument("--dry-run", action="store_true"); bl.add_argument("-n", type=int, default=None, help="send 장수 (기본 bplan_label.per_day)")
     a = p.parse_args(argv)
     try:
         if a.cmd in ("run", "sync"):
@@ -854,6 +857,20 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "diff":
             print(judgments.diff_text(judgments.diff(_gate().con, a.a, a.b, bucket=bucket), a.a, a.b, raw=True))
             return 0
+        if a.cmd == "blind":
+            with lock.hold("bplan-blind"):
+                g = blind.gate(store.connect(db_path(), judgments.SCHEMA), dry_run=a.dry_run)
+                if a.op == "send":
+                    print(f"· 블라인드 카드: {blind.send(g, _read_sheet()[0], n=a.n)} | 문 {g.level()}")
+                elif a.op == "collect":
+                    print(f"· 블라인드 라벨: {blind.collect(g)}")
+                else:
+                    todo = {_row_key(r): r.get(TODO_PROP) for r in _notion_rows()}
+                    text = blind.report(g.con, todo)
+                    path = paths.data("bplan", "reports") / f"blind-{ledger.now()[:10]}.md"
+                    path.write_text(text, encoding="utf-8")
+                    print(text + f"\n→ {path}")
+                return 0
     except lock.Busy as e:
         print(f"🔴 {e}")
         return 3
