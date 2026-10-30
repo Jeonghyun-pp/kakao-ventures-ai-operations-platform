@@ -1,49 +1,96 @@
-# kv — 인턴 한 명이 소프트웨어다
+# Investment Workflow Platform
 
-> **인턴 업무를 어떤 실패도 조용히 지나가지 못하는 최소 구조로 자동화한다.**
-> 헷갈릴 때 두 번 묻는다 — *사람 인턴이라면 이걸 할까?* 그리고 *이게 조용히 실패할 수 있나?*
+A sanitized, deployable version of the AI operations system I built with the Kakao Ventures investment team. It converts inbound applications and public founder signals into review queues, decision briefs, approval requests, controlled drafts, and operational reports. This is a personal project, not an official Kakao Ventures repository or company-endorsed release; it contains no applicant or production data.
 
-처음 왔으면 이 순서로 읽는다: 이 파일 → `./kv status` 한 번 → 각 `skills/<이름>/SKILL.md` → `docs/INTENT.md`.
+The repository is meant to run, not only illustrate an architecture. A new investment team can clone it, supply its own Gmail, Google, Slack, Notion, and Apify connections, reproduce the documented database schemas, and enable workflows one at a time. New installations default to no outbound actions.
 
-## 무엇이 도는가
+## System shape
 
-| 스킬 | 하는 일 | 문(outbound) | 정답(사람이 남기는 것) |
-|---|---|---|---|
-| `mail` | hello@ 메일 수집 → 한 통 한 번 판정 → (문이 열리면) 아카이브·포워드·초안·발송 | off | 노션·라벨 |
-| `linkedin` | 월 1회 극초기 창업자 구매 → Tier 판정 → 노션 전량 착지 → 평일 5명 #그물망 카드 → ✅ 면 콜드 메시지 초안 | **on** | 노션 Tier |
-| `appstore` | 매일 25장르×4차트 → 6개월 내 신규 → 국적 판정 → One Liner 요약 → 한국 앱만 노션 착지 | **on** | 노션 DB로 업데이트 체크 |
-| `bplan` | 구글폼 접수 → 노션 행 → 덱 포함 판정 → 점수·볼만 카드·드랍 초안 → ⭕❌🙋 잇기 | off · 미설치 | 노션 to do |
-| `memo` | 슬랙 스레드 "○○ 투심" + 자료 → 무인 초안 docx → 피드백 vN → ✅ | off · 미설치 | ✅ 시점 docx |
-| `fund` | 슬랙 스레드 "○○ 제안서" + 노션 DB 링크 + 공고 서식 hwp → 원문 그대로 옮긴 hwp(모델 없음) → 노션 바뀌면 vN → ✅ | off · 미설치 | ✅ 시점 제출본 hwp |
-| `ops` | kv-data 스냅샷 백업 · 보존 · 일곱 스킬 health 하나 · 하루 요약 한 통 · 현황판 | — | — |
+```text
+Gmail / Sheets / Drive / public sources
+                  |
+          deterministic adapters
+                  |
+       normalized records + ledger
+                  |
+       versioned AI judgments  <---- replay / diff / human labels
+                  |
+       policy and approval gate
+                  |
+    Slack / Notion / drafts / reports
+                  |
+       action ledger + health checks
+```
 
-**문은 사람이 연다.** `constraints.yaml` 의 `<스킬>.outbound` 한 줄(off → slack → on). 코드는 문을 못 연다. 문이 닫혀 있어도 무엇을 했을지는 `actions` 표에 dry 로 남는다.
-**기준은 사람이 깎는다.** `skills/<이름>/criteria.md`(투심은 `headless.md` + `skills/memo/engine/prompts/`). 저녁 요약·보고서의 🚩 절이 재료다.
+Facts, model judgment, and external action are separate. High-consequence actions can remain behind human approval. Stable action keys, an append-only ledger, replayable judgments, retries, health checks, and alerts make failures visible and prevent a completed action from being silently repeated.
 
-## 한 입구
+## Start from a fresh clone
 
 ```bash
-./kv status                 # 일곱 스킬 현황 한 화면 (문·오늘 건수·정답 누적·보고서·스케줄·마지막 실행)
-./kv health                 # 막힌 것만 한 줄. 매일 12:55 자동
-./kv digest                 # 하루 한 통 + 현황판 ~/kv-data/_reports/dashboard.html. 매일 18:30 자동
-./kv install [--apply]      # SKILL.md frontmatter 의 스케줄 ↔ 실제 설치(launchd, 리눅스면 cron)
-./kv check                  # 의도 검사 check_intent (A0~A13) · ./kv test — 테스트 전부
-./kv <스킬> <명령…>          # 예: ./kv mail observe --op status · ./kv bplan run --dry-run · ./kv memo run --company X --folder …
+git clone https://github.com/Jeonghyun-pp/kakao-ventures-ai-operations-platform.git
+cd kakao-ventures-ai-operations-platform
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+./kv setup
 ```
 
-## 세 루트와 뼈대
+Edit the four files created under `${KV_CONFIG:-~/kv-config}`:
 
+- `.env`: API tokens and credential-file paths;
+- `connections.yaml`: database, channel, form, sheet, and organization identifiers;
+- `people.yaml`: reviewers and their aliases;
+- `deployment.yaml`: rollout gates, initially all closed.
+
+Create the Notion properties in [docs/SETUP.md](docs/SETUP.md), then verify the local configuration without contacting an external service:
+
+```bash
+./kv doctor
+./kv test
+./kv check
+python -m demo.run_demo
 ```
-~/kv/          코드            ~/kv-data/     데이터(리포 안에 링크 안 만든다)      ~/kv-config/   시크릿
-kvlib/         gate(문·actions) · judgments(판정 저장·label·replay·diff) · store · report · ledger · people
-kv_transport/  gmail · slack · notion · claude · apify · sheets · drive · itunes — 밖에 닿는 유일한 자리(check_intent A1)
-skills/<이름>/ run.py(진입점·흐름) · SKILL.md(하루·문·명령·결정 기록, frontmatter = 스케줄) · criteria.md
-schedule.py    스케줄 정본은 SKILL.md · check_intent.py  의도를 기계로 센다(미적용을 통과로 세지 않는다) · tools/mutation_test.py  검사가 실제로 무는지
+
+Run a workflow in dry-run/read-only mode first. Open only its `deployment.yaml` gate after reviewing replay results, proposed changes, and failure behavior. Commands and schedules are documented in each `skills/*/SKILL.md`.
+
+## Workflow coverage
+
+- inbound email collection, triage, escalation, draft creation, and archive controls;
+- business-plan ingestion, scoring, review cards, blind human labels, and follow-up;
+- LinkedIn and App Store founder sourcing, review queues, feedback, and reminders;
+- investment-memo and document-generation lanes;
+- shared scheduling, backups, health checks, and status reporting.
+
+The nested memo engine has its own optional dependencies under `skills/memo/engine/`. The main platform and offline test suite do not require live credentials.
+
+## Reliability evidence
+
+- `kvlib/gate.py`: allow-listed rollout, dry runs, failure records, and idempotent actions;
+- `kvlib/judgments.py`: versioned input/output, human labels, replay, and run diffs;
+- `kvlib/ledger.py`: append-only operational state, crash-tail repair, and summaries;
+- `kv_transport/`: bounded Gmail, Drive, Sheets, Slack, Notion, public-source, and model adapters;
+- `demo/run_demo.py`: a network-free approval, retry, deduplication, and replay walkthrough;
+- `tests/`: synthetic regression coverage for workflow and failure paths.
+
+Business outcomes and historical evaluation counts are not reconstructed from private records. The executable evidence here supports the system-design claims without publishing confidential data. See [docs/CLAIM_COVERAGE.md](docs/CLAIM_COVERAGE.md).
+
+## History
+
+The Git graph retains both the earlier automation system and the later reliability-oriented rebuild. It includes the ADRs, failure notes, experiments, and simplification work that led to the current design. The 128 operational commits and all 174 commits from the earlier system retain their original parent relationships and author/committer timestamps. Files, policies, prompts, and tests are sanitized at their original commits. Recent commits contain the previously uncommitted operational work and public deployment adaptations. See [history and verification notes](docs/HISTORY.md).
+
+```bash
+git log --graph --decorate --oneline --all
+git tag --list
 ```
 
-## 규율 (전부 검사가 문다)
-망은 통로에서만 · 성공은 rc 가 아니라 출력으로 · 나가는 것은 문 뒤 · 허용 목록(금지 목록 아님) · 제약 숫자는 constraints.yaml · 스케줄 선언 = 설치 · 테스트는 프로덕션을 안 건드린다.
+Historical commits are preserved for design context, not as recommended deployment points. Start from `main`; older tags may require their original environment and may contain intentionally superseded designs.
 
-## 지금 사람 몫 (2026-09-26)
-슬랙 봇 `files:read`·`files:write`(투심 레인) · 비플랜·투심 스케줄 설치 · 구글폼 폴더 서비스계정 공유 · `people.yaml` 실명 매핑 · 채널 전환(test → 실채널) · 서버 이관(`claude setup-token`) · 오프사이트 백업.
-옛 시스템(kv-automation)은 걷어냈다(태그 `legacy-final-2026-09-26`). 투심 엔진은 `skills/memo/engine/` 으로 들여왔고(전용 venv), 옛 데이터는 `~/kv-data/_archive/`.
+## Documentation
+
+- [Installation and external-service contract](docs/SETUP.md)
+- [Architecture and failure controls](docs/ARCHITECTURE.md)
+- [Claim-to-evidence map](docs/CLAIM_COVERAGE.md)
+- [Operations](docs/OPERATIONS.md)
+- [Security policy](SECURITY.md)
+
+MIT licensed. Third-party components retain their own licenses.
