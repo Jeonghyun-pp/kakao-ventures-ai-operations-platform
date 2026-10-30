@@ -150,7 +150,8 @@ class Transport(unittest.TestCase):
         def spawn(cmd, prompt, timeout, cwd=None):
             seen["cmd"] = cmd
             return mock.Mock(stdout="없음", stderr="", returncode=0)
-        with mock.patch.object(claude, "_spawn", spawn), mock.patch.object(claude, "_record", lambda *a: None), \
+        with mock.patch.object(claude, "_bin", lambda: "claude"), mock.patch.object(claude, "_spawn", spawn), \
+                mock.patch.object(claude, "_record", lambda *a: None), \
                 mock.patch.object(claude, "_calls_today", lambda: 0):
             claude.notion_search("p", system="s", timeout_sec=10)
         cmd = seen["cmd"]
