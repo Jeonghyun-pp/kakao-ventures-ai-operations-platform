@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 import re
 
-from kvlib import Fetched, constraints
+from kvlib import Fetched, connections, constraints
 from kv_transport import claude
 
 # ── 문자 체계 ─────────────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "kr_origin_w34.json"      # 고�
 
 
 def criteria_text() -> str:
-    return CRITERIA.read_text(encoding="utf-8")
+    return connections.render(CRITERIA.read_text(encoding="utf-8"))
 
 
 def llm_judge_origin(unknowns: list[dict], criteria: str) -> Fetched:

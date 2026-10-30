@@ -17,9 +17,7 @@ from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
-import yaml
-
-from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, store, workday
+from kvlib import Fetched, connections, constraints, judgments, ledger, lock, paths, people, report, store, workday
 from kvlib.gate import Gate
 from kv_transport import apify, notion, slack
 
@@ -47,16 +45,13 @@ RESURFACED = "resurfaced"  # recheck 에서 회사·직함이 바뀌어 다시 �
 #    승격은 행 복사가 아니라 **단위 변환**(사람 → 회사)이라 판단이 필요하다 —
 #    claude 가 헤드라인에서 회사명을 찾고, 못 찾으면 정직하게 "(미상)" 으로 둔다.
 EARLY = "극초기"
-notion.register_writable(EARLY, "00000000-0000-0000-0000-72b2b8579963")
+notion.register_writable(EARLY, connections.get("notion.early_stage_database_id"))
 
 # 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.**
-notion.register_writable(DB, "00000000-0000-0000-0000-8702f7cc7f34")
-slack.register("net",  "C000AB261A0")       # 그물망 — 봇 초대 필요
+notion.register_writable(DB, connections.get("notion.linkedin_database_id"))
+slack.register("net", connections.get("slack.sourcing_channel_id"))
 
 # 스위치·채널·상한은 constraints.yaml `linkedin.*` 에 있다 [2026-09-25]. 승격 게이트·카드 티어·재고 규칙의 근거도 그쪽 주석에.
-PEOPLE = paths.repo_root() / "people.yaml"                      # 심사역 명부 — 메일과 같은 파일
-
-
 def _cfg(k: str):
     return constraints.get(f"linkedin.{k}")
 
@@ -79,7 +74,7 @@ def _gate(dry_run: bool = False) -> Gate:
 
 def _reviewers() -> dict[str, str]:
     """슬랙 ID → 성함. ✅ 를 누른 분 이름으로 콜드 메시지를 쓴다 — 개인 이름으로 나가는 글이라 명단 밖이면 비운다."""
-    return {p["slack_id"]: p["names"][0] for p in yaml.safe_load(PEOPLE.read_text(encoding="utf-8")) or [] if p.get("slack_id")}
+    return {p["slack_id"]: p["names"][0] for p in people.load() if p.get("slack_id")}
 
 
 _ORDER = {t: i for i, t in enumerate(judge.TIERS)}      # 좋은 순

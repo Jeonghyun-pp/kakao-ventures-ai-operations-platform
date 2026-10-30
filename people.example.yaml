@@ -1,0 +1,5 @@
+# Copy to $KV_CONFIG/people.yaml with `./kv setup`.
+# names[0] is used in drafts; the remaining names are aliases found in email.
+- names: ["Alex Kim", "Alex"]
+  email: "alex@example.vc"
+  slack_id: "U000000001"

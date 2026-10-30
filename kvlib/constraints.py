@@ -38,9 +38,26 @@ def _all() -> dict:
         return yaml.safe_load(f)
 
 
+@functools.cache
+def _deployment() -> dict:
+    p = paths.config_root() / "deployment.yaml"
+    if not p.exists():
+        return {}
+    return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
+
 def get(dotted: str) -> Any:
     """`"appstore.chart_caps.top-free"` 처럼 점으로 찾는다. 없으면 raise."""
-    node: Any = _all()
+    node: Any = _deployment()
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            node = None
+            break
+        node = node[part]
+    if node is not None:
+        return node
+
+    node = _all()
     seen: list[str] = []
     for part in dotted.split("."):
         seen.append(part)

@@ -15,7 +15,6 @@ appstore:
   remind_channel: "net"        # #그물망
   remind_every_days: 14
   remind_anchor: "2026-10-05"  # 첫 회차(월). 10/5 는 개천절 대체라 첫 발송은 10/6(화)
-  remind_view: "https://www.notion.so/0000000000000000000030deea8edcc5?v=000000000000000000002752bd2764ab"   # [주차] 유입 추이
   report_slack: "on"
   foreign_sample: 8            # 보고서에 보여줄 foreign 판정 표본 수 — 노션에 안 가는 앱을 사람이 5초씩 훑는 자리
   backup_keep: 7
@@ -241,7 +240,7 @@ linkedin:
 mail_observe:
   # 관찰 파이프라인(skills/mail/observe.py) — 메일함·슬랙에 **쓰지 않는다.** 읽고 분류하고 기록만 한다.
   # 현행 plan/apply 는 이 절을 안 읽는다.
-  own_addresses: ["deals@example.vc", "deals@example.vc"]   # 우리가 보낸 메일을 가리는 기준(별칭 포함)
+  own_addresses: ["deals@example.vc"]   # 하위 호환용. 실제 값은 $KV_CONFIG/connections.yaml
   lookback_days: 7             # 매 실행마다 이만큼 다시 훑고 이미 본 건 건너뛴다(id 만 받으므로 싸다). 맥이 며칠 자도 빈틈이 없다
   list_max: 500                # 목록 상한. 닿으면 partial 로 끝난다(조용히 자르지 않는다)
   judge_attempts_max: 3        # 같은 메일을 이만큼 실패하면 그만 부른다(무한 재호출 방지)
@@ -267,7 +266,7 @@ mail_observe:
   slack_channel: "test"
   # 🔴 문(outbound)이 'on' 이 아니어도 실제로 하는 종류 — **허용 목록**이다. 기본은 비었다. 단계적으로 켤 때 하나씩 넣는다(첫 후보: archive).
   #    쓸 수 있는 종류: archive · draft · intake · fwd_mail · post · forward · handoff · ack · clarify · remind. 🔴 send 는 넣어도 무시된다 — 발송은 send_branches 뒤만.
-  open_kinds: ["archive"]      # [사용자 결정 2026-10-20] 1단계 — 아카이브만, 그것도 아래 open_categories 의 카테고리만
+  open_kinds: ["archive"]
   # 🔴 open_kinds 로 연 종류를 **카테고리로 다시 좁힌다** — 허용 목록. 여기 적힌 종류는 적힌 카테고리만 실제로 하고 나머지는 dry 다.
   #    적히지 않은 종류는 open_kinds 대로(전부). 1단계는 사람이 논의할 게 없는 메일만: 기계 알림 · 단체 발송(구독해지·대량 수신) · 끝난 건의 감사 답장.
   #    2단계 후보(FOREIGN_COLD · VENDOR_PITCH · LP_CUSTODY)는 모델이 내용으로 가르는 갈래라 1~2주 사람 브리핑과 맞춰 본 뒤에 넣는다.
@@ -277,7 +276,7 @@ mail_observe:
               "FOREIGN_COLD", "LP_CUSTODY",
               "HUMAN_NO"]   # 슬랙 ❌ 로 사람이 정한 아카이브(flow._act) — 사람 결정이라 연다 [2026-10-22]   # 2단계 [사용자 결정 2026-10-22] 사람 정답 5/5·브리핑 11/11 · LP 는 사용자 규칙. VENDOR_PITCH 는 아직 — 사람 정답 1건이 투자 문의였다(ExampleVendor)
   report_after_hour: 10        # 하루 보고서는 KST 이 시각 뒤 첫 실행에서 한 번 [2026-10-20 — 관찰이 매시간 돌게 되어 자정 직후 실행이 빈 보고서를 내지 않게]
-  sender_name: "에반"          # 심사역 포워드 인사말의 이름("투자팀 인턴 ○○입니다"). 🔴 인수인계 때 바꾼다
+  sender_name: "Investment Team"  # 하위 호환용. 실제 값은 $KV_CONFIG/connections.yaml
   # 하루 보고 요약을 슬랙에 올린다 [사용자 결정 2026-09-21]. 위의 outbound 와 별개다 — 보고서만 먼저 열었다.
   report_slack: "on"
   report_channel: "test"       # review_test. 전체 표는 ~/kv-data/mail/reports/<날짜>.md

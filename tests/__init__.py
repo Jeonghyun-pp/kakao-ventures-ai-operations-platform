@@ -18,3 +18,24 @@
     리포 밖   ~/kv-data/mail/fixtures/ — 실제 기록에서 얼린 자료(개인정보 포함, 권한 600)
               없으면 그 테스트는 **건너뛰고 그 사실을 말한다.** 조용히 통과하지 않는다
 """
+from __future__ import annotations
+
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+# Tests never inherit a developer's live credentials or production data.
+_ROOT = Path(__file__).resolve().parent
+_CONFIG = Path(tempfile.mkdtemp(prefix="kv-test-config-"))
+for _name in ("connections.yaml", "people.yaml"):
+    shutil.copyfile(_ROOT / "fixtures" / "config" / _name, _CONFIG / _name)
+(_CONFIG / ".env").write_text(
+    "NOTION_TOKEN=test\nSLACK_BOT_TOKEN=test\nAPIFY_TOKEN=test\n"
+    "GMAIL_TOKEN_FILE=/tmp/test-gmail-token.json\n"
+    "GOOGLE_CREDENTIALS_FILE=/tmp/test-google-credentials.json\n",
+    encoding="utf-8",
+)
+(_CONFIG / ".env").chmod(0o600)
+os.environ["KV_CONFIG"] = str(_CONFIG)
+os.environ["KV_DATA"] = tempfile.mkdtemp(prefix="kv-tests-")

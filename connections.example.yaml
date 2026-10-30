@@ -1,0 +1,29 @@
+# Copy to $KV_CONFIG/connections.yaml with `./kv setup`, then replace every
+# EXAMPLE value. Identifiers are kept outside Git even though most are not secrets.
+organization:
+  name: "Example Ventures"
+  shared_inbox: "deals@example.vc"
+  own_addresses: ["deals@example.vc"]
+  internal_domain: "@example.vc"
+  sender_name: "Investment Team"
+
+notion:
+  bplan_database_id: "00000000-0000-0000-0000-000000000001"
+  appstore_database_id: "00000000-0000-0000-0000-000000000002"
+  linkedin_database_id: "00000000-0000-0000-0000-000000000003"
+  early_stage_database_id: "00000000-0000-0000-0000-000000000004"
+  startup_database_id: "00000000-0000-0000-0000-000000000005"
+  appstore_view_url: "https://www.notion.so/EXAMPLE"
+
+slack:
+  report_channel_id: "C000000001"
+  sourcing_channel_id: "C000000002"
+  screening_channel_id: "C000000003"
+
+intake:
+  google_form_url: "https://forms.gle/EXAMPLE"
+  spreadsheet_url: "https://docs.google.com/spreadsheets/d/EXAMPLE/edit"
+  worksheet_name: "Form Responses 1"
+  assignee: "Investment Team"
+  gmail_label: "investment-intake"
+  notification_company_name: "Example Ventures"

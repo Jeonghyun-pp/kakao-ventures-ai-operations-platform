@@ -18,7 +18,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
-from kvlib import Fetched, secrets
+from kvlib import Fetched, connections, secrets
 from kv_transport import sheets
 
 from skills.bplan.run import MAIL_MARK, MAIL_MARK_RE, _COLS, parse_ts, resolve_columns, submission_key
@@ -90,7 +90,7 @@ def existing(rows: list[list[str]], mid: str) -> list[str] | None:
 
 def deliver(msg: dict, fields: dict, *, deck_mid: str | None) -> dict:
     """시트에 한 줄. 이미 있으면 그 줄. 되읽은 줄의 접수키를 돌려준다 — 비플랜 노션 행과 맞춰 볼 키다."""
-    url, ws = secrets.get("SPREADSHEET_URL"), secrets.get("WORKSHEET_NAME")
+    url, ws = connections.get("intake.spreadsheet_url"), connections.get("intake.worksheet_name")
     rows = sheets.values(url, ws).require()
     headers = rows[0]
     idx = resolve_columns(headers)

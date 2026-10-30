@@ -11,6 +11,8 @@ from __future__ import annotations
 import html
 import re
 
+from kvlib import connections
+
 from . import route
 
 # 웹플로우 알림의 꼬리. 여기부터는 문의 내용이 아니다.
@@ -58,7 +60,7 @@ def webflow(body: str) -> dict:
 
     🔴 발신은 `no-reply-forms@webflow.com` 이다. 답장하면 거기로 가서 반송된다(2026-07-10 실제 550 반송, 문의자는 답을 못 받았다).
        그래서 **본문에서 문의자 주소를 찾아** 문의자가 보낸 메일처럼 본다. 못 찾으면 초안을 안 만든다(flow 의 no-reply 수신자 검사).
-       폴백으로 본문 전체에서 찾되 webflow·kakao 주소는 뺀다 — 그게 반송의 원인이다.
+       폴백으로 본문 전체에서 찾되 webflow·설정된 조직 주소는 뺀다 — 그게 반송의 원인이다.
     """
     body = body or ""
 
@@ -66,9 +68,12 @@ def webflow(body: str) -> dict:
         m = re.search(rf"{label}\s*:\s*(.+)", body)
         return m.group(1).strip() if m else ""
 
+    own = {str(a).lower() for a in connections.get("organization.own_addresses")}
+    domain = str(connections.get("organization.internal_domain")).lower().lstrip("@")
     m = re.search(_EMAIL, field("이메일"))
     reply_to = m.group(0) if m else next((c for c in re.findall(_EMAIL, body)
-                                          if "webflow.com" not in c.lower() and "example.vc" not in c.lower()), "")
+                                          if "webflow.com" not in c.lower() and c.lower() not in own
+                                          and c.rsplit("@", 1)[-1].lower() != domain), "")
     c = _WF_CONTENT.search(body)
     return {"kind": field("문의 유형"), "reply_to": reply_to, "title": field("문의 제목"),
             "content": text(c.group(1).split(_WF_FOOTER)[0]) if c else ""}

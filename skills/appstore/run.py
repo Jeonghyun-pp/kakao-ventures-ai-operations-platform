@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import json
 
-from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, store, workday
+from kvlib import Fetched, connections, constraints, judgments, ledger, lock, paths, report, store, workday
 from kvlib.gate import Gate
 from kv_transport import claude, itunes, notion, slack
 
@@ -27,9 +27,9 @@ from . import kr_origin
 
 
 # 🔴 이 스킬이 쓰는 DB 를 **스킬이 등록한다.** 통로는 명단을 안 들고 있다.
-notion.register_writable("ch_앱스토어", "00000000-0000-0000-0000-30deea8edcc5")
-notion.register_writable("ch_극초기", "00000000-0000-0000-0000-72b2b8579963")
-slack.register("net", "C000AB261A0")        # #그물망 — 격주 리마인드(링크드인 카드와 같은 방)
+notion.register_writable("ch_앱스토어", connections.get("notion.appstore_database_id"))
+notion.register_writable("ch_극초기", connections.get("notion.early_stage_database_id"))
+slack.register("net", connections.get("slack.sourcing_channel_id"))
 
 TASK = "appstore"
 DB = "ch_앱스토어"
@@ -455,7 +455,7 @@ def remind(*, dry_run: bool = False, gate: Gate | None = None) -> int:
             if r.get("src") != "seed" and ledger._local_day(r.get("ts", "")) >= since)
     text = (f"📱 *앱스토어 격주 리마인드*\n"
             f"지난 {every}일 새로 들어온 한국 앱 *{n}개* — 한번 훑어봐 주세요\n"
-            f"→ <{_cfg('remind_view')}|[주차] 유입 추이>\n"
+            f"→ <{connections.get('notion.appstore_view_url')}|[주차] 유입 추이>\n"
             f"괜찮은 앱은 `DB로 업데이트` 체크하면 극초기 DB 로 올라갑니다")
     g = gate or _gate(dry_run)
     if g.level() == "off":

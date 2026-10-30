@@ -15,9 +15,9 @@ import re
 from pathlib import Path
 
 from kv_transport import claude, notion
-from kvlib import Fetched
+from kvlib import Fetched, connections
 
-STARTUP_DB = "00000000-0000-0000-0000-3b327e053219"   # 스타트업 DB(KBDB) — 읽기만. `회사명`(제목)·`패밀리`(포트폴리오)
+STARTUP_DB = connections.get("notion.startup_database_id")
 # 꼬리 허용은 영문 복수형뿐(`step up` ↔ `step ups`) — 글자 수로 열면 `persly` 가 `perslyon` 을 건다. 한글엔 꼬리를 안 준다 — `예시랩` 가 `예시랩온` 을 걸면 남의 회사를
 #    "이미 본 팀"으로 영구히 Legacy 에 보낸다(잘못 빼는 쪽이 한 장 더 보는 쪽보다 비싸다). `예시랩AI` 는 덩어리 나누기가 잡는다.
 PLURAL = ("s", "es")

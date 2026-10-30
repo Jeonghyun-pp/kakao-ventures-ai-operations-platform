@@ -157,8 +157,6 @@ def _skill_dir() -> Path:
 
 
 def _skill_python() -> Path:
-    if not ENGINE_PY.exists():
-        raise SystemExit(f"엔진 venv 없음: {ENGINE_PY} — cd {ENGINE} && python3 -m venv .venv && .venv/bin/pip install -r mcp/requirements.txt")
     return ENGINE_PY
 
 

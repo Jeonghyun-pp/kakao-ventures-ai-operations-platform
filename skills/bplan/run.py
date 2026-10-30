@@ -11,7 +11,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from kvlib import Fetched, constraints, judgments, ledger, lock, paths, report, secrets, store, people
+from kvlib import Fetched, connections, constraints, judgments, ledger, lock, paths, report, secrets, store, people
 from kvlib.gate import Gate
 from kv_transport import claude, drive, gmail, notion, sheets, slack
 
@@ -25,10 +25,10 @@ LABELED = "labeled"             # key = 메일번호
 
 # [사용자 결정] 접수 담당자. 노션 `담당자` select 옵션이어야 한다 — 통로가 라이브 스키마로 대조하고,
 # 옵션에 없으면 만들기 전에 죽는다(노션은 모르는 이름을 주면 **새 옵션을 조용히 만든다**).
-ASSIGNEE = "에반 Evan"
+ASSIGNEE = connections.get("intake.assignee")
 # sync 가 붙이고, 드랍 초안이 **이 라벨 안에서** 원본 메일을 찾는다. 둘이 어긋나면 드랍이
 # 예외 없이 "0건" 을 찾는다 — 실패가 정상처럼 보인다(옛 시스템 2026-08-14 실측).
-GMAIL_LABEL = "3. Evan"
+GMAIL_LABEL = connections.get("intake.gmail_label")
 TODO_PROP = "to do"
 NEW_TODO = "Newly Added"
 
@@ -59,7 +59,7 @@ _TS_RE = re.compile(r"\s*(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\s*(오전|오후)?\
 _KST = timezone(timedelta(hours=9))
 
 # 접수 알림 제목. 답장(`Re:`)은 잡지 않는다 — 창업자의 후속 메일은 사람이 봐야 한다.
-_SUBJ_RE = re.compile(r"^\[카카오벤처스\]\s*(.*?)\s*로부터\s*접수된\s*사업계획서\s*$")
+_SUBJ_RE = re.compile(rf"^\[{re.escape(connections.get('intake.notification_company_name'))}\]\s*(.*?)\s*로부터\s*접수된\s*사업계획서\s*$")
 # 🔴 폼 오류로 메일로 온 접수(메일 레인 skills/mail/intake.py 가 시트에 한 줄 붙인다) [사용자 결정 2026-10-15].
 #    접수 알림 메일이 없으므로 `추가내용` 칸 끝의 이 표식이 원래 메일을 가리킨다 — 드랍 초안은 그 메일에 답장이다.
 MAIL_MARK = "[hello 메일 접수 — 구글폼 오류 · 메일 {mid}]"
@@ -162,7 +162,7 @@ def pick_new(subs: list[dict], keys: set[str], legacy: dict, floor: str) -> tupl
 # ---------------------------------------------------------------- 읽기
 
 def _read_sheet() -> tuple[list[dict], int]:
-    f = sheets.values(secrets.get("SPREADSHEET_URL"), secrets.get("WORKSHEET_NAME"))
+    f = sheets.values(connections.get("intake.spreadsheet_url"), connections.get("intake.worksheet_name"))
     if not f.is_measured:
         raise Degraded(f"시트를 못 읽었다: {f.reason}  ← 0행이 아니라 미상이다")
     rows = f.require()
@@ -252,7 +252,7 @@ def _reports_dir():
 def sync(*, dry_run: bool, limit: int, since: str | None) -> int:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     print(f"▶ sync {stamp}" + ("  (dry-run — 노션·지메일 쓰기 0)" if dry_run else ""))
-    notion.register_writable(DB_KEY, secrets.get("NOTION_DATABASE_ID"))
+    notion.register_writable(DB_KEY, connections.get("notion.bplan_database_id"))
 
     # ── 인증부터. 셋 중 하나라도 죽었으면 읽기 전에 멈춘다 ─────────────
     for name, chk in (("시트", sheets.auth_check()), ("지메일", gmail.auth_check())):
@@ -483,7 +483,7 @@ def judge_rows(con, rows: list[dict], all_rows: list[dict], *, llm=_llm, deck=_d
 
 
 def _notion_rows() -> list[dict]:
-    notion.register_writable(DB_KEY, secrets.get("NOTION_DATABASE_ID"))
+    notion.register_writable(DB_KEY, str(connections.get("notion.bplan_database_id")))
     f = notion.query(notion.writable_id(DB_KEY), _JUDGE_PROPS)
     if not f.is_measured:
         raise Degraded(f"노션을 못 읽었다: {f.reason}")
@@ -513,7 +513,7 @@ def label(con, rows: list[dict]) -> int:
 
 # ---------------------------------------------------------------- 행동 (문 뒤) — score · card · draft
 
-slack.register("bplan", "C0000AEB349")     # #Squad-비플랜 — 봇 초대 필요
+slack.register("bplan", connections.get("slack.screening_channel_id"))
 _HANGUL = re.compile(r"[가-힣]")
 _KO_DOMAINS = (".kr", "naver.com", "daum.net", "hanmail.net", "kakao.com", "nate.com")
 
@@ -531,7 +531,7 @@ def drop_lang(row: dict) -> str:
 
 def drop_body(row: dict) -> str:
     tpl = (paths.repo_root() / "skills" / "bplan" / "templates" / f"drop_{drop_lang(row)}.txt").read_text(encoding="utf-8")
-    return tpl.format(ceo_name=(row.get("대표명") or "").strip() or ("대표" if drop_lang(row) == "ko" else "there"))
+    return connections.render(tpl).format(ceo_name=(row.get("대표명") or "").strip() or ("대표" if drop_lang(row) == "ko" else "there"))
 
 
 def _intake_mail(company: str) -> str | None:
@@ -841,7 +841,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "replay":
             con = _gate().con
             crit = open(a.criteria, encoding="utf-8").read() if a.criteria else judge.criteria_text()
-            notion.register_writable(DB_KEY, secrets.get("NOTION_DATABASE_ID"))
+            notion.register_writable(DB_KEY, str(connections.get("notion.bplan_database_id")))
             allowed = notion.allowed_options(notion.writable_id(DB_KEY), "점수")
 
             def judge_lines(lines, keys, criteria):

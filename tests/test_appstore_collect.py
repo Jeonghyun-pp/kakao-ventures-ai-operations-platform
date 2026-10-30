@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from kvlib import Fetched
 from skills.appstore import kr_origin, run
@@ -76,7 +77,8 @@ class Collect(unittest.TestCase):
         self.assertIn("미상 1/4", c.out.getvalue())
 
     def test_props_carry_origin_reason(self):
-        p = run._props("1", {"chart": "top-free", "rank": 3, "genre": 6014}, app("1")["detail"], "run-x", origin=("kr", "seller_url .kr"))
+        with mock.patch.object(run.notion, "allowed_options", return_value=["도서"]):
+            p = run._props("1", {"chart": "top-free", "rank": 3, "genre": 6014}, app("1")["detail"], "run-x", origin=("kr", "seller_url .kr"))
         self.assertIn("국적 kr(seller_url .kr", p["Match Reason"])
         self.assertEqual((p["Entry Type"], p["Chart Rank"]), ("chart_new", 3))
 

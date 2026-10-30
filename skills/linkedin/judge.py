@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kvlib import Fetched, judgments
+from kvlib import Fetched, connections, judgments
 from kv_transport import claude
 
 TIERS = ("Catch", "Trend", "Wait", "Cut")
@@ -34,7 +34,7 @@ CRITERIA = Path(__file__).parent / "criteria.md"
 
 
 def criteria_text() -> str:
-    return CRITERIA.read_text(encoding="utf-8")
+    return connections.render(CRITERIA.read_text(encoding="utf-8"))
 
 
 def sha(criteria: str) -> str:

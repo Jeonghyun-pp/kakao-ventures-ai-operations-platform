@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import requests
 
-from kvlib import Fetched, constraints, secrets
+from kvlib import Fetched, connections, constraints, secrets
 
 _API = "https://slack.com/api"
 
@@ -55,7 +55,7 @@ def register(key: str, channel_id: str) -> None:
     _CHANNELS[key] = channel_id
 
 
-register("test", "C000E8E4F75")     # review_test — 모든 스킬의 보고·health 채널. 스킬은 자기 채널(net·bplan)만 등록한다
+register("test", connections.get("slack.report_channel_id"))
 
 
 def channel_id(key: str) -> str:

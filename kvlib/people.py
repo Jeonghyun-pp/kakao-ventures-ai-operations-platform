@@ -1,4 +1,4 @@
-"""심사역 명부 `people.yaml`(리포 루트) — 스킬 공용. 칸 뜻은 그 파일 머리에."""
+"""Reviewer roster from ``$KV_CONFIG/people.yaml`` with a synthetic fallback."""
 from __future__ import annotations
 
 import re
@@ -9,7 +9,9 @@ from . import paths
 
 
 def load() -> list[dict]:
-    return yaml.safe_load((paths.repo_root() / "people.yaml").read_text(encoding="utf-8")) or []
+    local = paths.config_root() / "people.yaml"
+    source = local if local.exists() else paths.repo_root() / "people.example.yaml"
+    return yaml.safe_load(source.read_text(encoding="utf-8")) or []
 
 
 def requesters(extra: list[str] | None = None) -> set[str]:

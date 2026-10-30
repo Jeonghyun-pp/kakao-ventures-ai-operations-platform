@@ -8,3 +8,6 @@ __pycache__/
 # 프로덕션 데이터에 썼고, gitignore 라 CI 가 원리적으로 못 보는 결함이었다.
 data
 *.env
+*.sqlite*
+*.db*
+demo/output/

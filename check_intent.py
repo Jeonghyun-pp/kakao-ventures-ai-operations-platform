@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 import subprocess
 import sys
@@ -39,7 +40,7 @@ TRANSPORTS = {
 # 🔴 통로 밖에서 써도 되는 서드파티 — **허용 목록**. 금지 목록(requests·httpx…)은 새 SDK(googleapiclient·slack_sdk·boto3)가 들어오면 조용히 뚫린다.
 #    stdlib 는 닫힌 집합이라 통과시키되, 그 안의 망 모듈만 따로 막는다.
 ALLOWED_THIRD_PARTY = {"yaml": "설정·명부", "langgraph": "메일 flow 의 대기 그래프", "docx": "초안 vs 완성본 대조(memo._metrics)"}
-LOCAL_PACKAGES = {"kvlib", "kv_transport", "skills", "tests", "tools", "schedule", "check_intent"}
+LOCAL_PACKAGES = {"demo", "kvlib", "kv_transport", "skills", "tests", "tools", "schedule", "check_intent"}
 STDLIB_NET = {"urllib", "http", "socket", "ftplib", "smtplib", "poplib", "imaplib", "telnetlib", "xmlrpc"}
 NET_EXEMPT = {"urllib.parse"}        # 망에 닿지 않는 순수 파서. urllib.request 는 그대로 막힌다
 SPAWN_MODULES = {"subprocess"}       # 이 검사는 subprocess 만 본다(os.system·pty·multiprocessing 은 안 본다)
@@ -351,6 +352,13 @@ def a8_no_send() -> None:
 # ---------------------------------------------------------------- 아직 못 세는 것
 def a9_schedule() -> None:
     """선언과 실제 설치가 맞나. 어긋나면 그게 '선언은 있는데 발동 안 하는 가드'다."""
+    if os.environ.get("CI") == "true":
+        r = subprocess.run([sys.executable, "-c", "import schedule; schedule.declared()"], cwd=ROOT,
+                           capture_output=True, text=True)
+        check("A9", "스케줄 선언이 파싱되고 라벨이 겹치지 않는다", r.returncode == 0,
+              "CI에서는 설치되지 않은 선언의 구조만 검증"
+              if r.returncode == 0 else (r.stderr or r.stdout)[-300:])
+        return
     r = subprocess.run([sys.executable, "schedule.py", "check"], cwd=ROOT,
                        capture_output=True, text=True)
     missing = "선언했는데 설치가 안 됐다" in r.stdout

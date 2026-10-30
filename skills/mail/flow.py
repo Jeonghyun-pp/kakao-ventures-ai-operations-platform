@@ -38,7 +38,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver             # noqa: E402
 from langgraph.graph import END, START, StateGraph              # noqa: E402
 from langgraph.types import Command, interrupt                  # noqa: E402
 
-from kvlib import constraints, paths, people, report                           # noqa: E402
+from kvlib import connections, constraints, paths, people, report              # noqa: E402
 from kvlib.gate import Gate                                     # noqa: E402
 
 from . import clean, intake, route, rules                       # noqa: E402
@@ -206,7 +206,7 @@ class Flow(Gate):
             elif a == "fwd_mail":
                 n["fwd_mail"] = n.get("fwd_mail", 0) + 1
                 intro = route.tpl("fwd_partner_ko", partners=", ".join(f"{x} 심사역님" for x in act["partners"]),
-                                  sender=constraints.get("mail_observe.sender_name"))
+                                  sender=connections.get("organization.sender_name"))
                 self.out(mid, "fwd_mail", {"to": act["to"], "category": cat, "note": act["note"]},
                          lambda: self.io.forward_mail(mid, act["to"], intro))
             elif a in ("archive", "forward") and (self.row(mid, a) or {}).get("status") != "done":
@@ -281,7 +281,7 @@ class Flow(Gate):
         wait = act.get("after_days")
         if wait and (datetime.fromisoformat(self.now().replace("Z", "+00:00")).timestamp() * 1000 - row["internal_ms"]) < wait * 86_400_000:
             return                                                       # 아직 기다리는 중 — 아무것도 안 적는다. 다음 실행에 다시 본다
-        own = {a.lower() for a in constraints.get("mail_observe.own_addresses")}
+        own = {a.lower() for a in connections.get("organization.own_addresses")}
         to = (act.get("to") or "").lower()
         submitted: list[str] = []
         if cat == rules.INBOUND_KO:

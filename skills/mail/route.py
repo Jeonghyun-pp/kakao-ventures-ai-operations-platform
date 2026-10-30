@@ -24,23 +24,23 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from kvlib import constraints, people
+from kvlib import connections, constraints, people
 from kv_transport import slack
 
 from . import rules
 
 _TPL = Path(__file__).resolve().parent / "templates"
 
-GOOGLE_FORM = "https://forms.gle/EXAMPLE_FORM_6c44ce733004"
+GOOGLE_FORM = connections.get("intake.google_form_url")
 
-slack.register("bplan", "C0000AEB349")     # #Squad-비플랜 — 봇 초대 필요
+slack.register("bplan", connections.get("slack.screening_channel_id"))
 
 # 🔴 분류가 무엇이든, 무수정률이 얼마든 **영원히** 사람이 보낸다.
 
 
 def tpl(name: str, **kw) -> str:
     """템플릿을 읽어 변수만 채운다. 본문은 손대지 않는다 — 회사 이름으로 나가는 글이다."""
-    return (_TPL / f"{name}.txt").read_text(encoding="utf-8").format(**kw)
+    return connections.render((_TPL / f"{name}.txt").read_text(encoding="utf-8")).format(**kw)
 
 
 # 맨 위 글에 넣는 미리보기 길이. 전문은 스레드로 따로 간다.
@@ -62,7 +62,7 @@ def _post_text(msg: dict, lead: str, ask: str = "", ping: str = "", summary: str
     한 줄 요약이 스레드에 달렸다. 우리는 위아래만 뒤집었다.
     """
     # 🔴 요약이 있으면 요약만 쓴다. 원문 앞 400자는 대개 인사말이라 훑는 데 쓸모가 없다
-    #    (실측 BIXPO: 400자가 전부 행사 소개였고 "30인 초청·9/16 마감" 은 그 뒤에 있었다).
+    #    (실측 Example Conference: 400자가 전부 행사 소개였고 "30인 초청·9/16 마감" 은 그 뒤에 있었다).
     #    요약이 없으면(claude 실패) 원문 앞머리로 물러난다 — 빈 글을 올리지는 않는다.
     if summary:
         gist = summary

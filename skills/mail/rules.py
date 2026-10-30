@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 
-from kvlib import constraints
+from kvlib import connections, constraints
 
 # 규칙이 확정하는 것
 BPLAN_INTAKE = "BPLAN_INTAKE"
@@ -63,7 +63,7 @@ JUDGE_CATEGORIES = (INBOUND_KO, FOREIGN_COLD, TRUSTED_REF, EVENT_SPEAKER,
 
 # ---------------------------------------------------------------- 규칙 재료
 
-_BPLAN_SUBJECT = re.compile(r"\[카카오벤처스\].*로부터\s*접수된\s*사업계획서")
+_BPLAN_SUBJECT = re.compile(rf"\[{re.escape(connections.get('intake.notification_company_name'))}\].*로부터\s*접수된\s*사업계획서")
 
 _WEBFLOW_SENDERS = ("no-reply-forms@webflow.com", "forms@webflow.com")
 
@@ -95,7 +95,7 @@ _IMPERSONATION_HINTS = (
 #    🔴 규칙에서 빼기만 하고 None 을 돌려주면 claude 로 넘어가 UNKNOWN → **#Squad-비플랜
 #       포워드**가 된다. 읽으시라고 뺀 메일을 남의 채널로 보내는 셈이다(08-18 실측).
 #       그래서 명시적으로 protect 한다 — 인박스에 그대로 두고 아무것도 안 한다.
-_INTERNAL_DOMAIN = "@example.vc"
+_INTERNAL_DOMAIN = connections.get("organization.internal_domain").lower()
 
 _AD_SENDER_TOKENS = (
     "innoforest.co.kr", "markncompany.co.kr", "iva.or.kr", "mail.instagram.com",
