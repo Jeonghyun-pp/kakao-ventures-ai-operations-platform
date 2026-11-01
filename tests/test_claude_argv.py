@@ -24,6 +24,16 @@ def _argv(**kw) -> list[str]:
 
 
 class Argv(unittest.TestCase):
+    def test_zero_exit_with_empty_output_is_a_recorded_failure(self):
+        with mock.patch.object(claude, "_bin", return_value="claude"), \
+             mock.patch.object(claude, "_calls_today", return_value=0), \
+             mock.patch.object(claude, "_spawn", return_value=types.SimpleNamespace(
+                 stdout=" \n", stderr="", returncode=0)), \
+             mock.patch.object(claude, "_record") as record:
+            with self.assertRaisesRegex(claude.SessionError, "빈 출력"):
+                claude.run_session("synthetic prompt")
+            record.assert_called_once_with(False, "empty_output")
+
     def test_default_is_unchanged(self):
         self.assertEqual(_argv(system="s"),
                          ["claude", "-p", "--strict-mcp-config", "--disallowedTools",

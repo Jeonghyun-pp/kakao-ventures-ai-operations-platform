@@ -30,7 +30,7 @@ def verdicts(lines: dict[str, str], version: str) -> list[dict]:
     ]
 
 
-def run() -> dict:
+def run(*, approved: frozenset[str] = frozenset({"company-001"})) -> dict:
     con = sqlite3.connect(":memory:")
     judgments.ensure(con)
 
@@ -59,32 +59,34 @@ def run() -> dict:
     attempts = 0
     delivered: list[str] = []
 
-    def flaky_delivery() -> str:
+    def flaky_delivery(key: str) -> str:
         nonlocal attempts
         attempts += 1
         if attempts == 1:
             raise TimeoutError("synthetic timeout")
-        delivered.append("company-001")
-        return "draft-001"
+        delivered.append(key)
+        return f"draft-{key}"
 
-    first = gate.out("company-001", "create_draft", {"approved_by": "reviewer"}, flaky_delivery)
-    second = gate.out("company-001", "create_draft", {"approved_by": "reviewer"}, flaky_delivery)
-    duplicate = gate.out("company-001", "create_draft", {"approved_by": "reviewer"}, flaky_delivery)
-
-    approved = {"company-001"}
+    # Approval belongs to the workflow; Gate only enforces rollout and action state.
     consequential = [key for key in RECORDS if key in approved]
+    statuses = []
+    for key in consequential:
+        for _ in range(3):
+            statuses.append(gate.out(key, "create_draft",
+                                     {"approved_by": "reviewer"}, lambda: flaky_delivery(key)))
 
     result = {
         "replay": replay,
         "changed_judgments": sum(row["a"] != row["b"] for row in changes),
-        "action_statuses": [first, second, duplicate],
+        "action_statuses": statuses,
         "delivery_attempts": attempts,
         "delivered": delivered,
         "approved_for_action": consequential,
+        "withheld": [key for key in RECORDS if key not in approved],
     }
-    assert result["action_statuses"] == ["failed", "done", "done"]
-    assert result["delivery_attempts"] == 2
-    assert result["delivered"] == ["company-001"]
+    con.close()
+    assert result["delivery_attempts"] == (len(consequential) + 1 if consequential else 0)
+    assert result["delivered"] == consequential
     assert result["changed_judgments"] == 1
     return result
 

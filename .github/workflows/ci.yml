@@ -18,3 +18,4 @@ jobs:
       - run: python -m unittest discover -s tests -t .
       - run: python check_intent.py
       - run: python -m demo.run_demo
+      - run: python -m demo.evaluate

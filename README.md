@@ -1,78 +1,80 @@
 # Investment Workflow Platform
 
-A sanitized, deployable version of the AI operations system I built with the Kakao Ventures investment team. It converts inbound applications and public founder signals into review queues, decision briefs, approval requests, controlled drafts, and operational reports. This is a personal project, not an official Kakao Ventures repository or company-endorsed release; it contains no applicant or production data.
+A Python CLI and shared runtime for AI-assisted investment workflows. It separates source collection, model judgments, human review and external actions so developers can change one part without rebuilding every workflow’s execution and evaluation controls.
 
-The repository is meant to run, not only illustrate an architecture. A new investment team can clone it, supply its own Gmail, Google, Slack, Notion, and Apify connections, reproduce the documented database schemas, and enable workflows one at a time. New installations default to no outbound actions.
+I built the underlying system with the Kakao Ventures investment team. This is a sanitized personal release, not an official or company-endorsed repository. It contains no applicant or production data. [My contribution and AI-assisted development](docs/ENGINEERING_GUIDE.md#ownership-and-ai-assisted-development).
+
+## What changed for a developer
+
+| Task | Earlier implementation | Current implementation and evidence |
+|---|---|---|
+| Add a workflow | Provider adapters and action bookkeeping lived inside individual skills | Domain logic stays in `skills/`; shared adapters, `Gate` and records are reused. [Actual extraction commits](docs/ENGINEERING_GUIDE.md#1-add-a-workflow-without-copying-its-runtime) |
+| Investigate a failure | A completed process or missing result could be mistaken for a successful task | Inspect the model response, judgment error and action state separately. [Failure boundaries](docs/ENGINEERING_GUIDE.md#2-investigate-a-failure-without-rerunning-everything) |
+| Change a decision rule | Evaluation was tied to one workflow’s vocabulary; agreement records initially kept only disagreements | Reuse stored inputs, keep all available human labels, compare changed cases and missing results. [Evaluation walkthrough](docs/EVALUATION.md) |
+
+These are code-backed changes in where work is implemented and inspected, not measured claims about developer-hours saved. The [engineering guide](docs/ENGINEERING_GUIDE.md) links each change to its code, history and tests.
+
+## Try it without credentials
+
+Requires Python 3.12 and Git on macOS or Linux. Installation downloads Python packages; the two demos below make no API or model calls and use in-memory SQLite. No Gmail, Slack, Notion account, Claude CLI, browser install or `kv setup` is needed.
+
+```sh
+git clone https://github.com/Jeonghyun-pp/kakao-ventures-ai-operations-platform.git
+cd kakao-ventures-ai-operations-platform
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m demo.run_demo
+python -m demo.evaluate
+```
+
+Both commands print JSON. The fixtures and the judge are synthetic; the storage, replay and gate are the actual shared implementation.
+
+| Command | Expected result | How to read it |
+|---|---|---|
+| `python -m demo.run_demo` | `action_statuses: ["failed", "done", "done"]`, `delivery_attempts: 2`, `delivered: ["company-001"]` | The first fake delivery fails. A retry succeeds. The third call returns the completed record without calling delivery again. Two unapproved records are withheld. |
+| `python -m demo.evaluate` | `baseline_matches: 3`, `candidate_matches: 5`, `labeled: 6`, `decision: "hold"` | Better aggregate agreement still introduces a priority-to-decline error. Inspect the changed case before considering rollout. |
+
+The fake delivery appends an ID to a local list; it sends nothing. The second example demonstrates evaluation mechanics, not LLM quality. [Expected cases, error handling and limits](docs/EVALUATION.md).
+
+## Verify the implementation
+
+```sh
+python -m unittest discover -s tests -t .
+CI=true python check_intent.py
+```
+
+`CI=true` checks schedule declarations without requiring this machine to have installed macOS jobs. The checker reports unsupported checks separately. Five private-fixture tests are skipped in a public clone; a skipped check is not evidence of a passing production test. [Verification scope](docs/VERIFICATION.md).
+
+The [CI workflow](.github/workflows/ci.yml) runs the tests, architecture checks and both demos on Python 3.12. Dependencies are pinned in [requirements.txt](requirements.txt). The project uses a custom AST/structure checker; it does not claim a separate linter or Python type-checking pipeline.
 
 ## System shape
 
 ```text
 Gmail / Sheets / Drive / public sources
                   |
-          deterministic adapters
+       deterministic adapters         kv_transport/
                   |
-       normalized records + ledger
+       normalized records + ledger    kvlib/ledger.py
                   |
-       versioned AI judgments  <---- replay / diff / human labels
+       versioned judgments            kvlib/judgments.py
+          |       ^
+          |       +-- stored-input replay / diff / human labels
+          |
+       workflow approval + rollout gate
                   |
-       policy and approval gate
+       drafts / review cards / reports
                   |
-    Slack / Notion / drafts / reports
-                  |
-       action ledger + health checks
+       action state + health checks
 ```
 
-Facts, model judgment, and external action are separate. High-consequence actions can remain behind human approval. Stable action keys, an append-only ledger, replayable judgments, retries, health checks, and alerts make failures visible and prevent a completed action from being silently repeated.
+A workflow owns the domain decision and approval check. `Gate` owns rollout levels and completed-action checks. It does not infer approval from a model result or make an external API call atomic with the local database write. [Architecture and failure controls](docs/ARCHITECTURE.md).
 
-## Start from a fresh clone
+## Deploy with your own connections
 
-```bash
-git clone https://github.com/Jeonghyun-pp/kakao-ventures-ai-operations-platform.git
-cd kakao-ventures-ai-operations-platform
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-./kv setup
-```
+After the offline walkthrough, follow [SETUP.md](docs/SETUP.md) for credentials, external schemas and rollout controls. `./kv setup` creates local configuration; `./kv doctor` checks it. Workflows cover email triage, application screening, founder sourcing, memo/document generation and operations. Each `skills/*/SKILL.md` describes its commands and operating contract.
 
-Edit the four files created under `${KV_CONFIG:-~/kv-config}`:
-
-- `.env`: API tokens and credential-file paths;
-- `connections.yaml`: database, channel, form, sheet, and organization identifiers;
-- `people.yaml`: reviewers and their aliases;
-- `deployment.yaml`: rollout gates, initially all closed.
-
-Create the Notion properties in [docs/SETUP.md](docs/SETUP.md), then verify the local configuration without contacting an external service:
-
-```bash
-./kv doctor
-./kv test
-./kv check
-python -m demo.run_demo
-```
-
-Run a workflow in dry-run/read-only mode first. Open only its `deployment.yaml` gate after reviewing replay results, proposed changes, and failure behavior. Commands and schedules are documented in each `skills/*/SKILL.md`.
-
-## Workflow coverage
-
-- inbound email collection, triage, escalation, draft creation, and archive controls;
-- business-plan ingestion, scoring, review cards, blind human labels, and follow-up;
-- LinkedIn and App Store founder sourcing, review queues, feedback, and reminders;
-- investment-memo and document-generation lanes;
-- shared scheduling, backups, health checks, and status reporting.
-
-The nested memo engine has its own optional dependencies under `skills/memo/engine/`. The main platform and offline test suite do not require live credentials.
-
-## Reliability evidence
-
-- `kvlib/gate.py`: allow-listed rollout, dry runs, failure records, and idempotent actions;
-- `kvlib/judgments.py`: versioned input/output, human labels, replay, and run diffs;
-- `kvlib/ledger.py`: append-only operational state, crash-tail repair, and summaries;
-- `kv_transport/`: bounded Gmail, Drive, Sheets, Slack, Notion, public-source, and model adapters;
-- `demo/run_demo.py`: a network-free approval, retry, deduplication, and replay walkthrough;
-- `tests/`: synthetic regression coverage for workflow and failure paths.
-
-Business outcomes and historical evaluation counts are not reconstructed from private records. The executable evidence here supports the system-design claims without publishing confidential data. See [docs/CLAIM_COVERAGE.md](docs/CLAIM_COVERAGE.md).
+New installations default to no outbound actions. Begin with dry runs, inspect outputs and explicitly enable only the workflow you intend to operate. Optional document engines have their own dependencies. macOS scheduling is separate from the portable Python test/demo path.
 
 ## History
 
@@ -87,10 +89,11 @@ Historical commits are preserved for design context, not as recommended deployme
 
 ## Documentation
 
-- [Installation and external-service contract](docs/SETUP.md)
-- [Architecture and failure controls](docs/ARCHITECTURE.md)
+- [Engineering decisions, developer tasks and ownership](docs/ENGINEERING_GUIDE.md)
+- [Reproducible evaluation example](docs/EVALUATION.md)
 - [Claim-to-evidence map](docs/CLAIM_COVERAGE.md)
-- [Operations](docs/OPERATIONS.md)
-- [Security policy](SECURITY.md)
+- [Verification results and limits](docs/VERIFICATION.md)
+- [Installation and external-service contract](docs/SETUP.md)
+- [Architecture](docs/ARCHITECTURE.md) · [Operations](docs/OPERATIONS.md) · [Security](SECURITY.md)
 
 MIT licensed. Third-party components retain their own licenses.

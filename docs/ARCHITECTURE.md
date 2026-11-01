@@ -6,7 +6,9 @@ External APIs are accessed through `kv_transport`. Collection normalizes identif
 
 ## Boundary 2: versioned judgment
 
-`kvlib.judgments` stores the exact input, criteria hash, raw output, parsed verdict, and error for each record. A changed prompt or decision rule creates a new run rather than overwriting the live result. Replays operate on stored inputs, so evaluation does not depend on a changing inbox or external API.
+`kvlib.judgments` stores the exact input, criteria hash, raw output, parsed verdict, and error for each record. A changed prompt or decision rule creates a new run rather than overwriting the live result. Replays operate on stored inputs rather than refetching a changing inbox. The judging callback may still call a model API and incur cost. A controlled evaluation must also keep model settings and the input set fixed.
+
+The current store keys replay runs by criteria hash, and `diff` includes only valid overlapping results. Inspect missing outputs and label coverage separately; see the [evaluation walkthrough](EVALUATION.md).
 
 Human decisions are stored as a separate run. `diff` compares two system versions beside the human label, making regressions and high-cost false negatives visible before rollout.
 
@@ -19,6 +21,8 @@ Consequential workflow actions use `kvlib.gate.Gate`; bounded transport adapters
 - `on`: execute the action.
 
 Each action has a primary key of `(record key, action kind)`. A completed action is returned as already done on retries. Failed actions retain their error and remain retryable. New action types default closed at partial rollout levels because the policy is an allow-list, not a deny-list.
+
+This is sequential completed-action suppression. The external effect and local state update are not atomic; concurrent calls or a crash between them can still duplicate an effect. Workflow code checks human approval before invoking the gate.
 
 ## Boundary 4: human approval
 

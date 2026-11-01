@@ -60,7 +60,7 @@ Notion workspaces evolve, so run the relevant workflow's collect/read command ag
 4. Enable the smallest allow-listed action set for one workflow.
 5. Verify health/status output before scheduling it.
 
-Final investment decisions and external sending remain human actions. The platform can create controlled drafts and approval requests, but it should not be treated as an autonomous investment authority.
+Final investment decisions remain human decisions. The platform can create drafts and approval requests. The mail workflow also contains an explicit sending path, disabled by the default deployment gates; review its branch permissions and required Gmail access before enabling it. A draft, an approval request and a sent message are distinct outcomes.
 
 ## 5. Scheduling and recovery
 

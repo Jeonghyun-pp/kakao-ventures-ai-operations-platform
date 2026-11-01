@@ -1410,7 +1410,7 @@ def main(argv: list[str] | None = None) -> int:
     ln = sub.add_parser("learn", help="주 1회 — 반응(정답)에서 특징 표 → 기준 근거 · 수정안(자동 반영 안 함)")
     ln.add_argument("--dry-run", action="store_true")
     sub.add_parser("status")
-    rp = sub.add_parser("replay", help="고친 기준으로 저장된 사람을 다시 판정 (돈 0 · 노션 0)")
+    rp = sub.add_parser("replay", help="고친 기준으로 다시 판정 (저장 입력 재사용 · 모델 호출 가능)")
     rp.add_argument("--limit", type=int, default=-1); rp.add_argument("--criteria", default=None)
     df = sub.add_parser("diff"); df.add_argument("--a", default="live"); df.add_argument("--b", required=True)
     sub.add_parser("label", help="슬랙 반응(✅·❌)을 정답(human)으로 — card 가 매일 하지만 손으로도")
