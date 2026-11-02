@@ -60,7 +60,7 @@ def _reports_dir():
 
 
 def _gate(dry_run: bool = False) -> Gate:
-    """나가는 것은 둘 — 노션 착지(land)·격주 리마인드(remind). 문은 on(살아 있는 시스템). --dry-run 은 이 실행만 내린다.
+    """나가는 것은 둘 — 노션 착지(land)·격주 리마인드(remind). 문은 로컬 deployment에서 명시한다(누락 시 off). --dry-run 은 이 실행만 내린다.
     `slack` 단계에서 실제로 나가는 종류는 허용 목록(SLACK_KINDS)이다."""
     con = store.connect(db_path(), judgments.SCHEMA)
     judgments.ensure(con)
@@ -395,11 +395,12 @@ def port() -> int:
 
 def daily_report(g: Gate, *, landed: int, candidates: int, fresh: int, unknowns: list[str], attempts: int) -> None:
     """하루 한 번. 첫 절 = **foreign 으로 걸러진 앱 표본** — 노션에 안 가서 아무도 못 보는 자리다. 억울하게 죽은 한국 앱은 여기서만 보인다."""
-    out = _reports_dir() / f"{ledger.today()}.md"
+    today = ledger.today()
+    out = _reports_dir() / f"{today}.md"
     if out.exists():
         return
-    today = ledger.today()
-    rows = g.con.execute("SELECT key, verdict, reason, input_text FROM judgments WHERE run=? AND created>=? ORDER BY created DESC", (judgments.LIVE, today)).fetchall()
+    bounds = ledger.day_bounds(today)
+    rows = g.con.execute("SELECT key, verdict, reason, input_text FROM judgments WHERE run=? AND created>=? AND created<? ORDER BY created DESC", (judgments.LIVE, *bounds)).fetchall()
     foreign = [(k, r, json.loads(t)) for k, v, r, t in rows if v == "foreign"]
     llm = [(k, r, json.loads(t)) for k, v, r, t in rows if not r.startswith("규칙")]
     week = ledger.now(timedelta(days=7))

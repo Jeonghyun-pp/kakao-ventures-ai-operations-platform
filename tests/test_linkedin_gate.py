@@ -41,7 +41,8 @@ class GateLevels(unittest.TestCase):
     def test_on_buys_lands_and_records_done(self):
         ap = Apify([{"id": "a"}])
         with Case(notion=Notion({run.DB: []}), apify=ap, _backlog=lambda: 0, _summary=summary,
-                  **{**AX, "judge.judge_people": lambda cards, **kw: Fetched.measured([{"key": "a", "verdict": "Wait", "reason": "r"}])}) as c:
+                  **{**AX, "judge.nationality": lambda lines: Fetched.measured({}),
+                     "judge.judge_people": lambda cards, **kw: Fetched.measured([{"key": "a", "verdict": "Wait", "reason": "r"}])}) as c:
             run.collect()
         self.assertEqual(c.acts(), {(f"ax/p1/{ledger.today()}", "buy"): "done", ("a", "land"): "done"})
         self.assertEqual(len(c.notion.created), 1)

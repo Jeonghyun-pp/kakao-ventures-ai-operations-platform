@@ -5,7 +5,7 @@
 
 멈춘 동안 상태는 SQLite 체크포인트에 있다. 며칠 뒤의 다른 실행(다른 프로세스)이 이어 받는다.
 
-## 🔴 밖으로 나가는 문은 `_out` 하나이고, 세 단계다  (`constraints.yaml  mail_observe.outbound`)
+## 🔴 밖으로 나가는 문은 `_out` 하나이고, 세 단계다  (`$KV_CONFIG/deployment.yaml  mail_observe.outbound`)
 
     off     아무것도 안 한다. 무엇을 했을지만 `actions` 에 dry 로 적는다          ← 기본
     slack   슬랙 글만 실제로 올린다(질문·리마인드·인계·포워드). 초안·아카이브는 여전히 dry   ← 시험은 여기서

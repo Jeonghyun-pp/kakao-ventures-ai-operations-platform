@@ -150,6 +150,12 @@ def today() -> str:
     return datetime.now(_KST).strftime("%Y-%m-%d")
 
 
+def day_bounds(day: str) -> tuple[str, str]:
+    """KST calendar day as a half-open UTC interval for stored timestamps."""
+    start = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=_KST).astimezone(timezone.utc)
+    return tuple(t.strftime("%Y-%m-%dT%H:%M:%SZ") for t in (start, start + timedelta(days=1)))
+
+
 def _local_day(ts: str) -> str:
     """UTC ts 를 KST 날짜로 옮긴다."""
     try:

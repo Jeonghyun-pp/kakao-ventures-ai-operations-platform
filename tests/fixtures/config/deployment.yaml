@@ -1,0 +1,41 @@
+# Explicit historical policy for fake-provider regression tests, never live deployment.
+appstore:
+  outbound: 'on'
+  report_slack: 'on'
+bplan:
+  outbound: 'off'
+  send_branches: []
+  report_slack: 'on'
+bplan_label:
+  outbound: slack
+linkedin:
+  outbound: 'on'
+  promote: true
+  report_slack: 'on'
+mail_observe:
+  outbound: 'off'
+  send_branches: []
+  open_kinds:
+  - archive
+  open_categories:
+    archive:
+    - SYSTEM_NOTICE
+    - AD_NOISE
+    - MASS_BLAST
+    - CLOSED_FOLLOWUP
+    - ANSWERED
+    - FOREIGN_COLD
+    - LP_CUSTODY
+    - HUMAN_NO
+  report_slack: 'on'
+mail_labels:
+  outbound: 'off'
+memo:
+  outbound: 'off'
+  report_slack: 'on'
+fund:
+  outbound: 'off'
+  report_slack: 'on'
+ops:
+  report_slack: 'on'
+  digest_slack: 'on'

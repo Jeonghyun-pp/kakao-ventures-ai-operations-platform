@@ -56,7 +56,7 @@ def _cfg(k: str):
     return constraints.get(f"linkedin.{k}")
 
 
-# 🔴 밖으로 나가는 것(buy·land·card·outreach·remind·promote·refresh)은 전부 `Gate.out` 을 지난다 (constraints.yaml linkedin.outbound).
+# 🔴 밖으로 나가는 것(buy·land·card·outreach·remind·promote·refresh)은 전부 `Gate.out` 을 지난다 ($KV_CONFIG/deployment.yaml linkedin.outbound).
 #    `slack` 단계에서 실제로 나가는 종류 — **허용 목록**. 카드·초안은 슬랙 글이고, 구매·착지·승격은 아니다.
 SLACK_KINDS = ("card", "outreach", "remind")
 
@@ -1355,11 +1355,12 @@ def _reaction_week() -> dict:
 def daily_report(g: Gate, *, pool: int, picked: int) -> None:
     """하루 한 번(평일 · card 뒤) 파일 + 슬랙 요약. 먼저 볼 것 = **심사역 반응**(정답)과 판정이 갈린 사람 — 기준을 깎을 재료다.
     🔴 노션 Tier 를 정답으로 대던 절(🚩)은 지웠다 — AI 가 쓴 값을 AI 판정과 맞대 437/437 일치만 찍었다(10/13)."""
-    out = paths.data("linkedin", "reports") / f"{ledger.today()}.md"
+    today = ledger.today()
+    out = paths.data("linkedin", "reports") / f"{today}.md"
     if out.exists():
         return
-    today = ledger.today()
-    day = {ev: sum(1 for r in ledger.rows(TASK, ev=ev) if str(r.get("ts", "")).startswith(today) or r.get("day") == today)
+    bounds = ledger.day_bounds(today)
+    day = {ev: sum(1 for r in ledger.rows(TASK, ev=ev, day=today))
            for ev in ("landed", "carded", "outreach", "resolved", "promoted")}
     week = ledger.now(timedelta(days=7))
     dist = dict(g.con.execute("SELECT verdict, count(*) FROM judgments WHERE run='live' AND ok=1 AND created>=? GROUP BY verdict", (week,)))
@@ -1368,7 +1369,7 @@ def daily_report(g: Gate, *, pool: int, picked: int) -> None:
     off = [(k, a, b) for k, a, b in g.con.execute(
         "SELECT h.key, l.verdict, h.verdict FROM judgments h JOIN judgments l ON l.key=h.key AND l.run='live'"
         " WHERE h.run='human' AND h.reason='슬랙 반응' AND h.created>=? ORDER BY h.created DESC", (week,)) if _bucket(a) != b]
-    acts = dict(g.con.execute("SELECT kind||':'||status, count(*) FROM actions WHERE created>=? GROUP BY 1", (today,)))
+    acts = dict(g.con.execute("SELECT kind||':'||status, count(*) FROM actions WHERE created>=? AND created<? GROUP BY 1", bounds))
     seen = f"{rw['seen_rate']:.0%}" if rw["seen_rate"] is not None else "-"
     head = (f"카드 {picked}명 · 재고 {pool}명({pool // 5}일치) · ✅ 초안 {day['outreach']} · 승격 {day['promoted']}"
             + f" · 지난 7일 결론 {rw['n']}명(✅ {rw['reaction_yes']} · ❌ {rw['reaction_no']} · 무반응 {rw['expiry']} · 본 비율 {seen})"

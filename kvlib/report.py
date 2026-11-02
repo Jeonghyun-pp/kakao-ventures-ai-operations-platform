@@ -1,6 +1,6 @@
 """하루 보고와 꺼짐 알림 — 문(`outbound`)과 **별개의 스위치**다. 보고서만 먼저 연다.
 
-    constraints.yaml  <task>.report_slack: on|off · <task>.report_channel
+    $KV_CONFIG/deployment.yaml  <task>.report_slack: on|off · <task>.report_channel
     post(task, text, send)        send(ch, text) 는 스킬이 준다(통로는 kvlib 이 모른다)
     daily(task, text, send)       하루 요약 — ops.digest_slack 이 on 이면 저녁 ops digest 한 통으로 묶인다
     health 는 skills/ops 가 여섯 스킬을 한 번에 본다(2026-09-26)

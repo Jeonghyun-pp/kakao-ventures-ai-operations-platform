@@ -34,6 +34,7 @@ def gather(today: str | None = None) -> dict:
     import schedule as sched                                     # 리포 루트의 schedule.py — 선언·설치 대조의 정본
     from . import run as ops
     today = today or ledger.today()
+    bounds = ledger.day_bounds(today)
     jobs, have = sched.declared(), sched.loaded()
     weekend = date.fromisoformat(today).weekday() >= 5
     out = {"today": today, "now": ledger.now(), "skills": [], "gaps": []}
@@ -44,16 +45,16 @@ def gather(today: str | None = None) -> dict:
              "actions": {}, "judged_today": 0, "human": 0, "last": None}
         con = _db(skill)
         if con:
-            for kind, st, n in con.execute("SELECT kind, status, count(*) FROM actions WHERE created>=? GROUP BY kind, status", (today,)):
+            for kind, st, n in con.execute("SELECT kind, status, count(*) FROM actions WHERE created>=? AND created<? GROUP BY kind, status", bounds):
                 k = f"{kind.rstrip('0123456789')}:{st}"
                 s["actions"][k] = s["actions"].get(k, 0) + n
             s["judged_today"], s["human"], last = con.execute(
-                "SELECT (SELECT count(*) FROM judgments WHERE run='live' AND created>=?), (SELECT count(*) FROM judgments WHERE run='human'),"
-                " max(coalesce((SELECT max(created) FROM actions), ''), coalesce((SELECT max(created) FROM judgments), ''))", (today,)).fetchone()
+                "SELECT (SELECT count(*) FROM judgments WHERE run='live' AND created>=? AND created<?), (SELECT count(*) FROM judgments WHERE run='human'),"
+                " max(coalesce((SELECT max(created) FROM actions), ''), coalesce((SELECT max(created) FROM judgments), ''))", bounds).fetchone()
             s["last"] = last or None
             if _request_lane(task):
-                stuck = con.execute("SELECT count(*) FROM actions a WHERE a.kind='request' AND a.created>=? AND NOT EXISTS"
-                                    "(SELECT 1 FROM actions b WHERE b.key=a.key AND b.kind='ack')", (today,)).fetchone()[0]
+                stuck = con.execute("SELECT count(*) FROM actions a WHERE a.kind='request' AND a.created>=? AND a.created<? AND NOT EXISTS"
+                                    "(SELECT 1 FROM actions b WHERE b.key=a.key AND b.kind='ack')", bounds).fetchone()[0]
                 if stuck:
                     out["gaps"].append(f"{skill}: 접수 답글 없는 요청 {stuck}건 — followup 이 안 돌았거나 채널을 못 읽는다")
             con.close()
@@ -107,7 +108,7 @@ td,th{{border:1px solid #ddd;padding:6px 10px;vertical-align:top;text-align:left
 <h1>kv 현황판 — {st['today']} <small>({st['now']} · 매일 18:30 갱신 · 읽기 전용)</small></h1>
 <p>{html.escape(st['gaps_text'])}</p>
 <table><tr>{''.join(f'<th>{h}</th>' for h in HEAD)}</tr>{body}</table>
-<p><small>문을 여닫는 건 <code>~/kv/constraints.yaml</code> 의 <code>&lt;스킬&gt;.outbound</code> 한 줄. 스케줄은 <code>./kv install --apply</code>. 이 페이지는 <code>./kv digest</code> 가 다시 쓴다.</small></p></html>"""
+<p><small>문을 여닫는 건 <code>$KV_CONFIG/deployment.yaml</code> 의 <code>&lt;스킬&gt;.outbound</code> 한 줄. 스케줄은 <code>./kv install --apply</code>. 이 페이지는 <code>./kv digest</code> 가 다시 쓴다.</small></p></html>"""
 
 
 def write_dashboard(st: dict):

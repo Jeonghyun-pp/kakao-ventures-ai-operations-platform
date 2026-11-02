@@ -1,6 +1,6 @@
 # Verification scope
 
-Checked on 2026-11-01 with a fresh Python 3.12.13 virtual environment on macOS 15.7.7. Dependencies were installed from `requirements.txt`. Demo and final test runs used temporary, initially absent `KV_CONFIG` and `KV_DATA` paths rather than a developer’s live configuration.
+Historical baseline checked on 2026-11-01 with a fresh Python 3.12.13 virtual environment on macOS 15.7.7. Dependencies were installed from `requirements.txt`. Demo and final test runs used temporary, initially absent `KV_CONFIG` and `KV_DATA` paths rather than a developer’s live configuration.
 
 | Check | Result | What it establishes |
 |---|---|---|
@@ -38,4 +38,21 @@ CI=true python tools/mutation_test.py
 
 The [GitHub Actions workflow](../.github/workflows/ci.yml) runs the suite, architecture checks and both demos on Ubuntu with Python 3.12. Its run status is available in the repository’s [Actions tab](https://github.com/Jeonghyun-pp/kakao-ventures-ai-operations-platform/actions). The local checks above are distinct from a hosted run.
 
-No live Gmail, Slack, Notion, Apify or model calls were used to validate this change. Installed macOS schedules, remote API contracts, production model scores, optional document-engine/browser dependencies and business outcomes were not revalidated. Runtime behavior is unchanged outside the public demo; the shared judgment-store and LinkedIn CLI changes correct explanatory text only.
+No live Gmail, Slack, Notion, Apify or model calls were used to validate this change. Installed macOS schedules, remote API contracts, production model scores, optional document-engine/browser dependencies and business outcomes were not revalidated. For that November 1 baseline, runtime behavior was unchanged outside the public demo; the shared judgment-store and LinkedIn CLI changes corrected explanatory text only. Later runtime corrections are recorded below.
+
+## Initial deployment regression check (2026-11-03, before date correction)
+
+On the working tree based on `06c4c893`, the rollout/configuration and scheduler tests passed: 19 tests in `test_deployment`, `test_doctor` and `test_schedule`. They cover missing/partial deployment files, explicit activation, optional mail category restrictions, local doctor diagnostics, and generated scheduler environments/quoting. The two offline demos still produce their documented results. The AST checker reports 11 passes, no failures and 3 unsupported checks. No real scheduler was installed or provider called.
+
+The full suite was run with socket connections and `subprocess.run` blocked: **415 tests, 408 passed, 5 private-fixture skips, 2 errors**. Both errors also reproduce from the unmodified `06c4c893` archive at the same time: `test_fund_lane.Lane.test_notion_change_makes_v2_and_check_marks_done` and `test_memo_lane.Lane.test_feedback_makes_v2_and_check_marks_done_with_metrics`. Their daily report filters compare the KST calendar date with UTC timestamp strings; during the first nine hours of a KST day, current rows can be omitted and the report file is missing. At this initial checkpoint the existing report-date bug remained unresolved, so that run was not a passing full suite. The subsequent correction and clean run below supersede this result.
+
+The network/process guard also exposed a missing nationality-judge fake in the LinkedIn gate test; the test now supplies it explicitly. Tests use a dedicated synthetic deployment fixture for historical enabled policies. Production `constraints.yaml` values were not changed to make tests pass.
+
+
+## Submission readiness check (2026-11-03, after date correction)
+
+The final local suite ran with socket connections and `subprocess.run` blocked: **422 tests, 417 passed, 5 private-fixture skips, zero errors or failures**. The two formerly failing memo/fund lane tests now pass without freezing their clocks. Seven new report-date regression tests cover KST midnight inclusion/exclusion, month/year transitions, both action and human-feedback records, and all affected report consumers.
+
+`ledger.day_bounds(day)` converts a KST calendar day to a half-open UTC timestamp interval. Memo, fund, appstore, bplan, LinkedIn and the ops dashboard now use that interval for daily SQL counts. LinkedIn's JSONL event counts use the existing `ledger.rows(day=...)` KST filter. Weekly rolling windows and cumulative human-label totals retain their original meaning. Stored timestamps remain UTC; no stored data was rewritten.
+
+The final AST check remains **11 passed, 0 failed, 3 unsupported**. An isolated, temporary launchd probe also verified generated environment and log paths under the actual scheduler; this was not installation of production workflow jobs. Remote service permissions, model quality and private-fixture paths remain outside this verification scope.

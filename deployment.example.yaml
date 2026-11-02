@@ -4,7 +4,7 @@ appstore: {outbound: "off", report_slack: "off"}
 bplan: {outbound: "off", report_slack: "off"}
 bplan_label: {outbound: "off"}
 linkedin: {outbound: "off", promote: false, report_slack: "off"}
-mail_observe: {outbound: "off", open_kinds: [], report_slack: "off"}
+mail_observe: {outbound: "off", open_kinds: [], open_categories: {}, send_branches: [], report_slack: "off"}
 mail_labels: {outbound: "off"}
 memo: {outbound: "off", report_slack: "off"}
 fund: {outbound: "off", report_slack: "off"}

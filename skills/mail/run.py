@@ -2,7 +2,7 @@
 
     observe   수집 → 한 통 한 번 판정 → (문이 열려 있으면) 실행 → 하루 보고서 → 백업     매일 10:00
 
-밖으로 나가는 문은 `constraints.yaml mail_observe.outbound` 하나다(기본 off). 켜는 건 사람이다.
+밖으로 나가는 문은 `$KV_CONFIG/deployment.yaml mail_observe.outbound` 하나다(기본 off). 켜는 건 사람이다.
 옛 실행부(plan/apply/followup · judge.py · brief.py)는 2026-09-25 에 지웠다 — 태그 `baseline-2026-09-21` 에 있다.
 """
 from __future__ import annotations

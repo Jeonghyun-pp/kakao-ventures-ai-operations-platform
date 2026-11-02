@@ -686,6 +686,7 @@ def _send(ch: str, text: str) -> str:
 def daily_report(g: Gate, acted: dict) -> None:
     """하루 한 번. 첫 줄 = **드랍이라 했는데 심사역이 살린 건** — 이 필터에서 가장 아픈 실수라 맨 위에 둔다."""
     today = ledger.today()
+    bounds = ledger.day_bounds(today)
     out = _reports_dir() / f"{today}.md"
     if out.exists():
         return
@@ -693,8 +694,8 @@ def daily_report(g: Gate, acted: dict) -> None:
                         (judgments.LIVE, judgments.HUMAN)).fetchall()
     saved = [k for k, live, human in gap if bucket(live) == "drop" and human == "keep"]
     killed = [k for k, live, human in gap if bucket(live) == "keep" and human == "drop"]
-    dist = dict(g.con.execute("SELECT verdict, count(*) FROM judgments WHERE run=? AND ok=1 AND created>=? GROUP BY verdict", (judgments.LIVE, today)))
-    acts = dict(g.con.execute("SELECT kind||':'||status, count(*) FROM actions WHERE created>=? GROUP BY 1", (today,)))
+    dist = dict(g.con.execute("SELECT verdict, count(*) FROM judgments WHERE run=? AND ok=1 AND created>=? AND created<? GROUP BY verdict", (judgments.LIVE, *bounds)))
+    acts = dict(g.con.execute("SELECT kind||':'||status, count(*) FROM actions WHERE created>=? AND created<? GROUP BY 1", bounds))
     waiting = g.con.execute("SELECT count(*) FROM actions a WHERE kind='card' AND status='done'"
                             " AND NOT EXISTS(SELECT 1 FROM actions t WHERE t.key=a.key AND t.kind IN ('todo','ack') AND t.status='done')").fetchone()[0]
     # 승격 — gmail.promote 원칙 그대로: 창 안에 정답 붙은 드랍 판정이 min_samples 이상이고, 그중 심사역이 살린 게 없어야(rate) 켜도 된다

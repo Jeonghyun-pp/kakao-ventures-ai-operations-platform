@@ -10,7 +10,7 @@ description: 심사역이 슬랙 스레드에 "○○ 투심" + 자료를 올리
 ## 🔴 밖으로 나가는 것 — 스레드 글·파일뿐, 문은 **닫혀 있다**
 
 ```
-constraints.yaml  memo.outbound: "off"     off = 기록만(actions:dry) · slack = 스레드에 올린다. on 은 없다(그 이상 나갈 것이 없다)
+$KV_CONFIG/deployment.yaml  memo.outbound: "off"     off = 기록만(actions:dry) · slack = 스레드에 올린다. on 은 없다(그 이상 나갈 것이 없다)
   ack       접수 답글(노션 찾음/못 찾음 · 자료 체크리스트)     SLACK_KINDS 허용 목록 — 그 밖의 종류는 기록만
   deliverN  초안 docx 올리기(files:write 필요)
   noteN     미확인 목록 + 다음 안내
@@ -57,7 +57,7 @@ cd skills/memo/engine && .venv/bin/python scripts/backtest.py compare <초안.do
 ## 구성
 
 `run.py` 한 파일(흐름은 위 "하루"와 같다 · `grep ^def`) + `headless.md`(무인 규칙 — 실행마다 회사명·폴더·노션 줄·피드백을 채워 `--append-system-prompt-file` 로. 스킬 프롬프트는 손대지 않는다).
-통로는 `kv_transport/{notion,slack,claude}.py` 끝의 2026-09-26 절. `constraints.yaml memo.*`: outbound · request_channel · request_pattern · extra_requesters · collect_wait_min · session_timeout_min · max_versions · report_* · backup_keep · allowed_tools. **근거는 그 주석에**.
+통로는 `kv_transport/{notion,slack,claude}.py` 끝의 2026-09-26 절. `constraints.yaml memo.*`의 일반 업무 기준: request_channel · request_pattern · extra_requesters · collect_wait_min · session_timeout_min · max_versions · 보고서 형식·채널 · backup_keep · allowed_tools. **근거는 그 주석에**.
 
 ## 알아둘 것
 
@@ -72,3 +72,7 @@ cd skills/memo/engine && .venv/bin/python scripts/backtest.py compare <초안.do
 **파일명은 NFC.** 맥은 NFD 로 저장한다. `완성본` 폴더가 복사 제외에서 빠져 IRR 엑셀이 답안지처럼 들어간 사고(09-26). 다운로드할 때 NFC 로 통일한다.
 
 **권한 둘이 아직 없다.** 슬랙 봇에 `files:read`·`files:write` 가 없다(다운로드는 로그인 HTML 이 200 으로 온다 — 크기가 아니라 종류로 판정한다). 서버에서 돌리려면 `claude setup-token`. 둘 다 사람 몫.
+
+## 공개 배포의 설정 위치
+
+행동 허가(`outbound`), Slack 보고, 승격과 메일의 별도 허용 목록은 `$KV_CONFIG/deployment.yaml`에서 명시한다. 파일이나 스위치가 빠지면 닫힌 값으로 처리한다. 일반 업무 기준·API 한계는 `constraints.yaml`을 사용한다. 위의 날짜별 운영 기록은 과거 맥락이며 현재 배포 허가를 대신하지 않는다. 우선순위와 메일 예외 범위는 [운영 가이드](../../docs/OPERATIONS.md#로컬-배포-설정)를 따른다.

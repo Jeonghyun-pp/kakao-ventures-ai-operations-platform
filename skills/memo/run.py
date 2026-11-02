@@ -343,13 +343,14 @@ def run_folder(company: str, folder: Path, *, dry_run: bool = False) -> int:
 
 def daily_report(g: Gate) -> None:
     today = ledger.today()
-    rows = g.con.execute("SELECT key, kind, status, detail FROM actions WHERE created>=? ORDER BY created", (today,)).fetchall()
+    bounds = ledger.day_bounds(today)
+    rows = g.con.execute("SELECT key, kind, status, detail FROM actions WHERE created>=? AND created<? ORDER BY created", bounds).fetchall()
     if not rows:
         return
     by = Counter(k.rstrip("0123456789") + ":" + s for _, k, s, _ in rows)
     done = [(k, json.loads(d)) for k, kind, s, d in rows if kind == "done"]
     gaps = Counter(x for k, kind, s, d in rows if kind.startswith("generate") and s == "done" for x in json.loads(d).get("gaps", []))
-    ex = [json.loads(e or "{}") for (e,) in g.con.execute("SELECT extra FROM judgments WHERE run=? AND created>=?", (judgments.HUMAN, today))]
+    ex = [json.loads(e or "{}") for (e,) in g.con.execute("SELECT extra FROM judgments WHERE run=? AND created>=? AND created<?", (judgments.HUMAN, *bounds))]
     samples = [x for m in ex for x in (m.get("discarded_sample") or [])][:10]
     pairs = [x for m in ex for x in (m.get("rewritten_sample") or [])][:10]
     head = (f"요청 {by['request:done']} · 접수 {by['ack:done'] + by['ack:dry']} · 초안 {by['generate:done']}(실패 {by['generate:failed']})"

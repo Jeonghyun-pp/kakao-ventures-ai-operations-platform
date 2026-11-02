@@ -13,7 +13,7 @@ schedule:
 
 메일·링크드인과 같은 뼈대(`kvlib` store·gate·report·judgments)다. 2026-09-26 에 sync 위에 판정·행동·followup·보고서를 올렸다. **문은 off 다.**
 
-## 🔴 밖으로 나가는 문 — `constraints.yaml bplan.outbound`
+## 🔴 밖으로 나가는 문 — `$KV_CONFIG/deployment.yaml bplan.outbound`
 
 ```
 off     기록만. 무엇을 했을지 actions 에 dry 로                         ← 지금. 기준 깎는 기간
@@ -75,7 +75,7 @@ cd ~/kv
 `blind send` 가 2026-01-01 이후 접수(1,057건)를 **고정된 무작위 순서**로 하루 35장 review_test 에 올린다 — 서비스·팀 원문 + 덱 링크, 나머지 폼은 스레드.
 🔴 모델 점수·요약은 카드에 없다(라벨이 모델에 끌려가면 모델을 재는 자로 못 쓴다). ⭕ 볼만 · ❌ 아님 · 🤔 애매, 이유는 스레드에 한 줄.
 `collect` 가 반응·이유를 `blind_labels` 에 모으고, `report` 가 분포와 노션 to do 대조(🚩 To Drop 인데 볼만)를 `reports/blind-<날짜>.md` 로 낸다.
-문은 `constraints.yaml bplan_label.outbound`(본 문과 따로) · 채널은 review_test 고정 · 노션·메일엔 안 쓴다. 첫 100건은 순수 무작위 — 표본을 기울일지는 그 결과로 정한다.
+문은 `$KV_CONFIG/deployment.yaml bplan_label.outbound`(본 문과 따로) · 채널은 review_test 고정 · 노션·메일엔 안 쓴다. 첫 100건은 순수 무작위 — 표본을 기울일지는 그 결과로 정한다.
 
 ## 스케줄 [사용자 결정 2026-10-20]
 
@@ -113,7 +113,7 @@ DB       ~/kv-data/bplan/db/bplan.sqlite (judgments · actions)   백업 ~/kv-da
 보고서    ~/kv-data/bplan/reports/<날짜>.md
 장부      ~/kv-data/_ledger/bplan.jsonl — landed(접수키) · labeled(메일번호) · 옛 drop_drafted(9/18 손 초안 25건)
 ```
-`constraints.yaml bplan.*`: outbound · send_branches · card_channel · report_channel · report_slack · deck_chars · remind_days · remind_max · drop_after_days · backup_keep.
+`constraints.yaml bplan.*`의 일반 업무 기준: card_channel · report_channel · deck_chars · remind_days · remind_max · drop_after_days · backup_keep.
 
 ## 결정 기록
 
@@ -123,3 +123,7 @@ DB       ~/kv-data/bplan/db/bplan.sqlite (judgments · actions)   백업 ~/kv-da
 - **드랍 문안은 사람이 쓴 것** — 한 글자도 안 고쳤다. 언어는 한글 이름·기업명·한국 도메인이면 ko(옛 실측: 한국 창업자가 영문 거절을 받는 쪽으로만 틀렸다).
 - **Status=Reviewing 같은 재정의는 여기 없다.** 노션 칸은 심사역이 쓰는 뜻 그대로.
 - 9/16 손 스크리닝(76건: 드랍 46 · 볼만 20 · 애매 10)과 9/18 손 초안 25통은 `reports/screening-20260916.md`·장부 `drop_drafted` 에 남아 있다 — 첫 replay 의 대조 자료.
+
+## 공개 배포의 설정 위치
+
+행동 허가(`outbound`), Slack 보고, 승격과 메일의 별도 허용 목록은 `$KV_CONFIG/deployment.yaml`에서 명시한다. 파일이나 스위치가 빠지면 닫힌 값으로 처리한다. 일반 업무 기준·API 한계는 `constraints.yaml`을 사용한다. 위의 날짜별 운영 기록은 과거 맥락이며 현재 배포 허가를 대신하지 않는다. 우선순위와 메일 예외 범위는 [운영 가이드](../../docs/OPERATIONS.md#로컬-배포-설정)를 따른다.

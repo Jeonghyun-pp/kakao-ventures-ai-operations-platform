@@ -11,7 +11,7 @@ description: 심사역이 슬랙 스레드에 "○○ 제안서" + 노션 제안
 ## 🔴 밖으로 나가는 것 — 스레드 글·파일뿐, 문은 **닫혀 있다**
 
 ```
-constraints.yaml  fund.outbound: "off"     off = 기록만(actions:dry) · slack = 스레드에 올린다. on 은 없다
+$KV_CONFIG/deployment.yaml  fund.outbound: "off"     off = 기록만(actions:dry) · slack = 스레드에 올린다. on 은 없다
   ack       접수 답글(DB 링크·서식 hwp·그림 있나)                    SLACK_KINDS 허용 목록 — 그 밖의 종류는 기록만
   deliverN  vN.hwp 올리기(files:write 필요)
   noteN     원문 대조 결과 · 판단 필요 목록 · (v1) 이 서식으로 읽었다 표
@@ -81,10 +81,14 @@ cd ~/kv
 ## 구성
 
 통로는 `kv_transport/hwp.py`(엔진 스크립트를 띄우는 유일한 자리) + `kv_transport/notion.py` 끝의 `page_blocks`·`download`. 엔진은 `skills/fund/engine/`(`hwp/` = 들여온 rhwp 스크립트·vendor, `patch.mjs` = 바이트 손질 셋).
-`constraints.yaml fund.*`: outbound · request_channel · request_pattern · extra_requesters · max_versions · report_* · backup_keep · font · font_note · sizes · bullets · image_*. `hwp.timeout_sec`. **근거는 그 주석에**.
+`constraints.yaml fund.*`의 일반 업무 기준: request_channel · request_pattern · extra_requesters · max_versions · 보고서 형식·채널 · backup_keep · font · font_note · sizes · bullets · image_*. `hwp.timeout_sec`. **근거는 그 주석에**.
 DB `~/kv-data/fund/db/fund.sqlite`(actions · judgments), 요청 폴더 `~/kv-data/fund/requests/<ts>/`(in/ · notion.json · profile.json · vN.hwp · vN/ops.json).
 
 ## 사람 몫
 
 슬랙 봇 `files:read`·`files:write`(투심과 같음) · 스케줄 설치(`./kv install`, 사용자 결정) · v1 의 서식 표 한 번 훑기 · 미확보 그림 올리기 · 슬래시 셀 판단 · 제출.
 안 하는 것: 목차 밖 항목(PT·실사 제출분)은 요청이 따로 와야 한다(같은 DB, 항목명 규칙을 바꾸는 일이라 사용자 결정) · 셀 병합(양식이 요구하는 격자 병합은 아직 사람) · 페이지 나눔 후가공.
+
+## 공개 배포의 설정 위치
+
+행동 허가(`outbound`), Slack 보고, 승격과 메일의 별도 허용 목록은 `$KV_CONFIG/deployment.yaml`에서 명시한다. 파일이나 스위치가 빠지면 닫힌 값으로 처리한다. 일반 업무 기준·API 한계는 `constraints.yaml`을 사용한다. 위의 날짜별 운영 기록은 과거 맥락이며 현재 배포 허가를 대신하지 않는다. 우선순위와 메일 예외 범위는 [운영 가이드](../../docs/OPERATIONS.md#로컬-배포-설정)를 따른다.

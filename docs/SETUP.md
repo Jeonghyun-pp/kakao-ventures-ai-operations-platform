@@ -9,7 +9,7 @@ $KV_DATA    default ~/kv-data    ledgers, state, downloaded working data
 $KV_CONFIG  default ~/kv-config  .env, connections, people, rollout gates
 ```
 
-Run `./kv setup` once. It copies example configuration without overwriting existing files. `./kv doctor` checks file presence, placeholders, credential paths, and permissions without calling an external API.
+Run `./kv setup` once. It copies example configuration without overwriting existing files. `./kv doctor` checks local configuration structure, placeholders, credential-file paths and `.env` permissions. It lists explicitly enabled rollout settings; it does not verify remote credentials, API permissions or model tools.
 
 ## 2. Credentials and permissions
 
@@ -52,7 +52,7 @@ Notion workspaces evolve, so run the relevant workflow's collect/read command ag
 
 ## 4. Safe rollout
 
-`deployment.example.yaml` closes every mutation/report gate. Keep that file's copied values while checking live reads and dry-run output.
+`deployment.example.yaml` closes every mutation/report gate. Keep that file's copied values while checking live reads and dry-run output. Missing files or switches stay closed instead of inheriting historical activation settings from `constraints.yaml`. Set rollout values in `$KV_CONFIG/deployment.yaml`; ordinary API limits and workflow criteria still fall back to `constraints.yaml`.
 
 1. Connect one provider and verify read access.
 2. Run the workflow's collect/judge path against test records.
@@ -65,3 +65,7 @@ Final investment decisions remain human decisions. The platform can create draft
 ## 5. Scheduling and recovery
 
 Use `./kv install` only after manual runs succeed. `./kv status`, `./kv health`, and the per-workflow reports expose incomplete runs and adapter failures. Runtime ledgers under `$KV_DATA` are the recovery source; back them up separately from replaceable credentials.
+
+Scheduling captures the resolved `KV_CONFIG` and `KV_DATA` paths from the installing shell for both launchd and cron. Logs go to `$KV_DATA/_logs`. Reinstall schedules after changing either path. The generated paths and arguments support spaces and XML/shell punctuation; cron rejects embedded newlines.
+
+Mail exception switches are independent: explicitly listed `mail_observe.open_kinds` can run below `outbound: on`. Optional `open_categories` narrows each listed kind; an explicitly opened kind without a category entry applies to all categories. Both maps/lists default empty. Sending also requires an explicit `send_branches` list and the existing send guards.

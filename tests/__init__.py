@@ -28,7 +28,7 @@ from pathlib import Path
 # Tests never inherit a developer's live credentials or production data.
 _ROOT = Path(__file__).resolve().parent
 _CONFIG = Path(tempfile.mkdtemp(prefix="kv-test-config-"))
-for _name in ("connections.yaml", "people.yaml"):
+for _name in ("connections.yaml", "people.yaml", "deployment.yaml"):
     shutil.copyfile(_ROOT / "fixtures" / "config" / _name, _CONFIG / _name)
 (_CONFIG / ".env").write_text(
     "NOTION_TOKEN=test\nSLACK_BOT_TOKEN=test\nAPIFY_TOKEN=test\n"

@@ -47,6 +47,8 @@ from pathlib import Path
 
 import yaml
 
+from kvlib import paths
+
 ROOT = Path(__file__).resolve().parent
 LABEL = "com.kv.{skill}.{cmd}"
 AGENTS = Path.home() / "Library/LaunchAgents"
@@ -83,7 +85,9 @@ def declared() -> list[dict]:
             #       (옛 잡이 남아 둘이 같이 돈다).
             #    ② argv 는 **낱말마다 하나씩** 넘긴다. 통째로 넘기면 argparse 가
             #       "apply --no-slack" 이라는 이름의 하위명령을 찾다가 죽는다.
-            argv = str(row["cmd"]).split()
+            argv = shlex.split(str(row["cmd"]))
+            if not argv:
+                raise ValueError(f"{md}: schedule cmd must not be empty")
             job = {"skill": skill, "cmd": row["cmd"], "argv": argv, "when": raw,
                    "why": row.get("why", ""),
                    "label": LABEL.format(skill=skill, cmd=argv[0])}
@@ -116,26 +120,27 @@ def plist(job: dict) -> str:
         if job["weekday"] is not None:
             cal += f"\n    <key>Weekday</key><integer>{job['weekday']}</integer>"
         when = f"  <key>StartCalendarInterval</key><dict>\n    {cal}\n  </dict>"
-    log = Path.home() / "kv-data" / "_logs" / f"{job['label']}.log"
-    argv = "".join(f"<string>{a}</string>" for a in job["argv"])
+    log = paths.data_root().resolve() / "_logs" / f"{job['label']}.log"
+    argv = "".join(f"<string>{html.escape(a)}</string>" for a in job["argv"])
+    env = {"PATH": _PATH, "KV_CONFIG": str(paths.config_root().resolve()), "KV_DATA": str(paths.data_root().resolve())}
+    environment = "".join(f"<key>{k}</key><string>{html.escape(v)}</string>" for k, v in env.items())
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- 생성물이다. 손으로 고치지 마라 — 정본은 skills/{job['skill']}/SKILL.md 의 schedule 선언이다.
-     {job['why']} -->
+<!-- 생성물이다. 손으로 고치지 마라. 정본은 스킬의 SKILL.md schedule 선언이다. -->
 <plist version="1.0"><dict>
-  <key>Label</key><string>{job['label']}</string>
+  <key>Label</key><string>{html.escape(job['label'])}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{ROOT}/.venv/bin/python</string>
-    <string>-m</string><string>skills.{job['skill']}.run</string>
+    <string>{html.escape(str(ROOT))}/.venv/bin/python</string>
+    <string>-m</string><string>skills.{html.escape(job['skill'])}.run</string>
     {argv}
   </array>
-  <key>WorkingDirectory</key><string>{ROOT}</string>
+  <key>WorkingDirectory</key><string>{html.escape(str(ROOT))}</string>
 {when}
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{html.escape(_PATH)}</string></dict>
+  <key>EnvironmentVariables</key><dict>{environment}</dict>
   <key>RunAtLoad</key><false/>
-  <key>StandardOutPath</key><string>{log}</string>
-  <key>StandardErrorPath</key><string>{log}</string>
+  <key>StandardOutPath</key><string>{html.escape(str(log))}</string>
+  <key>StandardErrorPath</key><string>{html.escape(str(log))}</string>
 </dict></plist>
 """
 
@@ -150,9 +155,18 @@ def cron_line(job: dict) -> str:
     else:
         wd = "*" if job["weekday"] is None else job["weekday"]          # 우리 요일표(일=0)가 cron 과 같다
         when = f"{job['minute']} {job['hour']} * * {wd}"
-    log = Path.home() / "kv-data" / "_logs" / f"{job['label']}.log"
-    return (f"{when} cd {ROOT} && PATH={shlex.quote(_PATH)} .venv/bin/python -m skills.{job['skill']}.run {' '.join(job['argv'])}"
-            f" >> {log} 2>&1  # {job['label']}")
+    log = paths.data_root().resolve() / "_logs" / f"{job['label']}.log"
+    env = {"PATH": _PATH, "KV_CONFIG": str(paths.config_root().resolve()), "KV_DATA": str(paths.data_root().resolve())}
+    assignments = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
+    argv = ['.venv/bin/python', '-m', f"skills.{job['skill']}.run", *job['argv']]
+    command = (f"cd {shlex.quote(str(ROOT))} && {assignments} "
+               f"{shlex.join(argv)}"
+               f" >> {shlex.quote(str(log))} 2>&1")
+    # cron interprets percent signs before the shell, even inside shell quotes.
+    if "\n" in command or "\r" in command:
+        raise ValueError("cron paths and arguments must not contain newlines")
+    command = command.replace('%', r'\%')
+    return f"{when} {command}  # {job['label']}"
 
 
 def _crontab() -> list[str]:
@@ -203,7 +217,8 @@ def cmd_install(apply: bool) -> int:
         p = AGENTS / f"{j['label']}.plist"
         print(f"  {'쓴다' if apply else '(dry)'} {p.name}  ← {j['when']}")
         if apply:
-            (Path.home() / "kv-data" / "_logs").mkdir(parents=True, exist_ok=True)
+            AGENTS.mkdir(parents=True, exist_ok=True)
+            paths.data("_logs")
             p.write_text(plist(j), encoding="utf-8")
             subprocess.run(["launchctl", "bootout", f"gui/{__import__('os').getuid()}/{j['label']}"],
                            capture_output=True)
@@ -228,7 +243,7 @@ def _install_cron(jobs: list[dict], apply: bool) -> int:
     for ln in block[1:-1]:
         print(f"  {'쓴다' if apply else '(dry)'} {ln}")
     if apply:
-        (Path.home() / "kv-data" / "_logs").mkdir(parents=True, exist_ok=True)
+        paths.data("_logs")
         subprocess.run(["crontab", "-"], input="\n".join([*keep, *block]) + "\n", text=True)
         missing = {j["label"] for j in jobs} - loaded()                # 🔴 쓴 것은 되읽는다 — rc 가 아니라 crontab -l 로 판정
         if missing:

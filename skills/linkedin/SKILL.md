@@ -14,10 +14,10 @@ schedule:
 
 2026-09-25 에 메일과 같은 뼈대로 옮겼다(`kvlib` store·gate·report). **동작은 그대로다** — 골든 dry-run 넷이 전·후 동일, 특성화 테스트 27개가 먼저 잡았다.
 
-## 🔴 밖으로 나가는 여섯은 문 하나를 지난다 — 그리고 문은 **열려 있다**
+## 🔴 밖으로 나가는 여섯은 문 하나를 지난다 — 공개 배포의 문은 **닫혀 있다**
 
 ```
-constraints.yaml  linkedin.outbound: "on"      ← 살아 있는 시스템이다. off/slack 은 시험·중단용
+$KV_CONFIG/deployment.yaml  linkedin.outbound: "off"     ← 공개 배포 기본값. 확인 후 slack/on을 명시한다
   buy       Apify 구매(돈) — collect·recheck   off·slack 이면 안 산다. 계획만 찍는다
   land      노션 착지                    〃 dry
   card      #그물망 카드(헤더+스레드)     slack 이상이면 나간다
@@ -118,7 +118,7 @@ learn.py       주간 학습 — 특징 표 · 수정안 · 사람 이름 유출
 criteria.md    Tier 기준 — 사람이 깎는다
 ../../people.yaml   심사역 명부(슬랙 ID → 성함). 메일과 같은 파일
 ```
-`constraints.yaml linkedin.*`: outbound · promote · card_channel(net) · report_channel(test) · report_slack · card_tiers · followup_days · stock_warn_days · outreach_batch · outreach_pitch · card_known · card_history · remind_* · learn_weeks · learn_min_n · recheck_days · recheck_batch · recheck_max. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
+`constraints.yaml linkedin.*`의 일반 업무 기준: card_channel(net) · report_channel(test) · card_tiers · followup_days · stock_warn_days · outreach_batch · outreach_pitch · card_known · card_history · remind_* · learn_weeks · learn_min_n · recheck_days · recheck_batch · recheck_max. 승격 게이트·티어·재고 규칙의 **근거는 그 주석에**.
 
 ## 알아둘 것 (지우지 않은 결정)
 
@@ -162,3 +162,7 @@ criteria.md    Tier 기준 — 사람이 깎는다
 - 액터의 `schools` 필터는 학력 **아무 줄**에나 걸린다(대학원·교환 한 줄로 통과 115명 중 31명). 학교를 조건으로 쓰려면 **학부 줄의 정규화 이름 정확 일치**만 — 부분문자열 함정: `Seoul National University of Science and Technology`(서울과기대) · `Korea National Open University` · `Columbia College Chicago` · `Stanford Continuing Studies` · `UC Berkeley Extension`. 연도 미상은 컷(08-19 결정, 두 번 뒤집힌 끝).
 - **10-15 정답(✅)으로 다시 쟀다**: 스텔스+명문대 축 ✅ 14/25 = 56% · 같은 8월의 학교 없는 스텔스 축 2/10 = 20%. 표본은 작지만 "학교 덕인지 스텔스 덕인지"가 처음 갈렸다. 다만 1페이지 25명 중 22명이 이미 본 사람(모수 325) — 되살린다면 월 1회 전량. Reviewer B 확인 대기.
 - 경력단절은 **발굴이 아니라 리텐션 신호**다 — elite-gap 모수 297,197 · 천장 2,500 = 0.8%, 1페이지 25명 중 6개월내 공백 0명($0.20 실측). 액터에 "현 직장 없음" 필터가 없다.
+
+## 공개 배포의 설정 위치
+
+행동 허가(`outbound`), Slack 보고, 승격과 메일의 별도 허용 목록은 `$KV_CONFIG/deployment.yaml`에서 명시한다. 파일이나 스위치가 빠지면 닫힌 값으로 처리한다. 일반 업무 기준·API 한계는 `constraints.yaml`을 사용한다. 위의 날짜별 운영 기록은 과거 맥락이며 현재 배포 허가를 대신하지 않는다. 우선순위와 메일 예외 범위는 [운영 가이드](../../docs/OPERATIONS.md#로컬-배포-설정)를 따른다.

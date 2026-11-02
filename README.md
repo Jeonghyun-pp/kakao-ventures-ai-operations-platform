@@ -74,7 +74,7 @@ A workflow owns the domain decision and approval check. `Gate` owns rollout leve
 
 After the offline walkthrough, follow [SETUP.md](docs/SETUP.md) for credentials, external schemas and rollout controls. `./kv setup` creates local configuration; `./kv doctor` checks it. Workflows cover email triage, application screening, founder sourcing, memo/document generation and operations. Each `skills/*/SKILL.md` describes its commands and operating contract.
 
-New installations default to no outbound actions. Begin with dry runs, inspect outputs and explicitly enable only the workflow you intend to operate. Optional document engines have their own dependencies. macOS scheduling is separate from the portable Python test/demo path.
+New installations default to no outbound actions, including when local rollout settings are missing. Set rollout switches in `$KV_CONFIG/deployment.yaml`; `./kv doctor` reports local checks and explicitly enabled switches without certifying remote access. Begin with dry runs, inspect outputs and explicitly enable only the workflow you intend to operate. Optional document engines have their own dependencies. macOS scheduling is separate from the portable Python test/demo path.
 
 ## History
 

@@ -337,7 +337,8 @@ def run_local(title: str, db: str, form: Path, images: Path | None) -> int:
 
 def daily_report(g: Gate) -> None:
     today = ledger.today()
-    rows = g.con.execute("SELECT key, kind, status, detail FROM actions WHERE created>=? ORDER BY created", (today,)).fetchall()
+    bounds = ledger.day_bounds(today)
+    rows = g.con.execute("SELECT key, kind, status, detail FROM actions WHERE created>=? AND created<? ORDER BY created", bounds).fetchall()
     if not rows:
         return
     by = Counter(k.rstrip("0123456789") + ":" + s for _, k, s, _ in rows)
@@ -347,7 +348,7 @@ def daily_report(g: Gate) -> None:
     for m in made:
         for k in ("slash_cells", "images_missing", "outside", "unknown", "emdash"):
             judge[k] += len(m.get("findings", {}).get(k, []))
-    ex = [json.loads(e or "{}") for (e,) in g.con.execute("SELECT extra FROM judgments WHERE run=? AND created>=?", (judgments.HUMAN, today))]
+    ex = [json.loads(e or "{}") for (e,) in g.con.execute("SELECT extra FROM judgments WHERE run=? AND created>=? AND created<?", (judgments.HUMAN, *bounds))]
     changed = [x for m in ex for x in (m.get("changed_in_hwp") or [])][:10]
     fmt = [f"{k}: 프로필 {a} → 제출본 {b}" for m in ex for k, (a, b) in (m.get("format_diff") or {}).items()]
     fb = [json.loads(d).get("text", "")[:120] for k, kind, s, d in rows if kind == "feedback"]

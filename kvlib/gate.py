@@ -1,6 +1,6 @@
 """밖으로 나가는 문 — 한 스킬의 모든 부작용이 지나는 자리. 무엇을 했(을)는지가 `actions` 에 남는다.
 
-    constraints.yaml  <task>.outbound
+    $KV_CONFIG/deployment.yaml  <task>.outbound
       off     아무것도 안 한다. 무엇을 했을지만 dry 로 적는다
       slack   `is_slack(kind)` 인 종류만 실제로 (슬랙 글). 나머지는 dry            ← 시험은 여기서
       on      전부 실제로

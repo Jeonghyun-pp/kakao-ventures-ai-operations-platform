@@ -10,10 +10,10 @@ schedule:
 
 2026-09-26 에 메일과 같은 뼈대로 옮겼다(`kvlib` store·gate·report·judgments). **수집·필터·착지 동작은 그대로다** — 골든 dry-run 이 전·후 같은 앱을 고른다.
 
-## 🔴 밖으로 나가는 것은 둘 — 노션 착지 · 격주 리마인드. 문은 **열려 있다**
+## 🔴 밖으로 나가는 것은 둘 — 노션 착지 · 격주 리마인드. 공개 배포의 문은 **닫혀 있다**
 
 ```
-constraints.yaml  appstore.outbound: "on"     ← 살아 있는 시스템이다. off 는 시험·중단용
+$KV_CONFIG/deployment.yaml  appstore.outbound: "off"    ← 공개 배포 기본값. 확인 후 slack/on을 명시한다
   land    노션 착지                             off 면 계획만 적는다(actions:dry)
   remind  #그물망 "앱스토어 보세요" (2주마다)      slack 이상이면 나간다. 한 회차 한 번(actions 키 remind:<회차>)
 ```
@@ -86,7 +86,7 @@ kr_origin.py   국적 규칙 L1~L7(도메인·법인 표기·문자·한글 비�
 criteria.md    모델이 볼 국적 기준 — 사람이 깎는다
 fixtures/      kr_origin_w34.json 고정 정답 199건
 ```
-`constraints.yaml appstore.*`: outbound · report_channel(test) · report_slack · foreign_sample · backup_keep · 차트 천장 · remind_*. 공휴일은 `calendar.holidays_kr`(kvlib/workday). **근거는 그 주석에**.
+`constraints.yaml appstore.*`의 일반 업무 기준: report_channel(test) · foreign_sample · backup_keep · 차트 천장 · remind_*. 공휴일은 `calendar.holidays_kr`(kvlib/workday). **근거는 그 주석에**.
 
 ## 지키는 규율
 
@@ -108,3 +108,7 @@ fixtures/      kr_origin_w34.json 고정 정답 199건
 **`genre=36` 단독으로 쓰지 마라.** 신규진입 29건 중 24건이 홈플러스·배민·라인의 시즌성 재진입이었다. 25개 카테고리로 쪼개야 극초기 앱이 보인다.
 
 **최신출시 피드는 genre 를 무시한다.** 장르별로 부르면 같은 응답을 25번 받는다. 코드가 그 호출을 거부한다.
+
+## 공개 배포의 설정 위치
+
+행동 허가(`outbound`), Slack 보고, 승격과 메일의 별도 허용 목록은 `$KV_CONFIG/deployment.yaml`에서 명시한다. 파일이나 스위치가 빠지면 닫힌 값으로 처리한다. 일반 업무 기준·API 한계는 `constraints.yaml`을 사용한다. 위의 날짜별 운영 기록은 과거 맥락이며 현재 배포 허가를 대신하지 않는다. 우선순위와 메일 예외 범위는 [운영 가이드](../../docs/OPERATIONS.md#로컬-배포-설정)를 따른다.

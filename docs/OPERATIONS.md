@@ -10,14 +10,14 @@
 | 스킬 | 하는 일 | 문(outbound) | 정답(사람이 남기는 것) |
 |---|---|---|---|
 | `mail` | hello@ 메일 수집 → 한 통 한 번 판정 → (문이 열리면) 아카이브·포워드·초안·발송 | off | 노션·라벨 |
-| `linkedin` | 월 1회 극초기 창업자 구매 → Tier 판정 → 노션 전량 착지 → 평일 5명 #그물망 카드 → ✅ 면 콜드 메시지 초안 | **on** | 노션 Tier |
-| `appstore` | 매일 25장르×4차트 → 6개월 내 신규 → 국적 판정 → One Liner 요약 → 한국 앱만 노션 착지 | **on** | 노션 DB로 업데이트 체크 |
+| `linkedin` | 월 1회 극초기 창업자 구매 → Tier 판정 → 노션 전량 착지 → 평일 5명 #그물망 카드 → ✅ 면 콜드 메시지 초안 | off (공개 배포 기본값) | 노션 Tier |
+| `appstore` | 매일 25장르×4차트 → 6개월 내 신규 → 국적 판정 → One Liner 요약 → 한국 앱만 노션 착지 | off (공개 배포 기본값) | 노션 DB로 업데이트 체크 |
 | `bplan` | 구글폼 접수 → 노션 행 → 덱 포함 판정 → 점수·볼만 카드·드랍 초안 → ⭕❌🙋 잇기 | off · 미설치 | 노션 to do |
 | `memo` | 슬랙 스레드 "○○ 투심" + 자료 → 무인 초안 docx → 피드백 vN → ✅ | off · 미설치 | ✅ 시점 docx |
 | `fund` | 슬랙 스레드 "○○ 제안서" + 노션 DB 링크 + 공고 서식 hwp → 원문 그대로 옮긴 hwp(모델 없음) → 노션 바뀌면 vN → ✅ | off · 미설치 | ✅ 시점 제출본 hwp |
 | `ops` | kv-data 스냅샷 백업 · 보존 · 일곱 스킬 health 하나 · 하루 요약 한 통 · 현황판 | — | — |
 
-**문은 사람이 연다.** `constraints.yaml` 의 `<스킬>.outbound` 한 줄(off → slack → on). 코드는 문을 못 연다. 문이 닫혀 있어도 무엇을 했을지는 `actions` 표에 dry 로 남는다.
+**문은 사람이 연다.** `$KV_CONFIG/deployment.yaml` 의 `<스킬>.outbound` 값을 명시한다(off → slack → on). 누락된 행동·보고·승격 스위치는 닫히며, `constraints.yaml`의 과거 운영값으로 열리지 않는다. 코드는 문을 못 연다. 문이 닫혀 있어도 무엇을 했을지는 `actions` 표에 dry 로 남는다.
 **기준은 사람이 깎는다.** `skills/<이름>/criteria.md`(투심은 `headless.md` + `skills/memo/engine/prompts/`). 저녁 요약·보고서의 🚩 절이 재료다.
 
 ## 한 입구
@@ -47,3 +47,11 @@ schedule.py    스케줄 정본은 SKILL.md · check_intent.py  의도를 기계
 ## 지금 사람 몫 (2026-09-26)
 슬랙 봇 `files:read`·`files:write`(투심 레인) · 비플랜·투심 스케줄 설치 · 구글폼 폴더 서비스계정 공유 · `people.yaml` 실명 매핑 · 채널 전환(test → 실채널) · 서버 이관(`claude setup-token`) · 오프사이트 백업.
 옛 시스템(kv-automation)은 걷어냈다(태그 `legacy-final-2026-09-26`). 투심 엔진은 `skills/memo/engine/` 으로 들여왔고(전용 venv), 옛 데이터는 `~/kv-data/_archive/`.
+
+## 로컬 배포 설정
+
+`./kv setup`은 닫힌 예제를 `$KV_CONFIG/deployment.yaml`로 복사한다. 행동·보고 스위치는 이 파일에서 바꾼다. `constraints.yaml`은 일반 API 한계와 업무 기준의 기본값이며, 그 안의 과거 활성화 값은 배포 허가가 아니다.
+
+메일은 `outbound` 외에 `open_kinds` 예외와 `send_branches` 발송 허용 목록이 있다. 누락 시 둘 다 비어 있다. `open_kinds`를 명시하면 해당 종류를 허용하고, `open_categories`에 그 종류를 함께 적으면 해당 카테고리로 좁힌다. 카테고리 제한을 적지 않은 명시적 종류는 전체 범위에 적용된다. `--dry-run`은 이 예외도 닫는다.
+
+`./kv doctor`는 로컬 구조·파일·권한과 명시적으로 열린 스위치를 확인한다. 원격 인증이나 API 권한을 검증하지는 않는다. 별도 `KV_CONFIG`/`KV_DATA`를 쓰면 같은 환경에서 `./kv install --apply`를 실행한다. 생성한 예약 작업에 두 경로가 저장되며 로그는 해당 데이터 루트의 `_logs`에 쌓인다. 경로를 바꾼 뒤에는 예약 작업을 다시 생성한다.

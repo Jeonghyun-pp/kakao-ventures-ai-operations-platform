@@ -13,7 +13,7 @@ schedule:
 ## 🔴 밖으로 나가는 문은 하나이고, 지금 닫혀 있다
 
 ```
-constraints.yaml  mail_observe.outbound
+$KV_CONFIG/deployment.yaml  mail_observe.outbound
   off     아무것도 안 한다. 무엇을 했을지만 actions 에 dry 로 적는다                     ← 지금
   slack   슬랙 글만 실제로 올린다(질문·리마인드·인계·포워드 → slack_channel). 초안·아카이브·발송은 dry
   on      메일함에도 쓴다(초안·아카이브). 발송은 그 위에 send_branches 허용 목록을 또 지난다 — 목록 밖 갈래는 초안까지
@@ -164,3 +164,7 @@ TIPS 문의   문의자에게 TIPS 안내.    문안 templates/webflow_tips.txt
 
 `schedule.py` 가 맥이 아니면 crontab 블록을 만든다. 맥 전용 코드는 그 파일에만 있다(A13). `claude` 는 서버에서 hello@ 로 `claude login` 한 번.
 Gmail·Slack 은 토큰. DB 는 백업 파일에서 복원(`--op restore-test` 가 그 시험). 백업은 `skills/ops`(매일 12:45 스냅샷)가 한다.
+
+## 공개 배포의 설정 위치
+
+행동 허가(`outbound`), Slack 보고, 승격과 메일의 별도 허용 목록은 `$KV_CONFIG/deployment.yaml`에서 명시한다. 파일이나 스위치가 빠지면 닫힌 값으로 처리한다. 일반 업무 기준·API 한계는 `constraints.yaml`을 사용한다. 위의 날짜별 운영 기록은 과거 맥락이며 현재 배포 허가를 대신하지 않는다. 우선순위와 메일 예외 범위는 [운영 가이드](../../docs/OPERATIONS.md#로컬-배포-설정)를 따른다.
