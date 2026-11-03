@@ -5,7 +5,7 @@ import sqlite3
 import unittest
 from unittest import mock
 
-from kvlib import Fetched, judgments
+from kvlib import Fetched, judgments, ledger
 from skills.bplan import blind
 
 
@@ -99,6 +99,28 @@ class Flow(unittest.TestCase):
         t = blind.report(self.c, {"k1": "To Drop", "k2": "To Drop"})
         self.assertIn("볼만 비율 50.0%", t)
         self.assertIn("To Drop 인데 볼만·애매로 단 건 1", t)
+
+    def test_failed_later_reply_page_preserves_label_and_creates_nothing(self):
+        g = blind.gate(self.c)
+        for key in ("existing", "new"):
+            g.put(key, "label_card", "done", {"result": key})
+        now = ledger.now()
+        saved = ("existing", "no", "human reason already saved", '["U1"]', "existing", now, now)
+        self.c.execute("INSERT INTO blind_labels VALUES(?,?,?,?,?,?,?)", saved)
+
+        def call(method, path, *, params):
+            if params.get("cursor"):
+                raise blind.slack.SlackError("later page timeout")
+            return {"messages": [{"ts": params["ts"]},
+                                 {"ts": "reply", "text": "partial human reason", "user": "U1"}],
+                    "has_more": True, "response_metadata": {"next_cursor": "next"}}
+
+        with mock.patch.object(blind.slack, "_call", side_effect=call) as calls:
+            got = blind.collect(g, reactions=lambda *args: Fetched.measured([{"name": "o", "users": ["U1"]}]),
+                                replies=blind.slack.replies)
+        self.assertEqual(got, {"unread": 2})
+        self.assertEqual(calls.call_count, 4)
+        self.assertEqual(self.c.execute("SELECT * FROM blind_labels").fetchall(), [saved])
 
 
 if __name__ == "__main__":

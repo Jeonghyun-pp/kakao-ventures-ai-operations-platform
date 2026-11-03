@@ -230,6 +230,10 @@ def cmd_install(apply: bool) -> int:
         if apply:
             subprocess.run(["launchctl", "bootout", f"gui/{__import__('os').getuid()}/{label}"], capture_output=True)
             (AGENTS / f"{label}.plist").unlink(missing_ok=True)
+    if apply:
+        missing = {j["label"] for j in jobs} - loaded()
+        if missing:
+            raise RuntimeError(f"launchd 에 안 들어갔다: {sorted(missing)}")
     if not apply:
         print("\n  --apply 를 붙이면 실제로 설치한다. 설치하면 그 시각부터 무인으로 돈다.")
     return 0

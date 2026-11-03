@@ -80,12 +80,48 @@ class ScheduledEnvironment(unittest.TestCase):
         agents = self.root / 'agents'
         with mock.patch.object(schedule, 'MAC', True), mock.patch.object(schedule, 'AGENTS', agents), \
              mock.patch.object(schedule, 'declared', return_value=[job('매일 10:00')]), \
-             mock.patch.object(schedule, 'loaded', return_value=set()), \
+             mock.patch.object(schedule, 'loaded', return_value={'com.kv.mail.observe'}), \
              mock.patch.object(schedule.subprocess, 'run') as run:
             schedule.cmd_install(True)
         self.assertTrue((self.data / '_logs').is_dir())
         self.assertTrue((agents / 'com.kv.mail.observe.plist').is_file())
         self.assertEqual(run.call_count, 2)
+
+
+class InstallReadback(unittest.TestCase):
+    def test_launchd_refused_job_is_not_reported_as_success(self):
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(schedule, 'MAC', True), \
+             mock.patch.object(schedule, 'AGENTS', Path(d) / 'agents'), \
+             mock.patch.object(schedule.paths, 'data_root', return_value=Path(d) / 'data'), \
+             mock.patch.object(schedule, 'declared', return_value=[job('매일 10:00')]), \
+             mock.patch.object(schedule, 'loaded', return_value=set()), \
+             mock.patch.object(schedule.subprocess, 'run'):
+            with self.assertRaisesRegex(RuntimeError, 'launchd'):
+                schedule.cmd_install(True)
+
+    def test_cron_preserves_unrelated_lines_and_reads_back(self):
+        old = ['MAILTO=local@example.invalid', '0 0 * * * echo unrelated', schedule._CRON_BEGIN,
+               '0 1 * * * old # com.kv.old.job', schedule._CRON_END, '# personal comment']
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(schedule.paths, 'data_root', return_value=Path(d)), \
+             mock.patch.object(schedule, '_crontab', return_value=old), \
+             mock.patch.object(schedule, 'loaded', return_value={'com.kv.mail.observe'}), \
+             mock.patch.object(schedule.subprocess, 'run') as call:
+            self.assertEqual(schedule._install_cron([job('매일 10:00')], True), 0)
+        text = call.call_args.kwargs['input']
+        self.assertIn('MAILTO=local@example.invalid\n0 0 * * * echo unrelated\n# personal comment\n', text)
+        self.assertNotIn('com.kv.old.job', text)
+        self.assertEqual(text.count(schedule._CRON_BEGIN), 1)
+
+    def test_cron_refused_job_is_not_reported_as_success(self):
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(schedule.paths, 'data_root', return_value=Path(d)), \
+             mock.patch.object(schedule, '_crontab', return_value=[]), \
+             mock.patch.object(schedule, 'loaded', return_value=set()), \
+             mock.patch.object(schedule.subprocess, 'run'):
+            with self.assertRaisesRegex(RuntimeError, 'crontab'):
+                schedule._install_cron([job('매일 10:00')], True)
 
 
 if __name__ == "__main__":

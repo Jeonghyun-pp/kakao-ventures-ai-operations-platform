@@ -114,7 +114,10 @@ def collect(g: Gate, *, reactions=slack.reactions, replies=slack.replies) -> dic
             n["waiting"] += 1
             continue
         rp = replies(CH, ts)
-        reason = " / ".join(m.get("text", "").strip() for m in (rp.require() if rp.is_measured else [])
+        if not rp.is_measured:
+            n["unread"] += 1
+            continue
+        reason = " / ".join(m.get("text", "").strip() for m in rp.require()
                             if not m.get("bot_id") and m.get("text", "").strip())
         now = ledger.now()
         g.con.execute("INSERT INTO blind_labels VALUES(?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "

@@ -75,12 +75,12 @@ def label(con, rows: list[dict], prop: str, to_label: Callable[[str], str | None
 
 
 def replay(con, judge_lines, criteria: str, sha: str, *, limit: int = -1) -> dict:
-    """live 에 있고 r-<sha> 에 없는 건의 **저장된 입력**으로 다시 판정한다.
+    """live 에 있고 r-<sha> 에 성공 판정이 없는 건의 **저장된 입력**으로 다시 판정한다.
     `judge_lines(lines, keys, criteria) -> Fetched[list[verdict]]` — keys 는 lines 와 **같은 순서**의 목록이다(키가 줄 안에 없는 스킬을 위해).
     저장된 입력에는 기준 본문이 없다 — 기준은 부를 때 붙인다. 그래서 고친 기준으로 다시 잴 수 있다."""
     run = f"r-{sha}"
     rows = con.execute("SELECT key, input_text FROM judgments j WHERE run=? AND ok=1 AND input_text!=''"
-                       " AND NOT EXISTS(SELECT 1 FROM judgments r WHERE r.key=j.key AND r.run=?) ORDER BY created DESC LIMIT ?",
+                       " AND NOT EXISTS(SELECT 1 FROM judgments r WHERE r.key=j.key AND r.run=? AND r.ok=1) ORDER BY created DESC LIMIT ?",
                        (LIVE, run, limit)).fetchall()
     lines = {r[0]: r[1] for r in rows}
     if not lines:

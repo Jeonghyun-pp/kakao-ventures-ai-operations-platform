@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import shutil
 import sys
@@ -43,7 +44,9 @@ def backup(src: Path | None = None, dst: Path | None = None, keep: int | None = 
     """스냅샷 하나. 🔴 원본이 비어 보이면 중단한다 — 빈 백업으로 멀쩡한 스냅샷을 밀어내지 않는다.
     🔴 파일 수가 원본보다 적으면 실패로 남긴다(.last-success 를 안 쓴다)."""
     src, dst, keep, today = src or paths.data_root(), dst or _dst(), keep or int(_cfg("backup_keep")), today or date.today().isoformat()
-    files = [p for p in src.rglob("*") if p.is_file() and not _excluded(p.relative_to(src))]
+    if src.resolve() == dst.resolve() or src.resolve() in dst.resolve().parents or dst.resolve() in src.resolve().parents:
+        raise RuntimeError("backup source and destination must not overlap")
+    files = [p for p in src.rglob("*") if p.is_file() and not p.is_symlink() and not _excluded(p.relative_to(src))]
     if len(files) < int(_cfg("backup_min_files")):
         raise RuntimeError(f"원본 파일이 {len(files)}개뿐이다(기대 수천) — 마운트 실패·경로 오타 의심. 중단")
     prev = next((s for s in reversed(_snapshots(dst)) if s.name != today), None)
@@ -54,11 +57,16 @@ def backup(src: Path | None = None, dst: Path | None = None, keep: int | None = 
     def link_or_copy(a: str, b: str) -> None:
         q = prev / Path(a).relative_to(src) if prev else None
         st = Path(a).stat()
-        if q and q.exists() and q.stat().st_size == st.st_size and int(q.stat().st_mtime) == int(st.st_mtime):   # 초 단위 — rsync 와 같은 기준(옛 스냅샷은 초까지만 있다)
+        unchanged = False
+        if q and q.exists() and q.stat().st_size == st.st_size and int(q.stat().st_mtime) == int(st.st_mtime):
+            # Equal metadata can hide same-size rewrites; verify content before reusing an old inode.
+            with Path(a).open("rb") as source, q.open("rb") as previous:
+                unchanged = hashlib.file_digest(source, "sha256").digest() == hashlib.file_digest(previous, "sha256").digest()
+        if unchanged:
             os.link(q, b); linked[0] += 1                              # 안 변한 파일은 전날 것과 같은 inode — 디스크를 안 먹는다
         else:
             shutil.copy2(a, b)
-    shutil.copytree(src, tmp, copy_function=link_or_copy, symlinks=True,                       # 링크는 링크로 — 따라가면 다른 트리를 통째로 복사하거나 죽은 링크에서 넘어진다
+    shutil.copytree(src, tmp, copy_function=link_or_copy, symlinks=True,                       # 심볼릭 링크는 제외해 외부 트리를 따라가지 않는다
                     ignore=lambda d, names: [n for n in names if (Path(d) / n).is_symlink() or ((Path(d) / n).is_file() and _excluded((Path(d) / n).relative_to(src)))])
     linked = linked[0]
     n = sum(1 for _ in tmp.rglob("*") if _.is_file())

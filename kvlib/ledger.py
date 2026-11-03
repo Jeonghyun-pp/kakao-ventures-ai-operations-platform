@@ -86,14 +86,14 @@ def rows(task: str, *, ev: str | None = None, day: str | None = None) -> list[di
     p = paths.ledger(task)
     if not p.exists():
         return []
-    lines = p.read_text(encoding="utf-8").splitlines()
+    lines = p.read_bytes().splitlines()
     out = []
     for i, line in enumerate(lines):
         if not line.strip():
             continue
         try:
-            r = json.loads(line)
-        except json.JSONDecodeError as e:
+            r = json.loads(line.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             if i == len(lines) - 1:
                 print(f"  ⚠️  장부 마지막 줄이 깨져 있다 — 버린다: {p.name}")
                 continue

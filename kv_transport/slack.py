@@ -147,6 +147,21 @@ def reactions(key: str, ts: str) -> Fetched:
     return Fetched.measured(msgs[0].get("reactions") or [], ts=ts)
 
 
+def _thread_messages(ch: str, parent_ts: str) -> list[dict]:
+    messages, cursors = [], set()
+    params = {"channel": ch, "ts": parent_ts, "limit": 200}
+    while True:
+        res = _call("GET", "/conversations.replies", params=params.copy())
+        messages.extend(res.get("messages") or [])
+        cursor = (res.get("response_metadata") or {}).get("next_cursor")
+        if not cursor and not res.get("has_more"):
+            return messages
+        if not cursor or cursor in cursors:
+            raise SlackError("thread pagination cursor missing or repeated")
+        cursors.add(cursor)
+        params["cursor"] = cursor
+
+
 def replies(key: str, parent_ts: str) -> Fetched:
     """스레드 답글 전체. 각 답글의 `reactions` 가 같이 온다.
 
@@ -156,11 +171,9 @@ def replies(key: str, parent_ts: str) -> Fetched:
     """
     ch = channel_id(key)
     try:
-        res = _call("GET", "/conversations.replies",
-                    params={"channel": ch, "ts": parent_ts, "limit": 200})
+        msgs = _thread_messages(ch, parent_ts)
     except SlackError as e:
         return Fetched.unknown(f"slack:{e}", channel=key)
-    msgs = res.get("messages") or []
     # 첫 항목은 부모 메시지다 — 답글만 돌려준다
     return Fetched.measured([m for m in msgs if m.get("ts") != parent_ts],
                             parent=parent_ts, n=len(msgs))
@@ -202,10 +215,10 @@ def thread(key: str, parent_ts: str) -> Fetched:
     """부모 + 답글 전부(부모 포함). `replies()` 는 답글만 준다 — 부모에 붙은 파일까지 보려면 이것."""
     ch = channel_id(key)
     try:
-        res = _call("GET", "/conversations.replies", params={"channel": ch, "ts": parent_ts, "limit": 200})
+        msgs = _thread_messages(ch, parent_ts)
     except SlackError as e:
         return Fetched.unknown(f"slack:{e}", channel=key)
-    return Fetched.measured(res.get("messages") or [], parent=parent_ts)
+    return Fetched.measured(msgs, parent=parent_ts)
 
 
 def files_of(msgs: list[dict]) -> list[dict]:
