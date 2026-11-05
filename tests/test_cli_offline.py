@@ -4,12 +4,14 @@ import contextlib
 import importlib
 import io
 import os
+import sqlite3
+import types
 from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
 
-from kvlib import Fetched, connections, constraints, lock, paths, secrets
+from kvlib import Fetched, connections, constraints, judgments, lock, paths, secrets
 from tools import bootstrap
 
 
@@ -64,6 +66,24 @@ class OfflineCLI(unittest.TestCase):
             with self.subTest(skill=skill):
                 self.assertEqual(module.main(['replay']), 0)
                 self.assertEqual(module.main(['diff', '--b', 'r-absent']), 0)
+
+    def test_all_three_diff_commands_show_incomplete_scope(self):
+        con = sqlite3.connect(':memory:')
+        self.addCleanup(con.close)
+        judgments.ensure(con)
+        judgments.save(con, 'live', 'a', {'a': 'A', 'b': 'B'},
+                       [{'key': k, 'verdict': 'Catch'} for k in ('a', 'b')])
+        judgments.save(con, 'candidate', 'b', {'a': 'A', 'b': 'B'},
+                       [{'key': 'a', 'verdict': 'Catch'}])
+        for skill in ('linkedin', 'bplan', 'appstore'):
+            module = importlib.import_module(f'skills.{skill}.run')
+            out = io.StringIO()
+            with self.subTest(skill=skill), contextlib.redirect_stdout(out), \
+                 mock.patch.object(module, '_gate', return_value=types.SimpleNamespace(con=con)):
+                self.assertEqual(module.main(['diff', '--b', 'candidate']), 0)
+            self.assertIn('판정 실패·누락 1', out.getvalue())
+            self.assertIn('같은 입력 비교: 1/2', out.getvalue())
+            self.assertIn('주의:', out.getvalue())
 
     def test_overlapping_workflow_cli_returns_busy_without_provider_call(self):
         cases = [('linkedin', 'collect', 'linkedin-collect'), ('appstore', 'collect', 'appstore-collect'),

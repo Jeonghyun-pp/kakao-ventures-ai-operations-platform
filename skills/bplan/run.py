@@ -856,7 +856,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"replay {r['run']}: 판정 {r['judged']} · 누락 {r['missing']}\n  다음: bplan diff --b {r['run']}")
             return 0
         if a.cmd == "diff":
-            print(judgments.diff_text(judgments.diff(_gate().con, a.a, a.b, bucket=bucket), a.a, a.b, raw=True))
+            print(judgments.comparison_text(judgments.comparison_report(_gate().con, a.a, a.b, bucket=bucket), a.a, a.b, raw=True))
             return 0
         if a.cmd == "blind":
             with lock.hold("bplan-blind"):

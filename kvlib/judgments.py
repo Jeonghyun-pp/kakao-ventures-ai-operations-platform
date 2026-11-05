@@ -112,3 +112,61 @@ def diff(con, a: str, b: str, bucket: Callable[[str], str] = lambda v: v) -> lis
             " WHERE ja.run=? AND ja.ok=1 ORDER BY ja.created DESC", (b, HUMAN, a)):
         out.append({"key": key, "a": bucket(va), "b": bucket(vb), "human": vh, "raw_a": va, "raw_b": vb})
     return out
+
+
+def comparison_report(con, a: str, b: str, bucket: Callable[[str], str] = lambda v: v,
+                      *, keys: list[str] | None = None) -> dict:
+    """Compare identical stored inputs, keeping failures and absent records visible.
+
+    Default scope is every stored key in a, including failed judgments. Explicit
+    keys define a sample; an empty sample stays empty. Absence does not prove a
+    model was never called. Completeness describes results, not model quality.
+    """
+    records = {(key, run): (text, verdict, ok) for key, run, text, verdict, ok in con.execute(
+        "SELECT key,run,input_text,verdict,ok FROM judgments WHERE run IN (?,?,?) ORDER BY created DESC,key",
+        (a, b, HUMAN))}
+    targets = list(dict.fromkeys(keys)) if keys is not None else [key for key, run in records if run == a]
+    sides = {side: {"success": [], "failed": [], "absent": []} for side in ("a", "b")}
+    rows, changed_inputs = [], []
+    for key in targets:
+        left, right = records.get((key, a)), records.get((key, b))
+        for side, record in (("a", left), ("b", right)):
+            status = "absent" if record is None else "success" if record[2] == 1 else "failed"
+            sides[side][status].append(key)
+        if left is None or right is None or left[2] != 1 or right[2] != 1:
+            continue
+        if left[0] != right[0]:
+            changed_inputs.append(key)
+            continue
+        human = records.get((key, HUMAN))
+        rows.append({"key": key, "a": bucket(left[1]), "b": bucket(right[1]),
+                     "human": human[1] if human and human[2] == 1 else None,
+                     "raw_a": left[1], "raw_b": right[1]})
+    labeled = [r for r in rows if r["human"] is not None]
+    return {"scope": "explicit" if keys is not None else "baseline", "targets": targets,
+            "total": len(targets), "a": sides["a"], "b": sides["b"],
+            "input_changed": changed_inputs, "rows": rows, "compared": len(rows),
+            "labeled": len(labeled), "a_matches": sum(r["a"] == r["human"] for r in labeled),
+            "b_matches": sum(r["b"] == r["human"] for r in labeled),
+            "complete": bool(targets) and len(rows) == len(targets)}
+
+
+def comparison_text(report: dict, a: str, b: str, *, unit: str = "건", raw: bool = False) -> str:
+    scope = f"기준 실행 {a} 전체" if report["scope"] == "baseline" else "명시한 평가 대상"
+    out = [f"범위: {scope} {report['total']}{unit}"]
+    for side, run in (("a", a), ("b", b)):
+        counts = report[side]
+        out.append(f"{run}: 성공 {len(counts['success'])}{unit} · 판정 실패·누락 {len(counts['failed'])}{unit}"
+                   f" · 기록 없음 {len(counts['absent'])}{unit}")
+    out.append(f"입력 변경으로 비교 제외: {len(report['input_changed'])}{unit}")
+    va, vb = ("raw_a", "raw_b") if raw else ("a", "b")
+    out.extend(f"  {str(r[va]):8} → {str(r[vb]):8} 정답={r['human'] if r['human'] is not None else '-'} {r['key'][:50]}"
+               for r in report["rows"] if r["a"] != r["b"])
+    out.append(f"같은 입력 비교: {report['compared']}/{report['total']}{unit} · 사람 판단 포함 {report['labeled']}{unit}")
+    if report["labeled"]:
+        out.append(f"사람 판단과 일치: {a}={report['a_matches']}/{report['labeled']} · {b}={report['b_matches']}/{report['labeled']}")
+    if not report["total"]:
+        out.append("평가 대상 없음: 실행 이름과 평가 범위를 확인하세요. 품질을 판단할 수 없습니다.")
+    elif not report["complete"]:
+        out.append("주의: 일부 대상은 비교할 수 없습니다. 위 일치 수는 비교 가능한 사례에 한정됩니다.")
+    return "\n".join(out)

@@ -51,17 +51,16 @@ def evaluate(candidate_judge=judge) -> dict:
         judgments.label(con, [{"_page_id": key, "decision": label} for key, (_, label) in CASES.items()],
                         "decision", source="Synthetic reference labels, authored for this demo")
         replay = judgments.replay(con, candidate_judge, CANDIDATE, judgments.criteria_sha(CANDIDATE))
-        rows = sorted(judgments.diff(con, judgments.LIVE, replay["run"]), key=lambda row: row["key"])
-        # diff joins valid results only. Count failed/missing results before interpreting agreement.
-        missing = [row[0] for row in con.execute(
-            "SELECT key FROM judgments WHERE run=? AND ok=0 ORDER BY key", (replay["run"],))]
-        labeled = sum(bool(row["human"]) for row in rows)
-        baseline_matches = sum(row["a"] == row["human"] for row in rows if row["human"])
-        candidate_matches = sum(row["b"] == row["human"] for row in rows if row["human"])
+        comparison = judgments.comparison_report(con, judgments.LIVE, replay["run"], keys=list(inputs))
+        rows = sorted(comparison["rows"], key=lambda row: row["key"])
+        missing = sorted(comparison["b"]["failed"] + comparison["b"]["absent"])
+        labeled = comparison["labeled"]
+        baseline_matches = comparison["a_matches"]
+        candidate_matches = comparison["b_matches"]
         new_misses = [row["key"] for row in rows
                       if row["human"] == "priority" and row["a"] != "decline" and row["b"] == "decline"]
         reasons = []
-        if missing:
+        if not comparison["complete"]:
             reasons.append("incomplete candidate results")
         if labeled != len(inputs):
             reasons.append("not every input has a comparable reference label")

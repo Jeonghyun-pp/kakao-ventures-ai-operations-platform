@@ -1457,7 +1457,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if a.cmd == "diff":
             # 정답(반응) 어휘에 맞춰 Tier 를 yes/no 로 묶는다 — 갈림·일치는 그 기준. 원래 Tier 는 raw 로
-            print(judgments.diff_text(judgments.diff(_gate().con, a.a, a.b, bucket=_bucket), a.a, a.b, unit="명"))
+            print(judgments.comparison_text(judgments.comparison_report(_gate().con, a.a, a.b, bucket=_bucket), a.a, a.b, unit="명"))
             return 0
         if a.cmd == "label":
             print(f"· 판정과 반응이 갈린 사람 {_sync_labels(_gate().con)}명 → human (정답 = 슬랙 ✅·❌)")

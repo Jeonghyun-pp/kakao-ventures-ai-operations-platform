@@ -509,7 +509,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"replay {r['run']}: 판정 {r['judged']} · 누락 {r['missing']}\n  다음: appstore diff --b {r['run']}")
             return 0
         if a.cmd == "diff":
-            print(judgments.diff_text(judgments.diff(_gate().con, a.a, a.b), a.a, a.b))
+            print(judgments.comparison_text(judgments.comparison_report(_gate().con, a.a, a.b), a.a, a.b))
             return 0
     except lock.Busy as e:
         print(f"🔴 {e}")
